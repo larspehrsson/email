@@ -727,7 +727,7 @@ impl Connection {
             }
             ServerOp::Find { .. } | ServerOp::FindByMessageId { .. } => return Err(anyhow!("nested Find")),
             // Sent by the outbox through Graph, never over IMAP.
-            ServerOp::Graph { .. } => return Err(anyhow!("a Graph change sent over IMAP")),
+            ServerOp::Graph { .. } | ServerOp::GraphReport { .. } => return Err(anyhow!("a Graph change sent over IMAP")),
         }
         Ok(())
     }

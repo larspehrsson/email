@@ -1392,6 +1392,17 @@ body.resizing iframe {
   user-select: none;
   -webkit-user-select: none;
 }
+/* the keyboard on an expanded message's header: the ring inside it (the card clips outlines) */
+.cm-head:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 3px rgba(10, 108, 255, 0.3);
+  border-radius: 10px 10px 0 0;
+}
+@media (prefers-color-scheme: dark) {
+  .cm-head:focus-visible {
+    box-shadow: inset 0 0 0 3px rgba(61, 139, 255, 0.4);
+  }
+}
 .cm-head:hover {
   background: var(--bg-subtle);
 }

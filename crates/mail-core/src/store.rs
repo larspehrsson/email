@@ -1863,6 +1863,16 @@ impl Store {
         Ok(())
     }
 
+    /// Its server keeps keywords of our own (seen at its first sync).
+    pub fn account_keeps_keywords(&self, account_id: i64) -> Result<bool> {
+        Ok(self
+            .rdb()
+            .prepare_cached("SELECT coalesce(keywords, 0) FROM accounts WHERE id=?1")?
+            .query_row([account_id], |r| r.get(0))
+            .optional()?
+            .unwrap_or(false))
+    }
+
     pub fn account_uses_graph(&self, account_id: i64) -> Result<bool> {
         Ok(self
             .rdb()
@@ -2742,7 +2752,12 @@ impl Store {
     /// suggestions (`contacts::build`).
     pub fn contact_rows(&self) -> Result<Vec<(String, String, String, i64)>> {
         let db = self.rdb();
-        let mut stmt = db.prepare("SELECT from_name, from_addr, to_addrs, date FROM messages")?;
+        // Not from Spam: spammers borrow familiar names ("Ya Hall" on a throwaway address).
+        let mut stmt = db.prepare(
+            "SELECT m.from_name, m.from_addr, m.to_addrs, m.date FROM messages m
+             WHERE m.id NOT IN (SELECT e.message_id FROM entries e JOIN folders f ON f.id = e.folder_id
+                                WHERE f.role = 'junk')",
+        )?;
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
@@ -3244,6 +3259,42 @@ mod tests {
         store.set_account_mark(b, None, None).unwrap();
         let jane = store.accounts().unwrap().into_iter().find(|x| x.id == b).unwrap();
         assert_eq!((jane.mark_letter, jane.mark_color), (None, None));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn spam_teaches_no_addresses() {
+        let dir = std::env::temp_dir().join(format!("mail-core-spam-contacts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = Store::open(&dir).unwrap();
+        let acct = store.insert_account("john@example.com", "John", Provider::Imap, "h", 993).unwrap();
+        let lf = |name: &str, role| ListedFolder { raw_name: name.into(), path: vec![name.into()], role, selectable: true };
+        store.sync_folder_list(acct.id, &[lf("INBOX", Some(FolderRole::Inbox)), lf("Junk", Some(FolderRole::Junk))]).unwrap();
+        let id = |n: &str| store.folders(acct.id).unwrap().into_iter().find(|f| f.raw_name == n).unwrap().id;
+        let rec = |uid: u32, name: &str, addr: &str| HeaderRecord {
+            original_message_id: None,
+            uid,
+            gm_msgid: None,
+            email_id: None,
+            gm_labels: None,
+            keywords: vec![],
+            message_id: Some(format!("{uid}@example.com")),
+            in_reply_to: None,
+            refs: None,
+            subject: "s".into(),
+            from_name: name.into(),
+            from_addr: addr.into(),
+            to_addrs: String::new(),
+            date: 1,
+            size: 10,
+            flags: 0,
+            has_attachments: false,
+        };
+        let none = std::collections::HashMap::new();
+        store.upsert_headers(acct.id, id("INBOX"), &[rec(1, "Jane Doe", "jane@example.org")], &none).unwrap();
+        store.upsert_headers(acct.id, id("Junk"), &[rec(2, "Jane Doe", "jane@spam.example")], &none).unwrap();
+        let from: Vec<String> = store.contact_rows().unwrap().into_iter().map(|r| r.1).collect();
+        assert_eq!(from, ["jane@example.org"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

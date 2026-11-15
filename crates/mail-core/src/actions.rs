@@ -218,6 +218,10 @@ pub enum ServerOp {
     /// as the category `category` (name, colour), or else one of the app's markers, on every
     /// copy of the message with this Message-ID.
     Graph { message_id: String, keyword: String, category: Option<(String, String)>, on: bool },
+    /// Microsoft Graph: report the message with this Message-ID as junk or not junk, which
+    /// teaches Outlook's filter (and its blocked/safe senders). The move itself is done over
+    /// IMAP; a report that fails is only logged.
+    GraphReport { message_id: String, junk: bool },
 }
 
 impl ServerOp {
@@ -226,7 +230,7 @@ impl ServerOp {
         let mut op = self.clone();
         match &mut op {
             ServerOp::Labels { uid: u, .. } | ServerOp::Move { uid: u, .. } | ServerOp::Flags { uid: u, .. } | ServerOp::Expunge { uid: u, .. } => *u = uid,
-            ServerOp::Find { .. } | ServerOp::FindByMessageId { .. } | ServerOp::Append { .. } | ServerOp::Graph { .. } => {}
+            ServerOp::Find { .. } | ServerOp::FindByMessageId { .. } | ServerOp::Append { .. } | ServerOp::Graph { .. } | ServerOp::GraphReport { .. } => {}
         }
         op
     }
@@ -235,7 +239,7 @@ impl ServerOp {
     fn uid(&self) -> Option<u32> {
         match self {
             ServerOp::Labels { uid, .. } | ServerOp::Move { uid, .. } | ServerOp::Flags { uid, .. } | ServerOp::Expunge { uid, .. } => Some(*uid),
-            ServerOp::Find { .. } | ServerOp::FindByMessageId { .. } | ServerOp::Append { .. } | ServerOp::Graph { .. } => None,
+            ServerOp::Find { .. } | ServerOp::FindByMessageId { .. } | ServerOp::Append { .. } | ServerOp::Graph { .. } | ServerOp::GraphReport { .. } => None,
         }
     }
 
@@ -249,7 +253,7 @@ impl ServerOp {
             | ServerOp::Find { folder, .. }
             | ServerOp::Append { folder, .. } => folder,
             ServerOp::FindByMessageId { then, .. } => then.folder(),
-            ServerOp::Graph { .. } => "",
+            ServerOp::Graph { .. } | ServerOp::GraphReport { .. } => "",
         }
     }
 
@@ -257,6 +261,38 @@ impl ServerOp {
     pub fn is_lookup(&self) -> bool {
         matches!(self, ServerOp::Find { .. } | ServerOp::FindByMessageId { .. })
     }
+}
+
+/// Teach the spam filter that message `id` is (`junk`) or isn't spam, before it's moved:
+/// Thunderbird's `$Junk`/`$NotJunk` keywords on its copy `at` where the server keeps keywords
+/// (filters and other clients train on them; Gmail learns from the move itself, Exchange keeps
+/// none), and a report through Graph on a Microsoft account that allows it.
+#[allow(clippy::too_many_arguments)]
+fn spam_signals(
+    store: &Store,
+    account_id: i64,
+    gmail: bool,
+    id: i64,
+    junk: bool,
+    at: Option<(String, u32)>,
+    change: &mut LocalChange,
+    ops: &mut Vec<ServerOp>,
+    wrap: &dyn Fn(ServerOp) -> ServerOp,
+) -> Result<()> {
+    if store.account_uses_graph(account_id)? {
+        if let Some(message_id) = store.message_header_id(id)?.filter(|m| !m.is_empty()) {
+            ops.push(ServerOp::GraphReport { message_id, junk });
+        }
+    }
+    if !gmail && store.account_keeps_keywords(account_id)? {
+        if let Some((folder, uid)) = at {
+            for (flag, on) in [("$junk", junk), ("$notjunk", !junk)] {
+                ops.push(wrap(ServerOp::Flags { folder: folder.clone(), uid, flag: flag.into(), on }));
+                change.tags.push((id, flag.into(), on));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// What applying an action produced.
@@ -492,7 +528,9 @@ fn plan_basic(
             }
             Action::Spam => {
                 let target = role(FolderRole::Junk).ok_or_else(|| anyhow!("This account has no Spam folder."))?;
-                if target.id != context {
+                if target.id != context && !in_folders.contains(&target.id) {
+                    let at = primary.clone().map(|(_, folder, uid)| (folder, uid));
+                    spam_signals(store, account_id, gmail, id, true, at, &mut change, &mut ops, &wrap)?;
                     move_to(target, &mut change, &mut ops, &mut touched)?;
                 }
             }
@@ -503,6 +541,7 @@ fn plan_basic(
                 }
                 // Revealed messages that aren't in Spam are left alone.
                 if let Some((folder, uid)) = copy_in(context) {
+                    spam_signals(store, account_id, gmail, id, false, Some((folder.clone(), uid)), &mut change, &mut ops, &wrap)?;
                     ops.push(wrap(ServerOp::Move { folder, uid, target: inbox.raw_name.clone() }));
                     change.remove.push((context, id));
                     change.add.push((inbox.id, id));
@@ -1069,6 +1108,49 @@ mod tests {
         none_archive.store.upsert_headers(none_archive.acct, none_archive.id("INBOX"), &[rec(1, None, None, "c@x", 0)], &none).unwrap();
         let m = none_archive.store.message_ids_for_uids(none_archive.id("INBOX"), &[1]).unwrap()[0];
         assert!(plan(&none_archive.store, none_archive.acct, false, Action::Archive, &[m], none_archive.id("INBOX")).is_err());
+    }
+
+    #[test]
+    fn spam_and_not_spam_teach_the_filter() {
+        let env = Env::new("spam", Provider::Imap, &[lf("INBOX", Some(FolderRole::Inbox)), lf("Junk", Some(FolderRole::Junk))]);
+        let none = HashMap::new();
+        let (inbox, junk) = (env.id("INBOX"), env.id("Junk"));
+        env.store.upsert_headers(env.acct, inbox, &[rec(7, None, None, "s@x", flags::SEEN)], &none).unwrap();
+        let msg = env.store.message_ids_for_uids(inbox, &[7]).unwrap()[0];
+        let flag = |f: &str, on| ServerOp::Flags { folder: "INBOX".into(), uid: 7, flag: f.into(), on };
+        let to_junk = ServerOp::Move { folder: "INBOX".into(), uid: 7, target: "Junk".into() };
+
+        // A server whose keywords aren't known (or kept): just the move.
+        let p = plan(&env.store, env.acct, false, Action::Spam, &[msg], inbox).unwrap();
+        assert_eq!(p.ops, vec![to_junk.clone()]);
+
+        // One that keeps them: Thunderbird's keywords first, on the copy that moves.
+        env.store.set_keywords_supported(env.acct, true).unwrap();
+        let p = plan(&env.store, env.acct, false, Action::Spam, &[msg], inbox).unwrap();
+        assert_eq!(p.ops, vec![flag("$junk", true), flag("$notjunk", false), to_junk.clone()]);
+        env.store.apply_local(&p.change).unwrap();
+        assert!(env.store.list_messages(junk, 0, 10).unwrap().messages[0].tags.is_empty(), "markers, not tags");
+
+        // Not spam, from Spam (the copy there gets its UID at the next sync).
+        env.store.upsert_headers(env.acct, junk, &[rec(3, None, None, "s@x", flags::SEEN)], &none).unwrap();
+        let p = plan(&env.store, env.acct, false, Action::NotSpam, &[msg], junk).unwrap();
+        let in_junk = |f: &str, on| ServerOp::Flags { folder: "Junk".into(), uid: 3, flag: f.into(), on };
+        assert_eq!(
+            p.ops,
+            vec![in_junk("$junk", false), in_junk("$notjunk", true), ServerOp::Move { folder: "Junk".into(), uid: 3, target: "INBOX".into() }]
+        );
+
+        // Microsoft with Graph: a report too (Exchange keeps no keywords).
+        env.store.set_keywords_supported(env.acct, false).unwrap();
+        env.store.set_account_graph(env.acct, true).unwrap();
+        let p = plan(&env.store, env.acct, false, Action::NotSpam, &[msg], junk).unwrap();
+        assert_eq!(
+            p.ops,
+            vec![
+                ServerOp::GraphReport { message_id: "s@x".into(), junk: false },
+                ServerOp::Move { folder: "Junk".into(), uid: 3, target: "INBOX".into() }
+            ]
+        );
     }
 
     #[test]

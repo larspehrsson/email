@@ -68,14 +68,16 @@ account by typing its name (Ctrl/⌘+G).
 ![The folder switcher](docs/screenshots/goto.png)
 
 **Keyboard first.** Choose Gmail's or Thunderbird's shortcuts in Settings and change any of
-them; press `?` to see them all.
+them; press `?` to see them all. In a conversation, Enter moves onto its messages, ↑/↓ go
+between them and Enter opens or closes one.
 
 ![Settings › Keyboard](docs/screenshots/keyboard.png)
 ![The keyboard shortcuts sheet](docs/screenshots/shortcuts.png)
 
 **And also:** notifications for new mail, email links from your browser opening a new message
 (Settings › General › Make Email the default), your own order and markers for accounts, and
-images in messages blocked until you choose to load them.
+images in messages blocked until you choose to load them. Marking mail as spam or not spam
+also teaches your provider's spam filter.
 
 ## Good to know
 

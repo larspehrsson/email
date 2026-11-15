@@ -216,6 +216,61 @@ describe('compose', () => {
   });
 });
 
+describe('conversation keyboard', () => {
+  test('Enter onto the messages, arrows between them, Enter to expand, ; for all', async () => {
+    const { page, errors, close } = await open({ threaded: true });
+    try {
+      // a conversation of several messages, some collapsed
+      const rows = page.locator('.folder-layer .row');
+      const n = await rows.count();
+      let k = -1;
+      for (let i = 0; i < n; i++) {
+        if (Number((await rows.nth(i).locator('.thread-count').textContent().catch(() => '')) || 0) >= 2) {
+          k = i;
+          break;
+        }
+      }
+      assert.ok(k >= 0, 'a conversation with several messages');
+      await rows.nth(k).click();
+      await page.waitForSelector('.conv-scroll .card-slot');
+      const expandedCount = () => page.locator('.conv-scroll .card-msg.expanded').count();
+      const cards = await page.locator('.conv-scroll .card-slot').count();
+      await page.keyboard.press('Enter'); // into the reader
+      await page.keyboard.press('Enter'); // onto the message in view
+      const onHeader = () => page.evaluate(() => !!document.activeElement?.classList.contains('cm-toggle'));
+      assert.ok(await onHeader(), 'a message header has the focus');
+      // ; toggles all: some are collapsed, so all open; again, all close
+      await page.keyboard.press(';');
+      await page.waitForFunction((c) => document.querySelectorAll('.conv-scroll .card-msg.expanded').length === c, cards);
+      await page.keyboard.press(';');
+      await page.waitForFunction(() => document.querySelectorAll('.conv-scroll .card-msg.expanded').length === 0);
+      // first header, then down to the second, and expand it
+      await page.locator('.conv-scroll .cm-toggle').first().focus();
+      await page.keyboard.press('ArrowDown');
+      const at = () => page.evaluate(() => document.activeElement?.closest('.card-slot')?.getAttribute('data-mid'));
+      const second = await page.locator('.conv-scroll .card-slot').nth(1).getAttribute('data-mid');
+      assert.equal(await at(), second);
+      await page.keyboard.press('Enter');
+      await page.waitForFunction(() => document.querySelectorAll('.conv-scroll .card-msg.expanded').length === 1);
+      assert.equal(await at(), second, 'the focus stays on that message');
+      assert.ok(await onHeader());
+      await page.keyboard.press(' '); // and collapse it again
+      await page.waitForFunction(() => document.querySelectorAll('.conv-scroll .card-msg.expanded').length === 0);
+      // Esc: back to scrolling the reader; Esc again: back to the list
+      await page.keyboard.press('Escape');
+      assert.ok(await page.evaluate(() => document.activeElement?.classList.contains('conv-scroll')), 'scrolling the reader');
+      await page.keyboard.press('Escape');
+      assert.ok(await page.evaluate(() => !!document.activeElement?.closest('.folder-layer')), 'back in the list');
+      await page.keyboard.press(';'); // one collapsed: all open
+      await page.waitForFunction((c) => document.querySelectorAll('.conv-scroll .card-msg.expanded').length === c, cards);
+      assert.equal(await expandedCount(), cards);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('snooze', () => {
   test('a day from the calendar and a typed time', async () => {
     const { page, errors, close } = await open({ threaded: false });

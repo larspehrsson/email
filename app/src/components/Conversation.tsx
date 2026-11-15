@@ -24,6 +24,8 @@ import { runAction } from '../lib/actions';
 import { forwardFrameKeys } from '../lib/frameKeys';
 import { SendState } from './MessageList';
 import { editDraft } from '../lib/compose';
+import { commandFor } from '../lib/shortcuts';
+import { isTextInput } from './ShortcutsSheet';
 
 // ------------------------------------------------------------- auto-height frame
 
@@ -148,7 +150,7 @@ function Marks(props: { m: MessageSummary }) {
 
 function CollapsedCard(props: { m: MessageSummary; me: Me; folderTag?: string; onToggle: () => void }) {
   return (
-    <button class="card-msg collapsed" classList={{ unread: props.m.unread }} onClick={() => props.onToggle()}>
+    <button class="card-msg collapsed cm-toggle" classList={{ unread: props.m.unread }} aria-expanded="false" onClick={() => props.onToggle()}>
       <span class="unread-dot" />
       <Avatar name={props.m.fromName} addr={props.m.fromAddr} size={28} />
       <span class="cm-from">{senderLabel(props.m, props.me)}</span>
@@ -182,7 +184,20 @@ function ExpandedCard(props: { m: MessageSummary; me: Me; folderTag?: string; ac
 
   return (
     <article class="card-msg expanded" classList={{ unread: props.m.unread }}>
-      <header class="cm-head" onClick={() => props.onToggle()} title="Collapse">
+      <header
+        class="cm-head cm-toggle"
+        role="button"
+        tabIndex={0}
+        aria-expanded="true"
+        onClick={() => props.onToggle()}
+        onKeyDown={(e) => {
+          if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
+            e.preventDefault();
+            props.onToggle();
+          }
+        }}
+        title="Collapse"
+      >
         <Avatar name={props.m.fromName} addr={props.m.fromAddr} size={36} />
         <div class="cm-head-text">
           <div class="reader-from-line">
@@ -516,7 +531,58 @@ function ConversationView(props: { thread: ThreadSummary; ref?: (el: HTMLElement
   });
 
   const subject = () => state.list[0]?.subject || t.subject || '(no subject)';
-  const toggle = (id: number) => setExpanded(id, (v) => !v);
+  /** The header (collapsed card or expanded card's head) of message `id`, to give the focus. */
+  const headerOf = (id: number) => scrollEl?.querySelector<HTMLElement>(`.card-slot[data-mid="${id}"] .cm-toggle`);
+  /** Expand or collapse a message; with the keyboard on its header, the focus stays there. */
+  const toggle = (id: number) => {
+    const keep = document.activeElement?.closest('.card-slot')?.getAttribute('data-mid') === String(id);
+    setExpanded(id, (v) => !v);
+    if (keep) queueMicrotask(() => headerOf(id)?.focus({ preventScroll: true }));
+  };
+  const setAll = (open: boolean) => batch(() => state.list.forEach((m) => setExpanded(m.id, open)));
+
+  // The keyboard among the messages: Enter in the reader goes onto the header of the message
+  // in view, ↑/↓ then move between headers (Enter/Space expand or collapse, on the header), Esc
+  // goes back to scrolling;
+  // the expand/collapse-all key (a toggle) works anywhere while the conversation is shown.
+  function onReaderKey(e: KeyboardEvent) {
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+    const target = e.target as HTMLElement;
+    if (target === scrollEl && e.key === 'Enter') {
+      const id = captureAnchor()?.id ?? state.list[0]?.id;
+      const h = id != null ? headerOf(id) : null;
+      if (h) {
+        e.preventDefault();
+        h.focus();
+      }
+      return;
+    }
+    // Esc on a message: back to scrolling the reader (and Esc there, back to the list).
+    if (e.key === 'Escape' && target.classList.contains('cm-toggle') && !e.shiftKey) {
+      e.preventDefault();
+      scrollEl.focus({ preventScroll: true });
+      return;
+    }
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && target.classList.contains('cm-toggle')) {
+      const heads = [...scrollEl.querySelectorAll<HTMLElement>('.cm-toggle')];
+      const next = heads[heads.indexOf(target) + (e.key === 'ArrowDown' ? 1 : -1)];
+      e.preventDefault();
+      if (next) {
+        next.focus({ preventScroll: true });
+        next.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }
+  function onGlobalKey(e: KeyboardEvent) {
+    if (e.defaultPrevented || isTextInput(e.target) || document.querySelector('.modal-backdrop')) return;
+    if (commandFor(e) === 'expand-all') {
+      // Any collapsed: open them all; all open: close them all.
+      e.preventDefault();
+      setAll(state.list.some((m) => !expanded[m.id]));
+    }
+  }
+  window.addEventListener('keydown', onGlobalKey);
+  onCleanup(() => window.removeEventListener('keydown', onGlobalKey));
 
   return (
     <div class="conv-view">
@@ -545,7 +611,7 @@ function ConversationView(props: { thread: ThreadSummary; ref?: (el: HTMLElement
           <HeaderActions target={headerTarget()} />
         </div>
       </header>
-      <div class="conv-scroll" ref={(el) => { scrollEl = el; props.ref?.(el); }} tabIndex={-1}>
+      <div class="conv-scroll" ref={(el) => { scrollEl = el; props.ref?.(el); }} tabIndex={-1} onKeyDown={onReaderKey}>
       <div class="conv-cards">
         <Show when={state.error && !state.loaded}>
           <div class="body-error">

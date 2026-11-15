@@ -323,6 +323,17 @@ impl Graph {
         Ok(())
     }
 
+    /// Report the message as junk or not junk (Outlook's filter learns from it, and its
+    /// blocked and safe senders follow). Reported once, by its first copy; nothing moves.
+    pub async fn report(&self, message_id: &str, junk: bool) -> Result<()> {
+        let Some(item) = self.find(message_id).await?.into_iter().next() else {
+            return Err(GraphRejected(format!("the message <{}> wasn't found in the mailbox", bare(message_id))).into());
+        };
+        let body = json!({ "IsMessageMoveRequested": false, "ReportAction": if junk { "junk" } else { "notJunk" } });
+        self.call("POST", &format!("/v1.0/me/messages/{}/reportMessage", encode(&item.id)), Some(&body)).await?;
+        Ok(())
+    }
+
     /// Everything the account's tags and markers are, as Graph has them now.
     pub async fn snapshot(&self) -> Result<Snapshot> {
         let mut snap = Snapshot { categories: self.categories().await?, ..Default::default() };

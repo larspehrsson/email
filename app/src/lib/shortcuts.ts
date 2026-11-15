@@ -52,6 +52,16 @@ export const COMMANDS: CommandSection[] = [
     ],
   },
   {
+    title: 'Conversation',
+    items: [
+      c('msg-head', 'Onto the message in view (from the reader)', ['Enter']),
+      c('msg-step', 'Previous / next message (on a message)', ['ArrowUp', 'ArrowDown']),
+      c('msg-toggle', 'Expand / collapse it', ['Enter', ' ']),
+      c('msg-back', 'Back to scrolling the reader (on a message)', ['Escape']),
+      c('expand-all', 'Expand / collapse all messages'),
+    ],
+  },
+  {
     title: 'Messages',
     items: [
       c('compose', 'New message'),
@@ -139,6 +149,8 @@ const PRESET_KEYS: Record<PresetId, Record<string, Key[]>> = {
     undo: ['z'],
     'tag-menu': ['l'],
     search: ['/'],
+    // Gmail's "expand all" (here a toggle)
+    'expand-all': [';'],
   },
   thunderbird: {
     next: ['f'],
@@ -161,6 +173,8 @@ const PRESET_KEYS: Record<PresetId, Record<string, Key[]>> = {
     undo: ['Mod+Z'],
     'tag-menu': ['l'],
     search: ['Mod+K', 'Mod+Shift+K'],
+    // Thunderbird's "expand all threads" (here a toggle)
+    'expand-all': ['*'],
   },
 };
 

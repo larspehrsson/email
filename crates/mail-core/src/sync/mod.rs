@@ -786,6 +786,15 @@ async fn sweep_counts(shared: &Shared, conn: &mut Connection, only: Option<&Hash
 /// One queued Graph change (`ServerOp::Graph`).
 async fn run_graph_op(shared: &Shared, op: &crate::actions::ServerOp) -> Result<()> {
     use crate::graph::{Change, GraphRejected};
+    if let crate::actions::ServerOp::GraphReport { message_id, junk } = op {
+        // Teaching the filter is a bonus: never a reason to undo the move.
+        if let Some(graph) = &shared.graph {
+            if let Err(e) = graph.report(message_id, *junk).await {
+                tracing::warn!("reporting <{message_id}> as {}: {e:#}", if *junk { "junk" } else { "not junk" });
+            }
+        }
+        return Ok(());
+    }
     let crate::actions::ServerOp::Graph { message_id, keyword, category, on } = op else { unreachable!() };
     let Some(graph) = &shared.graph else {
         return Err(GraphRejected("tags and snooze through Microsoft Graph are turned off for this account".into()).into());
@@ -1551,7 +1560,7 @@ async fn run_outbox(shared: &Shared, conn: &mut Connection) -> Result<()> {
         let mut failure: Option<anyhow::Error> = None;
         while !ops.is_empty() {
             let activity = conn.activity.clone();
-            let sent = if let ServerOp::Graph { .. } = &ops[0] {
+            let sent = if let ServerOp::Graph { .. } | ServerOp::GraphReport { .. } = &ops[0] {
                 run_graph_op(shared, &ops[0]).await
             } else {
                 imap::stall_timeout(&activity, STALL_TIMEOUT, "sending an action", conn.run_op(&ops[0])).await.and_then(|r| r)
