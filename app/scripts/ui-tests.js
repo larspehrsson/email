@@ -253,6 +253,42 @@ describe('selected row colours', () => {
 });
 
 describe('conversation keyboard', () => {
+  test('the Show / Hide rows are on the arrow path too', async () => {
+    const { page, errors, close } = await open({ threaded: true });
+    try {
+      // a conversation with messages in other folders
+      const rows = page.locator('.folder-layer .row');
+      let found = false;
+      for (let i = 0; i < 6 && !found; i++) {
+        await rows.nth(i).click();
+        await page.waitForSelector('.conv-scroll .card-slot');
+        await page.waitForTimeout(200);
+        found = (await page.locator('[data-reveal="other"]').count()) > 0;
+      }
+      assert.ok(found, 'a conversation with hidden messages');
+      const cards = await page.locator('.conv-scroll .card-slot').count();
+      await page.keyboard.press('Enter');
+      await page.keyboard.press('Enter');
+      // up from the first message to the Show buttons
+      await page.locator('.conv-scroll .cm-toggle').first().focus();
+      const focusedText = () => page.evaluate(() => document.activeElement?.closest('.reveal-row')?.getAttribute('data-reveal') ?? null);
+      for (let i = 0; i < 3 && (await focusedText()) !== 'other'; i++) await page.keyboard.press('ArrowUp');
+      assert.equal(await focusedText(), 'other');
+      await page.keyboard.press('Enter');
+      await page.waitForFunction((c) => document.querySelectorAll('.conv-scroll .card-slot').length > c, cards);
+      assert.equal(await focusedText(), 'other', 'the focus stays on that row');
+      assert.match(await page.evaluate(() => document.activeElement?.textContent ?? ''), /^Hide/);
+      await page.keyboard.press('Enter');
+      await page.waitForFunction((c) => document.querySelectorAll('.conv-scroll .card-slot').length === c, cards);
+      assert.equal(await focusedText(), 'other');
+      await page.keyboard.press('Escape');
+      assert.ok(await page.evaluate(() => document.activeElement?.classList.contains('conv-scroll')), 'Esc: back to scrolling');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('Enter onto the messages, arrows between them, Enter to expand, ; for all', async () => {
     const { page, errors, close } = await open({ threaded: true });
     try {

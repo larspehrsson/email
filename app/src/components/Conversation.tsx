@@ -150,7 +150,7 @@ function Marks(props: { m: MessageSummary }) {
 
 function CollapsedCard(props: { m: MessageSummary; me: Me; folderTag?: string; onToggle: () => void }) {
   return (
-    <button class="card-msg collapsed cm-toggle" classList={{ unread: props.m.unread }} aria-expanded="false" onClick={() => props.onToggle()}>
+    <button class="card-msg collapsed cm-toggle conv-nav" classList={{ unread: props.m.unread }} aria-expanded="false" onClick={() => props.onToggle()}>
       <span class="unread-dot" />
       <Avatar name={props.m.fromName} addr={props.m.fromAddr} size={28} />
       <span class="cm-from">{senderLabel(props.m, props.me)}</span>
@@ -185,7 +185,7 @@ function ExpandedCard(props: { m: MessageSummary; me: Me; folderTag?: string; ac
   return (
     <article class="card-msg expanded" classList={{ unread: props.m.unread }}>
       <header
-        class="cm-head cm-toggle"
+        class="cm-head cm-toggle conv-nav"
         role="button"
         tabIndex={0}
         aria-expanded="true"
@@ -418,21 +418,31 @@ function ConversationView(props: { thread: ThreadSummary; ref?: (el: HTMLElement
   }
   void load();
 
+  /** With the keyboard on a Show/Hide button, it stays on that row's new button. */
+  async function keepRevealFocus(kind: 'other' | 'trash', change: () => Promise<void>) {
+    const keep = !!document.activeElement?.closest(`[data-reveal="${kind}"]`);
+    await change();
+    if (keep) scrollEl?.querySelector<HTMLElement>(`[data-reveal="${kind}"] .conv-nav`)?.focus({ preventScroll: true });
+  }
   function toggleRevealOther() {
-    if (revealOther()) setRevealOther(false);
-    else {
-      setRevealedOther(state.hiddenOther);
-      setRevealOther(true);
-    }
-    void load({ reveal: true });
+    return keepRevealFocus('other', () => {
+      if (revealOther()) setRevealOther(false);
+      else {
+        setRevealedOther(state.hiddenOther);
+        setRevealOther(true);
+      }
+      return load({ reveal: true });
+    });
   }
   function toggleRevealTrash() {
-    if (revealTrash()) setRevealTrash(false);
-    else {
-      setRevealedTrash(state.hiddenTrash);
-      setRevealTrash(true);
-    }
-    void load({ reveal: true });
+    return keepRevealFocus('trash', () => {
+      if (revealTrash()) setRevealTrash(false);
+      else {
+        setRevealedTrash(state.hiddenTrash);
+        setRevealTrash(true);
+      }
+      return load({ reveal: true });
+    });
   }
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   const folderTag = (m: MessageSummary) => (m.folderId !== t.folderId ? folderById(m.folderId)?.displayName : undefined);
@@ -558,13 +568,14 @@ function ConversationView(props: { thread: ThreadSummary; ref?: (el: HTMLElement
       return;
     }
     // Esc on a message: back to scrolling the reader (and Esc there, back to the list).
-    if (e.key === 'Escape' && target.classList.contains('cm-toggle') && !e.shiftKey) {
+    if (e.key === 'Escape' && target.classList.contains('conv-nav') && !e.shiftKey) {
       e.preventDefault();
       scrollEl.focus({ preventScroll: true });
       return;
     }
-    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && target.classList.contains('cm-toggle')) {
-      const heads = [...scrollEl.querySelectorAll<HTMLElement>('.cm-toggle')];
+    // The messages' headers and the Show/Hide rows among them, in screen order.
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && target.classList.contains('conv-nav')) {
+      const heads = [...scrollEl.querySelectorAll<HTMLElement>('.conv-nav')];
       const next = heads[heads.indexOf(target) + (e.key === 'ArrowDown' ? 1 : -1)];
       e.preventDefault();
       if (next) {
@@ -629,40 +640,40 @@ function ConversationView(props: { thread: ThreadSummary; ref?: (el: HTMLElement
         </Show>
         {/* Rendered in the same pass as the cards (one fetch), fixed height. */}
         <Show when={state.loaded && (revealOther() || state.hiddenOther > 0)}>
-          <div class="reveal-row">
+          <div class="reveal-row" data-reveal="other">
             <Show
               when={revealOther()}
               fallback={
                 <>
                   <span class="reveal-dots" aria-hidden="true">⋯</span>
                   <span class="reveal-text">{plural(state.hiddenOther, 'more message', 'more messages')} in other folders</span>
-                  <button class="link-btn" onClick={toggleRevealOther}>
+                  <button class="link-btn conv-nav" onClick={() => void toggleRevealOther()}>
                     Show
                   </button>
                 </>
               }
             >
-              <button class="link-btn" onClick={toggleRevealOther}>
+              <button class="link-btn conv-nav" onClick={() => void toggleRevealOther()}>
                 Hide {plural(revealedOther(), 'message', 'messages')} from other folders
               </button>
             </Show>
           </div>
         </Show>
         <Show when={state.loaded && (revealTrash() || state.hiddenTrash > 0)}>
-          <div class="reveal-row">
+          <div class="reveal-row" data-reveal="trash">
             <Show
               when={revealTrash()}
               fallback={
                 <>
                   <span class="reveal-dots" aria-hidden="true">⋯</span>
                   <span class="reveal-text">{plural(state.hiddenTrash, 'message', 'messages')} in Trash</span>
-                  <button class="link-btn" onClick={toggleRevealTrash}>
+                  <button class="link-btn conv-nav" onClick={() => void toggleRevealTrash()}>
                     Show
                   </button>
                 </>
               }
             >
-              <button class="link-btn" onClick={toggleRevealTrash}>
+              <button class="link-btn conv-nav" onClick={() => void toggleRevealTrash()}>
                 Hide {plural(revealedTrash(), 'message', 'messages')} from Trash
               </button>
             </Show>
