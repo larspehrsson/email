@@ -216,6 +216,42 @@ describe('compose', () => {
   });
 });
 
+describe('selected row colours', () => {
+  test('only the selected row has them, and only in full while the list has the focus', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const rows = page.locator('.folder-layer .row');
+      const look = (i) =>
+        rows.nth(i).evaluate((r) => ({
+          vars: r.style.getPropertyValue('--rs-text') !== '',
+          subject: getComputedStyle(r.querySelector('.row-subject')).color,
+          bg: getComputedStyle(r.querySelector('.row-inner')).backgroundColor,
+        }));
+      await rows.nth(1).click();
+      await page.mouse.move(5, 5); // no hover colour
+      await page.waitForTimeout(150);
+      const selected = await look(1);
+      assert.ok(selected.vars, 'the selected row carries its colours');
+      assert.equal(selected.subject, 'rgb(255, 255, 255)');
+      const normal = await look(3);
+      await page.keyboard.press('ArrowDown');
+      await page.waitForTimeout(150);
+      assert.deepEqual(await look(1), normal, 'the row left behind looks like any other');
+      assert.ok((await look(2)).vars);
+      // focus elsewhere: still marked, in the quiet colour, normal text
+      await page.locator('.search-field input').focus();
+      await page.waitForTimeout(150);
+      const quiet = await look(2);
+      assert.equal(quiet.vars, false);
+      assert.equal(quiet.subject, normal.subject);
+      assert.notEqual(quiet.bg, normal.bg);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('conversation keyboard', () => {
   test('Enter onto the messages, arrows between them, Enter to expand, ; for all', async () => {
     const { page, errors, close } = await open({ threaded: true });

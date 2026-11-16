@@ -63,6 +63,22 @@ export const ROW_HEIGHT = 72;
 /** Space above the first row and below the last, so they don't touch the list's edges. */
 const LIST_PAD = 3;
 
+/** The selected row's colours, set on the row itself (see styles.css, `.row:hover`): the
+ *  selected background, and while the list has the focus the colours of its contents. */
+function selectedRowVars(selected: boolean, active: boolean): Record<string, string> {
+  if (!selected) return {};
+  if (!active) return { '--row-bg': 'var(--sel-bg-inactive)' };
+  return {
+    '--row-bg': 'var(--sel-bg)',
+    '--rs-text': 'var(--sel-text)',
+    '--rs-muted': 'var(--sel-muted)',
+    '--rs-chip-bg': 'rgba(255, 255, 255, 0.22)',
+    '--rs-chip-fg': '#fff',
+    '--rs-mark': 'rgba(255, 255, 255, 0.28)',
+    '--rs-ring': '0 0 0 1.5px rgba(255, 255, 255, 0.85)',
+  };
+}
+
 function isTypingTarget(t: EventTarget | null): boolean {
   if (!(t instanceof HTMLElement)) return false;
   return t.isContentEditable || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT';
@@ -233,6 +249,8 @@ export function MessageList(props: {
   const select = (it: Item) => (threaded ? selectThread(it as ThreadSummary) : selectMessage(it as MessageSummary));
   let scrollEl!: HTMLDivElement;
   const [selIndex, setSelIndex] = createSignal(-1);
+  /** The keyboard is in the list (the selected row shows in the accent colour then). */
+  const [listFocused, setListFocused] = createSignal(false);
   /** Set when keyboard moves onto a row whose page hasn't loaded yet. */
   let pendingSelect = false;
 
@@ -754,6 +772,10 @@ export function MessageList(props: {
         role="listbox"
         aria-label={`${props.folder.displayName} messages`}
         aria-activedescendant={selIndex() >= 0 ? `${rowPrefix}-${selIndex()}` : undefined}
+        onFocusIn={() => setListFocused(true)}
+        onFocusOut={(e) => {
+          if (!(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget))) setListFocused(false);
+        }}
       >
         <Show when={model.state.total === 0}>
           <Show
@@ -800,7 +822,10 @@ export function MessageList(props: {
                     unread: !!m()?.unread,
                   }}
                   aria-selected={!!m() && isSelected(m()!.id)}
-                  style={{ transform: `translateY(${item.start}px)` }}
+                  style={{
+                    transform: `translateY(${item.start}px)`,
+                    ...selectedRowVars(!!m() && isSelected(m()!.id), listFocused()),
+                  }}
                   onMouseDown={(e) => {
                     if (e.button !== 0) return;
                     selectIndex(item.index, false);

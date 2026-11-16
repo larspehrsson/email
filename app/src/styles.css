@@ -562,6 +562,9 @@ body.resizing iframe {
 .row-inner {
   position: relative;
   height: 100%;
+  /* the selected row's colours come as variables set on the row by the code (see below) */
+  background: var(--row-bg, transparent);
+  color: var(--rs-text, var(--text));
   /* Content is 56px (20px line + 2px gap + two 17px lines); centre it in the row. */
   padding: calc((var(--row-h) - 56px) / 2) 14px 0 11px;
   border-radius: 8px;
@@ -584,28 +587,13 @@ body.resizing iframe {
 }
 
 .row:hover .row-inner {
-  background: var(--bg-subtle);
+  background: var(--row-bg, var(--bg-subtle));
 }
-.row.selected .row-inner {
-  background: var(--sel-bg-inactive);
-}
-.list-scroll:focus-within .row.selected .row-inner {
-  background: var(--sel-bg);
-  color: var(--sel-text);
-}
-/* The selected row's contents take their colours from these, set on the row itself and
-   inherited, never from rules like `.row.selected .row-subject`: WebKitGTK sometimes doesn't
-   restyle a row's contents when it stops being the selected one (white text on white, seen
-   after notification clicks), but it does carry an inherited change down. Unset elsewhere:
-   each use falls back to the normal colour. */
-.list-scroll:focus-within .row.selected {
-  --rs-text: var(--sel-text);
-  --rs-muted: var(--sel-muted);
-  --rs-chip-bg: rgba(255, 255, 255, 0.22);
-  --rs-chip-fg: #fff;
-  --rs-mark: rgba(255, 255, 255, 0.28);
-  --rs-ring: 0 0 0 1.5px rgba(255, 255, 255, 0.85);
-}
+/* The selected row's colours are never chosen by selectors here (`.row.selected`, the list's
+   :focus-within): WebKitGTK sometimes doesn't restyle a row when those stop matching, leaving
+   white text on white. MessageList sets them on the row itself, inline (`selectedRowVars`):
+   --row-bg, and while the list has the focus --rs-text, --rs-muted, --rs-chip-bg/fg, --rs-mark
+   and --rs-ring, which the row's contents inherit. Unset, each use falls back to normal. */
 
 .unread-dot {
   position: absolute;
