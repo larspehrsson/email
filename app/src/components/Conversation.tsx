@@ -500,8 +500,29 @@ function ConversationView(props: { thread: ThreadSummary; ref?: (el: HTMLElement
     const touched = folderIds.includes(t.folderId) || state.list.some((m) => folderIds.includes(m.folderId));
     if (!touched) return;
     clearTimeout(refetchTimer);
-    refetchTimer = setTimeout(() => void load(), 80);
+    refetchTimer = setTimeout(() => void refresh(), 80);
   });
+  // Reloads for changes: one at a time. A change during one is caught by a reload right after
+  // it, never by dropping it (a sync reporting changes faster than a load takes, as after days
+  // away, would otherwise keep the conversation as it was).
+  let refreshing = false;
+  let refreshAgain = false;
+  async function refresh() {
+    if (refreshing) {
+      refreshAgain = true;
+      return;
+    }
+    refreshing = true;
+    try {
+      await load();
+    } finally {
+      refreshing = false;
+      if (refreshAgain) {
+        refreshAgain = false;
+        void refresh();
+      }
+    }
+  }
   // A change while subscribing (a round trip, with the first load already under way) would be
   // missed: load again once listening.
   void unlistenP.then(() => void load());

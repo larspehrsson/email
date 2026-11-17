@@ -1071,6 +1071,29 @@ export function createMockBackend(): Backend {
     const w = window as unknown as {
       __clickNotification: (subjectOrId: string | number) => boolean;
       __olderInConversation: (role: FolderRole) => { id: number; subject: string } | null;
+      __busySync: (listMs: number, everyMs: number) => void;
+      __stopBusySync: () => void;
+      __newInboxMail: () => string;
+    };
+    // A long sync, as after days away: list reads slow, the Inboxes reported changed over and
+    // over (bodies arriving).
+    let busy: ReturnType<typeof setInterval> | undefined;
+    w.__busySync = (listMs, everyMs) => {
+      listDelay = listMs;
+      const inboxes = [...folders.values()].filter((f) => f.role === 'inbox').map((f) => f.id);
+      busy = setInterval(() => emit('messages-changed', { folderIds: inboxes }), everyMs);
+    };
+    w.__stopBusySync = () => {
+      clearInterval(busy);
+      listDelay = 0;
+    };
+    // New mail in the first account's Inbox; the newest one's subject.
+    w.__newInboxMail = () => {
+      const acc = accounts[0]!;
+      deliverNewMail(acc);
+      const inbox = [...folders.values()].find((f) => f.accountId === acc.id && f.role === 'inbox')!;
+      emit('messages-changed', { folderIds: [inbox.id] });
+      return (folderMsgs.get(inbox.id) ?? [])[0]?.subject ?? '';
     };
     // A notification click for the newest Inbox message with this subject (or id), as the
     // desktop one does (the `open-message` event).
@@ -1440,6 +1463,8 @@ export function createMockBackend(): Backend {
   }
 
   const latency = () => sleep(8 + Math.random() * 25);
+  /** Extra time a list read takes (tests: a database busy with a long sync). */
+  let listDelay = 0;
 
   const forgotten = new Set<string>();
   let mailDefault = false;
@@ -1508,6 +1533,7 @@ export function createMockBackend(): Backend {
     },
     async list_messages({ folderId, offset, limit }) {
       await latency();
+      if (listDelay) await sleep(listDelay);
       const list = folderMsgs.get(folderId) ?? [];
       return {
         total: list.length,
@@ -1523,6 +1549,7 @@ export function createMockBackend(): Backend {
     },
     async list_threads({ folderId, offset, limit, scope, includeTrash }) {
       await latency();
+      if (listDelay) await sleep(listDelay);
       const list = folderMsgs.get(folderId) ?? [];
       const order: number[] = [];
       const newest = new Map<number, MessageSummary>();

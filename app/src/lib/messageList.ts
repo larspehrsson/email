@@ -38,9 +38,11 @@ export function createPagedList<T extends { id: number }>(
   let fetcher = initialFetcher;
   /** true while a reset() is waiting for its first page; old rows stay on screen meanwhile */
   let resetting = false;
-  /** generation bumps on invalidate so late responses from before are dropped */
+  /** generation bumps on reset (another source) so late responses from before are dropped */
   let gen = 0;
   const inflight = new Map<number, number>();
+  /** Pages changed again while their fetch was in flight: fetched once more when it lands. */
+  const stale = new Set<number>();
   let visStart = 0;
   let visEnd = 0;
   let disposed = false;
@@ -75,7 +77,10 @@ export function createPagedList<T extends { id: number }>(
         setState('error', typeof e === 'string' ? e : 'Could not load messages');
       }
     } finally {
-      if (inflight.get(p) === g) inflight.delete(p);
+      if (inflight.get(p) === g) {
+        inflight.delete(p);
+        if (stale.delete(p) && !disposed) void fetchPage(p);
+      }
     }
   }
 
@@ -106,8 +111,6 @@ export function createPagedList<T extends { id: number }>(
       return;
     }
     hooks.onInvalidate?.();
-    gen++;
-    inflight.clear();
     const keep = new Set(visiblePages());
     setState(
       'pages',
@@ -115,7 +118,14 @@ export function createPagedList<T extends { id: number }>(
         for (const k of Object.keys(pages)) if (!keep.has(Number(k))) delete pages[Number(k)];
       }),
     );
-    for (const p of keep) void fetchPage(p);
+    // A page already being fetched isn't dropped and fetched again: its answer is newer than
+    // what's on screen and is shown when it comes, then fetched once more. (Dropping it, a
+    // sync reporting changes faster than a fetch takes, as after days away, kept the list on
+    // what it showed at launch.)
+    for (const p of keep) {
+      if (inflight.has(p)) stale.add(p);
+      else void fetchPage(p);
+    }
   }
 
   /**
@@ -127,6 +137,7 @@ export function createPagedList<T extends { id: number }>(
     fetcher = next;
     gen++;
     inflight.clear();
+    stale.clear();
     resetting = true;
     setState('pending', true);
     const g = gen;

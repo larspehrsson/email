@@ -60,6 +60,18 @@ async function hasText(locator, want, what) {
   assert.fail(`${what}: expected "${want}", got "${got}"`);
 }
 
+/** `hasText` with a longer wait. */
+async function hasTextWithin(locator, want, ms, what) {
+  const end = Date.now() + ms;
+  let got = null;
+  while (Date.now() < end) {
+    got = await locator.textContent({ timeout: 200 }).catch(() => null);
+    if (got?.trim() === want) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  assert.fail(`${what}: expected "${want}", got "${got}"`);
+}
+
 /** Search, pick the first result whose folder tag matches `where` and isn't `not`; its subject. */
 async function pickResult(page, query, where, not) {
   await page.fill('.search-field input', query);
@@ -209,6 +221,25 @@ describe('compose', () => {
       await w.locator('.cmp-mode button', { hasText: 'Reply all' }).click();
       assert.equal(await on(), 'Reply all');
       assert.deepEqual(await people(), all);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('a busy sync', () => {
+  test('new mail shows while the Inbox keeps changing and reads are slow', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      // reads take 400 ms, the Inbox is reported changed every 100 ms
+      await page.evaluate(() => window.__busySync(400, 100));
+      const subject = await page.evaluate(() => window.__newInboxMail());
+      try {
+        await hasTextWithin(page.locator('.folder-layer .row .row-subject').first(), subject, 4000, 'the new mail in the list');
+      } finally {
+        await page.evaluate(() => window.__stopBusySync());
+      }
       assert.deepEqual(errors, []);
     } finally {
       await close();
