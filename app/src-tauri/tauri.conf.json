@@ -30,12 +30,23 @@
     ],
     "linux": {
       "deb": {
-        "desktopTemplate": "linux/email.desktop"
+        "desktopTemplate": "linux/email.desktop",
+        "files": {
+          "/usr/share/metainfo/dev.mailclient.desktop.metainfo.xml": "linux/dev.mailclient.desktop.metainfo.xml"
+        }
       },
       "rpm": {
-        "desktopTemplate": "linux/email.desktop"
+        "desktopTemplate": "linux/email.desktop",
+        "files": {
+          "/usr/share/metainfo/dev.mailclient.desktop.metainfo.xml": "linux/dev.mailclient.desktop.metainfo.xml"
+        }
       }
-    }
+    },
+    "shortDescription": "A fast, local-first email app",
+    "longDescription": "All your accounts in one window (Gmail, Outlook and Microsoft 365, any IMAP server), your mail kept on your computer: conversations, search as you type, tags, snooze, undo send and a keyboard for everything.",
+    "homepage": "https://github.com/rickhall/email",
+    "category": "Productivity",
+    "license": "MIT"
   },
   "plugins": {
     "deep-link": {

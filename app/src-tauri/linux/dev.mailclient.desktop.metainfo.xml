@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata: what GNOME Software, KDE Discover and the like show for the app
+     (installed as /usr/share/metainfo/dev.mailclient.desktop.metainfo.xml by the deb and rpm). -->
+<component type="desktop-application">
+  <id>dev.mailclient.desktop</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Email</name>
+  <summary>A fast, local-first email app</summary>
+  <description>
+    <p>
+      All your accounts in one window: Gmail, Outlook and Microsoft 365, and any IMAP server.
+      Your mail is kept on your computer, so the list scrolls through tens of thousands of
+      messages at once and opening one is instant.
+    </p>
+    <ul>
+      <li>Conversations grouped across folders</li>
+      <li>Search as you type, with from:, to: and subject:</li>
+      <li>Tags that sync with Thunderbird (Outlook categories on Microsoft accounts)</li>
+      <li>Snooze, undo send, and a keyboard for everything</li>
+      <li>Export an account's mail as mbox files</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">Email.desktop</launchable>
+  <url type="homepage">https://github.com/rickhall/email</url>
+  <url type="bugtracker">https://github.com/rickhall/email/issues</url>
+  <developer id="io.github.rickhall">
+    <name>rickhall</name>
+  </developer>
+  <categories>
+    <category>Network</category>
+    <category>Email</category>
+  </categories>
+  <provides>
+    <binary>mail-app</binary>
+    <mediatype>x-scheme-handler/mailto</mediatype>
+  </provides>
+  <content_rating type="oars-1.1"/>
+</component>
