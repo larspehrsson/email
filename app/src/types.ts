@@ -19,6 +19,33 @@ export interface Account {
   markColor: string | null;
 }
 
+/** What exporting an account involves (its dialog). */
+export interface ExportPlan {
+  messages: number;
+  /** not here whole (attachments left on the server, or not downloaded): fetched for it */
+  toDownload: number;
+  downloadBytes: number;
+}
+/** An export under way. */
+export interface ExportStatus {
+  accountId: number;
+  done: number;
+  total: number;
+}
+/** How an export ended. */
+export interface ExportResult {
+  accountId: number;
+  /** the folder written (named "… (incomplete)" when stopped) */
+  path: string | null;
+  written: number;
+  /** written without their attachments (couldn't be downloaded) */
+  partial: number;
+  /** not written (not here, couldn't be downloaded) */
+  failed: number;
+  cancelled: boolean;
+  error: string | null;
+}
+
 /** Whether Email opens mailto: links on this system. */
 export interface DefaultMail {
   supported: boolean;
@@ -365,6 +392,10 @@ export interface EventMap {
   'send-failed': SendEventPayload;
   'action-failed': ActionFailedPayload;
   'open-message': OpenMessagePayload;
+  'export-progress': ExportStatus;
+  'export-finished': ExportResult;
+  /** closing (or, quit, quitting) with an export running: ask, then close_anyway */
+  'confirm-close': { status: ExportStatus; quit: boolean };
   /** mailto: links came from another program: take them (take_mailto_links) */
   mailto: null;
 }
@@ -437,6 +468,12 @@ export interface CommandMap {
   enable_graph: { args: { accountId: number }; ret: void };
   disable_graph: { args: { accountId: number }; ret: void };
   forget_address: { args: { addr: string }; ret: void };
+  export_plan: { args: { accountId: number }; ret: ExportPlan };
+  export_account: { args: { accountId: number; dir: string }; ret: void };
+  cancel_export: { args: Record<string, never>; ret: void };
+  export_status: { args: Record<string, never>; ret: ExportStatus | null };
+  remove_account: { args: { accountId: number }; ret: void };
+  close_anyway: { args: { quit: boolean }; ret: void };
   default_mail_status: { args: Record<string, never>; ret: DefaultMail };
   make_default_mail: { args: Record<string, never>; ret: void };
   set_account_mark: { args: { accountId: number; letter: string | null; color: string | null }; ret: void };

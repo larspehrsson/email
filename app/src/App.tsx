@@ -29,6 +29,7 @@ import { isTextInput, openShortcuts, ShortcutsHost } from './components/Shortcut
 import { openSettings, SettingsHost } from './components/Settings';
 import { commandFor } from './lib/shortcuts';
 import { newMessage, takeMailtoLinks } from './lib/compose';
+import { initExports } from './lib/exports';
 import { ManageTagsHost } from './components/Tags';
 import { AttachmentToast } from './components/Attachments';
 import { loadPref, savePref } from './lib/format';
@@ -50,7 +51,10 @@ export function App() {
   const [showAdd, setShowAdd] = createSignal(false);
   let readerEl: HTMLElement | undefined;
 
-  onMount(() => void initApp());
+  onMount(() => {
+    void initApp();
+    initExports();
+  });
 
   // Ctrl/⌘+1: full ↔ rail · Ctrl/⌘+Shift+1: folder flyout · Ctrl/⌘+G: folder switcher ·
   // Ctrl/⌘+,: settings — plus any single keys given to these in Settings.

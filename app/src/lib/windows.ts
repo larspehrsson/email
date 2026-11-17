@@ -87,6 +87,14 @@ export async function pickFiles(): Promise<FileInfo[]> {
   return paths.length ? api.fileInfo(paths) : [];
 }
 
+/** A folder chosen in the system's picker (null: none). The browser preview has no picker: a
+ *  stand-in path. */
+export async function pickFolder(title: string): Promise<string | null> {
+  if (!isTauri) return '/home/john/Documents';
+  const chosen = await openDialog({ directory: true, multiple: false, title });
+  return typeof chosen === 'string' ? chosen : null;
+}
+
 /** Files dragged over / dropped on this window. `over`: show the drop target. */
 export function onFileDrop(over: (on: boolean) => void, drop: (files: FileInfo[]) => void): void {
   if (isTauri) {

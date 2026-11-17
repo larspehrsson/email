@@ -44,8 +44,21 @@ Data lives in `~/.local/share/dev.mailclient.desktop/` on Linux (`~/Library/Appl
 - **Navigation:** the sidebar collapses to a 48px rail (Ctrl/⌘+1, automatic below 1100px wide) showing each account's main folders with unread badges; the folders button or Ctrl/⌘+Shift+1 slides the full tree out over the list. The list header is a breadcrumb (account marker / parent folders / folder); Ctrl/⌘+G opens a searchable switcher of every folder in every account, and Backspace climbs to the parent folder.
 - **Sync status:** one fixed summary row at the bottom of the sidebar, with per-account details in a popover. Nothing in the folder tree or headers moves because of background activity.
 - **Window:** size (and position, where the platform allows) is restored at launch, in logical units so GNOME fractional scaling works.
-- **macOS:** inset title bar with the traffic lights over the sidebar; the pane tops drag the window (macOS only; Linux keeps its native title bar). Closing the window keeps the app (and sync) running; the Dock icon reopens it and ⌘Q quits. Native menu bar with File (New Message), Edit (copy/paste) and View (Search, Group by Conversation ⌘T, Show All Mail ⇧⌘A); New Message and Search use the keyboard preset's keys.
+- **macOS:** inset title bar with the traffic lights over the sidebar; the pane tops drag the window (macOS only; Linux keeps its native title bar). Closing the main window quits, as on Linux (a compose window still open keeps the app until it closes). Native menu bar with File (New Message), Edit (copy/paste) and View (Search, Group by Conversation ⌘T, Show All Mail ⇧⌘A); New Message and Search use the keyboard preset's keys.
 - **Versions:** `major.minor` is set in `app/src-tauri/tauri.conf.json`; the patch is the number of commits (`app/src-tauri/build.rs`, and CI writes the same into the bundles), so a commit has the same version on every machine and every build upgrades the previous one. Shown with the commit, e.g. `0.1.47 (f43351f)`, in Settings › Troubleshooting, at the bottom of the sync status popover, and in the log.
+
+## Export and removal
+
+Settings › Accounts › Export… writes an account's mail to a new folder: one mboxrd file per mail
+folder, in subfolders like the account's, and a README.txt with counts and anything that
+couldn't be fetched (`crates/mail-core/src/sync/export.rs`). Messages stored whole are written
+from `bodies.db`; those stored without attachments, or not downloaded, are fetched from the
+server on a connection of the export's own, only for the export (never stored). One export at a
+time, in the background (`Core::export_account`; `export-progress` / `export-finished` events),
+shown in the sync status row; closing the main window (or quitting) while it runs asks first
+("confirm-close"), and stopping it leaves the folder named "… (incomplete)". Remove account deletes the account's local data (cascading from `accounts`),
+its keychain entry, and compacts both databases in the background; nothing changes on the
+server.
 
 ## Microsoft Graph (tags and snooze on Exchange)
 

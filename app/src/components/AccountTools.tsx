@@ -1,0 +1,212 @@
+import { createResource, createSignal, onCleanup, onMount, Show, type JSX } from 'solid-js';
+import { Portal } from 'solid-js/web';
+import { api, errorMessage } from '../api';
+import { cancelExport, exportNow, startExport } from '../lib/exports';
+import { fmtNum, fmtSize } from '../lib/format';
+import { pickFolder } from '../lib/windows';
+import { onAccountRemoved } from '../state';
+import { CloseIcon } from './Icons';
+import { showToast } from './Toast';
+
+// Settings › Accounts: exporting an account's mail, and removing an account from this computer.
+
+type Acct = { id: number; email: string };
+
+function Dialog(props: { title: string; onClose: () => void; children: JSX.Element }) {
+  let back: HTMLDivElement | undefined;
+  let card: HTMLDivElement | undefined;
+  // Esc closes it while it's the dialog on top, wherever the focus is.
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key !== 'Escape' || [...document.querySelectorAll('.modal-backdrop')].pop() !== back) return;
+    e.preventDefault();
+    e.stopPropagation();
+    props.onClose();
+  };
+  onMount(() => {
+    window.addEventListener('keydown', onKey, true);
+    card?.focus();
+  });
+  onCleanup(() => window.removeEventListener('keydown', onKey, true));
+  return (
+    <Portal>
+      <div ref={back} class="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && props.onClose()}>
+        <div ref={card} tabIndex={-1} class="card modal acct-dialog" role="dialog" aria-modal="true" aria-label={props.title}>
+          <div class="modal-head">
+            <h2>{props.title}</h2>
+            <button class="icon-btn" onClick={props.onClose} aria-label="Close">
+              <CloseIcon />
+            </button>
+          </div>
+          {props.children}
+        </div>
+      </div>
+    </Portal>
+  );
+}
+
+/** What the export will do (download first?), then a folder to put it in. */
+export function ExportDialog(props: { account: Acct; onClose: () => void }) {
+  const [plan] = createResource(() => api.exportPlan(props.account.id));
+  const [err, setErr] = createSignal<string | null>(null);
+  const [busy, setBusy] = createSignal(false);
+  const go = async () => {
+    setErr(null);
+    const dir = await pickFolder('Export to this folder');
+    if (!dir) return;
+    setBusy(true);
+    try {
+      await startExport(props.account.id, dir);
+      props.onClose();
+      showToast({ kind: 'ok', text: 'Exporting: its progress shows at the bottom of the sidebar.' });
+    } catch (e) {
+      setErr(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog title={`Export ${props.account.email}`} onClose={props.onClose}>
+      <div class="acct-dialog-body">
+        <Show when={plan()} fallback={<p class="st-muted">{plan.error ? errorMessage(plan.error) : 'Counting…'}</p>}>
+          {(p) => (
+            <>
+              <p>
+                Its {fmtNum(p().messages)} messages, as one mbox file per folder in a new folder. Apple Mail,
+                Thunderbird and other mail apps import them.
+              </p>
+              <Show
+                when={p().toDownload > 0}
+                fallback={<p>Everything is on this computer already: nothing to download.</p>}
+              >
+                <p>
+                  <strong>
+                    {fmtNum(p().toDownload)} {p().toDownload === 1 ? 'message isn’t' : 'messages aren’t'} complete on this
+                    computer
+                  </strong>{' '}
+                  (attachments left on the server): they’re downloaded for the export first, about{' '}
+                  {fmtSize(p().downloadBytes)}. Nothing extra stays on this computer.
+                </p>
+              </Show>
+              <p class="st-muted">
+                It runs in the background, so you can keep using Email. Closing Email’s window while it runs asks
+                whether to stop it (what’s written so far is kept, in a folder marked “incomplete”).
+              </p>
+            </>
+          )}
+        </Show>
+        <Show when={err()}>
+          <p class="st-acct-msg error">{err()}</p>
+        </Show>
+      </div>
+      <div class="form-actions">
+        <button class="btn secondary" onClick={props.onClose}>
+          Cancel
+        </button>
+        <button class="btn primary" disabled={!plan() || busy() || !!exportNow()} onClick={() => void go()}>
+          Choose folder and export…
+        </button>
+      </div>
+    </Dialog>
+  );
+}
+
+/** What removing takes away (and what it doesn't), with a way to export first. */
+export function RemoveDialog(props: { account: Acct; onClose: () => void; onExport: () => void }) {
+  const [plan] = createResource(() => api.exportPlan(props.account.id).catch(() => null));
+  const [err, setErr] = createSignal<string | null>(null);
+  const [busy, setBusy] = createSignal(false);
+  const remove = async () => {
+    setErr(null);
+    setBusy(true);
+    try {
+      await api.removeAccount(props.account.id);
+      await onAccountRemoved(props.account.id);
+      props.onClose();
+      showToast({ kind: 'ok', text: `Removed ${props.account.email} from this computer` });
+    } catch (e) {
+      setErr(errorMessage(e));
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog title={`Remove ${props.account.email}?`} onClose={props.onClose}>
+      <div class="acct-dialog-body">
+        <p>
+          Everything Email keeps for this account on this computer is deleted
+          {plan() ? `: its ${fmtNum(plan()!.messages)} messages and their downloads` : ''}.
+        </p>
+        <p>
+          <strong>Nothing changes on the server.</strong> Your mail stays there, and you can add the account again
+          later.
+        </p>
+        <p class="st-muted">
+          To keep a copy of its mail,{' '}
+          <button class="link-btn" onClick={props.onExport}>
+            export it
+          </button>{' '}
+          first.
+        </p>
+        <Show when={err()}>
+          <p class="st-acct-msg error">{err()}</p>
+        </Show>
+      </div>
+      <div class="form-actions">
+        <button class="btn secondary" onClick={props.onClose}>
+          Cancel
+        </button>
+        <button class="btn danger" disabled={busy()} onClick={() => void remove()}>
+          Remove account
+        </button>
+      </div>
+    </Dialog>
+  );
+}
+
+/** The account card's Export row and Remove link (rows passed in: the card's own layout). */
+export function AccountTools(props: {
+  account: Acct;
+  Field: (p: { label: string; children: JSX.Element }) => JSX.Element;
+}) {
+  const [dialog, setDialog] = createSignal<'export' | 'remove' | null>(null);
+  const mine = () => (exportNow()?.accountId === props.account.id ? exportNow() : null);
+  const F = props.Field;
+  return (
+    <>
+      <F label="Export">
+        <Show
+          when={mine()}
+          fallback={
+            <>
+              <span class="st-muted">Its mail as mbox files, for other apps or a backup.</span>
+              <button class="link-btn st-field-action" disabled={!!exportNow()} onClick={() => setDialog('export')}>
+                Export…
+              </button>
+            </>
+          }
+        >
+          {(s) => (
+            <>
+              <span class="st-muted">
+                Exporting · {s().total > 0 ? `${fmtNum(s().done)} / ${fmtNum(s().total)}` : 'starting…'}
+              </span>
+              <button class="link-btn st-field-action" onClick={cancelExport}>
+                Stop
+              </button>
+            </>
+          )}
+        </Show>
+      </F>
+      <F label="">
+        <button class="link-btn danger-link" onClick={() => setDialog('remove')}>
+          Remove account…
+        </button>
+      </F>
+      <Show when={dialog() === 'export'}>
+        <ExportDialog account={props.account} onClose={() => setDialog(null)} />
+      </Show>
+      <Show when={dialog() === 'remove'}>
+        <RemoveDialog account={props.account} onClose={() => setDialog(null)} onExport={() => setDialog('export')} />
+      </Show>
+    </>
+  );
+}

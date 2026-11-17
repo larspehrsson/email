@@ -100,6 +100,8 @@ pub struct Core {
     strategy: Arc<dyn HeaderSync>,
     options: SyncOptions,
     running: Mutex<HashMap<i64, AccountSync>>,
+    /// The export under way, if any (one at a time): its status and how to stop it.
+    export: Mutex<Option<(ExportStatus, Arc<std::sync::atomic::AtomicBool>)>>,
     /// Accounts with no usable stored password (e.g. missing from the keychain).
     needs_password: Mutex<std::collections::HashSet<i64>>,
     /// Address suggestions (see `contacts`): built from the stored mail, kept current.
@@ -150,6 +152,7 @@ impl Core {
             strategy,
             options,
             running: Mutex::new(HashMap::new()),
+            export: Mutex::new(None),
             needs_password: Mutex::new(Default::default()),
             contacts: Default::default(),
             sign_in_cancel: tokio::sync::Notify::new(),
@@ -408,14 +411,100 @@ impl Core {
         Ok((email, refresh))
     }
 
+    /// What exporting an account involves: its messages, and how many must be downloaded.
+    pub fn export_plan(&self, account_id: i64) -> Result<ExportPlan> {
+        let (messages, to_download, download_bytes) = self.store.export_plan(account_id)?;
+        Ok(ExportPlan { messages, to_download, download_bytes })
+    }
+
+    /// The export under way, if any.
+    pub fn export_status(&self) -> Option<ExportStatus> {
+        self.export.lock().unwrap().as_ref().map(|e| e.0.clone())
+    }
+
+    /// Stop the export under way (between messages; what's written stays, marked incomplete).
+    pub fn cancel_export(&self) {
+        if let Some((_, cancel)) = self.export.lock().unwrap().as_ref() {
+            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// Export an account's mail into a new folder in `dir` (see `sync::export`): progress and
+    /// the end as events (`ExportProgress`, `ExportFinished`). Runs until done; one at a time.
+    pub async fn export_account(&self, account_id: i64, dir: &Path) -> Result<()> {
+        let exporter = self
+            .running
+            .lock()
+            .unwrap()
+            .get(&account_id)
+            .map(|s| s.exporter())
+            .ok_or_else(|| anyhow!("This account isn't connected; check its sign-in in Settings › Accounts."))?;
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        {
+            let mut export = self.export.lock().unwrap();
+            if export.is_some() {
+                bail!("An export is already under way.");
+            }
+            *export = Some((ExportStatus { account_id, done: 0, total: 0 }, cancel.clone()));
+        }
+        let events = self.events.clone();
+        let last = Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(1));
+        let progress = |done: u32, total: u32| {
+            if let Some(e) = self.export.lock().unwrap().as_mut() {
+                e.0.done = done;
+                e.0.total = total;
+            }
+            // At most five a second, and the last one.
+            let mut last = last.lock().unwrap();
+            if done == total || last.elapsed() >= std::time::Duration::from_millis(200) {
+                *last = std::time::Instant::now();
+                let _ = events.send(CoreEvent::ExportProgress { account_id, done, total });
+            }
+        };
+        let result = exporter.run(dir, &cancel, progress).await;
+        *self.export.lock().unwrap() = None;
+        let finished = match &result {
+            Ok(s) => ExportResult {
+                account_id,
+                path: Some(s.path.display().to_string()),
+                written: s.written,
+                partial: s.partial,
+                failed: s.failed,
+                cancelled: s.cancelled,
+                error: None,
+            },
+            Err(e) => ExportResult { account_id, path: None, written: 0, partial: 0, failed: 0, cancelled: false, error: Some(format!("{e:#}")) },
+        };
+        tracing::info!(account_id, ?finished, "export finished");
+        let _ = self.events.send(CoreEvent::ExportFinished(finished));
+        result.map(|_| ())
+    }
+
+    /// Remove an account from this computer: its sync stops, its sign-in leaves the keychain,
+    /// and everything stored for it goes (the space given back in the background). Nothing
+    /// changes on the server.
     pub fn remove_account(&self, account_id: i64) -> Result<()> {
+        if self.export_status().is_some_and(|e| e.account_id == account_id) {
+            self.cancel_export();
+        }
         if let Some(s) = self.running.lock().unwrap().remove(&account_id) {
             s.stop();
         }
         if let Some(a) = self.store.accounts()?.into_iter().find(|a| a.id == account_id) {
             self.secrets.delete(&a.email);
         }
-        self.store.delete_account(account_id)
+        self.needs_password.lock().unwrap().remove(&account_id);
+        self.store.delete_account(account_id)?;
+        tracing::info!(account_id, "account removed");
+        let store = self.store.clone();
+        std::thread::spawn(move || {
+            let t = std::time::Instant::now();
+            match store.compact() {
+                Ok(()) => tracing::info!(ms = t.elapsed().as_millis() as u64, "space of the removed account given back"),
+                Err(e) => tracing::warn!("compacting after removing an account: {e:#}"),
+            }
+        });
+        Ok(())
     }
 
     pub fn accounts(&self) -> Result<Vec<Account>> {

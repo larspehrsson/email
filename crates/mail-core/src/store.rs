@@ -834,6 +834,15 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// Give back the space of data deleted in bulk (an account removed): both databases rebuilt
+    /// (VACUUM), with their temporary copies on disk. Slow on a large mailbox.
+    pub fn compact(&self) -> Result<()> {
+        let sql = "PRAGMA temp_store=FILE; VACUUM; PRAGMA temp_store=MEMORY; PRAGMA wal_checkpoint(TRUNCATE);";
+        self.bodies.lock().unwrap_or_else(|e| e.into_inner()).execute_batch(sql)?;
+        self.db().execute_batch(sql)?;
+        Ok(())
+    }
+
     pub fn delete_account(&self, account_id: i64) -> Result<()> {
         let db = self.db();
         let ids: Vec<i64> = {
@@ -1880,6 +1889,57 @@ impl Store {
             .query_row([account_id], |r| r.get(0))
             .optional()?
             .unwrap_or(false))
+    }
+
+    /// An account's messages for an export: (message id, UID or 0 while unknown, date) per
+    /// folder id, newest last.
+    pub fn export_entries(&self, account_id: i64) -> Result<Vec<(i64, Vec<(i64, u32, i64)>)>> {
+        let db = self.rdb();
+        let mut stmt = db.prepare(
+            "SELECT e.folder_id, e.message_id, coalesce(e.uid, 0), e.date
+             FROM entries e JOIN folders f ON f.id = e.folder_id
+             WHERE f.account_id=?1 AND f.selectable=1
+             ORDER BY e.folder_id, e.date, e.message_id",
+        )?;
+        let mut out: Vec<(i64, Vec<(i64, u32, i64)>)> = Vec::new();
+        for row in stmt.query_map([account_id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, u32>(2)?, r.get::<_, i64>(3)?)))? {
+            let (f, m, uid, date) = row?;
+            match out.last_mut() {
+                Some((last, list)) if *last == f => list.push((m, uid, date)),
+                _ => out.push((f, vec![(m, uid, date)])),
+            }
+        }
+        Ok(out)
+    }
+
+    /// Whether the message is here whole: a body stored, with no attachment left on the server.
+    pub fn stored_whole(&self, id: i64) -> Result<bool> {
+        let omitted = self.omitted(id)?;
+        if omitted.as_deref().is_some_and(|o| !o.trim().is_empty() && o.trim() != "[]") {
+            return Ok(false);
+        }
+        let bodies = self.bodies_read.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(bodies.prepare_cached("SELECT 1 FROM bodies WHERE message_id=?1")?.exists([id])?)
+    }
+
+    /// For the export dialog: (messages, of which not here whole, their size in bytes).
+    pub fn export_plan(&self, account_id: i64) -> Result<(u32, u32, u64)> {
+        let ids: Vec<(i64, i64)> = {
+            let db = self.rdb();
+            let mut stmt = db.prepare(
+                "SELECT DISTINCT m.id, m.size FROM messages m JOIN entries e ON e.message_id = m.id
+                 JOIN folders f ON f.id = e.folder_id WHERE f.account_id=?1 AND f.selectable=1",
+            )?;
+            stmt.query_map([account_id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?
+        };
+        let (mut missing, mut bytes) = (0u32, 0u64);
+        for (id, size) in &ids {
+            if !self.stored_whole(*id)? {
+                missing += 1;
+                bytes += (*size).max(0) as u64;
+            }
+        }
+        Ok((ids.len() as u32, missing, bytes))
     }
 
     /// Whether an account's tags and snooze go through Microsoft Graph.

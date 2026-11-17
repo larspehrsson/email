@@ -18,6 +18,7 @@
 //! Header strategies live in submodules; `chunked::ChunkedNewestFirst` is the default.
 
 pub mod chunked;
+pub mod export;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -334,6 +335,11 @@ pub struct AccountSync {
 }
 
 impl AccountSync {
+    /// Exports this account's mail (see `export`), using its sync's connections.
+    pub fn exporter(&self) -> export::Exporter {
+        export::Exporter(self.shared.clone())
+    }
+
     pub fn start(
         store: Arc<Store>,
         account: Account,

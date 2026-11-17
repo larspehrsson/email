@@ -87,6 +87,9 @@ also teaches your provider's spam filter.
 - **Tags and Snooze on Outlook and Microsoft 365** go through Microsoft Graph, which needs
   your permission once: Settings › Accounts › Tags & snooze › Turn on…. A work or school
   account may need your administrator to allow it first.
+- **Export and remove:** Settings › Accounts › Export… saves an account's mail as mbox files
+  (one per folder) that other mail apps import, downloading any attachments first. Remove
+  account… deletes what's on this computer; the mail on the server stays.
 - **Something not working?** Settings › Troubleshooting shows the app's log.
 
 ## For developers

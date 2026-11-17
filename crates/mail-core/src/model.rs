@@ -489,6 +489,43 @@ pub enum CoreEvent {
     NewMail { account_id: i64, folder_id: i64, messages: Vec<NewMessage> },
     /// Snoozed messages whose time came, set off here (back in the Inbox `folder_id`).
     SnoozeDue { account_id: i64, folder_id: i64, messages: Vec<NewMessage> },
+    /// An export (`Core::export_account`) wrote `done` of `total` messages.
+    ExportProgress { account_id: i64, done: u32, total: u32 },
+    /// An export ended: written to `path` (a folder), or stopped (`cancelled`), or failed
+    /// (`error`).
+    ExportFinished(ExportResult),
+}
+
+/// How an export ended (see `CoreEvent::ExportFinished`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportResult {
+    pub account_id: i64,
+    pub path: Option<String>,
+    pub written: u32,
+    pub partial: u32,
+    pub failed: u32,
+    pub cancelled: bool,
+    pub error: Option<String>,
+}
+
+/// What exporting an account involves (for its dialog).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportPlan {
+    pub messages: u32,
+    /// Not here whole: downloaded for the export.
+    pub to_download: u32,
+    pub download_bytes: u64,
+}
+
+/// An export under way.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportStatus {
+    pub account_id: i64,
+    pub done: u32,
+    pub total: u32,
 }
 
 /// A message that just arrived, as far as a notification needs it.

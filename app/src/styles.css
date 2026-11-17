@@ -2670,6 +2670,33 @@ body.resizing iframe {
 }
 
 /* app version at the bottom of the sync popover (fixed height) */
+.acct-dialog {
+  width: min(480px, 100%);
+}
+.acct-dialog-body p {
+  margin: 0 0 10px;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.danger-link {
+  color: var(--danger);
+}
+.sp-export {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--sep);
+  font-size: 12.5px;
+}
+.sp-export-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .sp-version {
   height: 26px;
   line-height: 26px;

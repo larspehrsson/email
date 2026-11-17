@@ -496,6 +496,12 @@ async fn forward_events(app: tauri::AppHandle, core: Arc<Core>) {
                 Ok(CoreEvent::NewMail { account_id, folder_id, messages }) => {
                     notify::new_mail(&app, &core, account_id, folder_id, messages);
                 }
+                Ok(CoreEvent::ExportProgress { account_id, done, total }) => {
+                    let _ = app.emit("export-progress", ExportStatus { account_id, done, total });
+                }
+                Ok(CoreEvent::ExportFinished(result)) => {
+                    let _ = app.emit("export-finished", result);
+                }
                 Ok(CoreEvent::SnoozeDue { account_id, folder_id, messages }) => {
                     notify::snooze_due(&app, &core, account_id, folder_id, messages);
                 }
@@ -591,19 +597,88 @@ fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
 
     window_state::track(&window, saved, requested, window_state::MAIN);
 
-    // macOS: closing the window hides it; the app keeps syncing until ⌘Q, and the Dock icon
-    // brings the window back (see the Reopen handler in `run`).
-    #[cfg(target_os = "macos")]
+    // Closing the main window quits (macOS too; a compose window still open keeps the app
+    // until it's closed). With an export running it asks first ("confirm-close"); stopping it
+    // and closing comes back as `close_anyway`.
     {
-        let w = window.clone();
+        let app = app.handle().clone();
         window.on_window_event(move |event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = w.hide();
+                if ask_before_closing(&app, false) {
+                    api.prevent_close();
+                }
             }
         });
     }
     Ok(())
+}
+
+/// An export is running: the window asks whether to stop it and close (or, `quit`, quit).
+/// True: don't close now.
+fn ask_before_closing(app: &tauri::AppHandle, quit: bool) -> bool {
+    let Some(status) = app.try_state::<Arc<Core>>().and_then(|c| c.export_status()) else { return false };
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+    let _ = app.emit("confirm-close", ConfirmClose { status, quit });
+    true
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfirmClose {
+    status: ExportStatus,
+    quit: bool,
+}
+
+/// Stop the export, then close the main window (`quit`: quit) after all: the user said so.
+#[tauri::command]
+fn close_anyway(app: tauri::AppHandle, core: State<'_, Arc<Core>>, quit: bool) {
+    core.cancel_export();
+    if quit {
+        app.exit(0);
+    } else if let Some(w) = app.get_webview_window("main") {
+        // destroy: no second close request (the export may take a moment to stop)
+        let _ = w.destroy();
+    }
+}
+
+#[tauri::command]
+async fn export_plan(core: State<'_, Arc<Core>>, account_id: i64) -> Res<ExportPlan> {
+    core.export_plan(account_id).map_err(err)
+}
+
+/// Start exporting an account into a new folder in `dir`; it runs on (progress and the end as
+/// events), this returns at once.
+#[tauri::command]
+async fn export_account(core: State<'_, Arc<Core>>, account_id: i64, dir: String) -> Res<()> {
+    if core.export_status().is_some() {
+        return Err("An export is already under way.".into());
+    }
+    let core = core.inner().clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = core.export_account(account_id, std::path::Path::new(&dir)).await {
+            tracing::warn!("export: {e:#}");
+        }
+    });
+    Ok(())
+}
+
+#[tauri::command]
+fn cancel_export(core: State<'_, Arc<Core>>) {
+    core.cancel_export();
+}
+
+#[tauri::command]
+fn export_status(core: State<'_, Arc<Core>>) -> Option<ExportStatus> {
+    core.export_status()
+}
+
+/// Remove an account from this computer (nothing changes on the server).
+#[tauri::command]
+async fn remove_account(core: State<'_, Arc<Core>>, account_id: i64) -> Res<()> {
+    core.remove_account(account_id).map_err(err)
 }
 
 /// macOS menu bar: the standard app/Edit/Window menus (Edit is what makes ⌘C/⌘V work in the
@@ -977,6 +1052,12 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .invoke_handler(tauri::generate_handler![
             take_mailto_links,
+            close_anyway,
+            export_plan,
+            export_account,
+            cancel_export,
+            export_status,
+            remove_account,
             enable_graph,
             disable_graph,
             default_mail_status,
@@ -1039,13 +1120,12 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app, _event| {
-            // macOS: clicking the Dock icon with the window hidden brings it back.
-            #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Reopen { has_visible_windows: false, .. } = _event {
-                if let Some(w) = _app.get_webview_window("main") {
-                    let _ = w.show();
-                    let _ = w.set_focus();
+            // ⌘Q (or the like) with an export running: ask first.
+            if let tauri::RunEvent::ExitRequested { api, code: None, .. } = &_event {
+                if ask_before_closing(_app, true) {
+                    api.prevent_exit();
                 }
             }
+
         });
 }

@@ -1074,6 +1074,13 @@ export function createMockBackend(): Backend {
       __busySync: (listMs: number, everyMs: number) => void;
       __stopBusySync: () => void;
       __newInboxMail: () => string;
+      __askClose: (quit: boolean) => boolean;
+    };
+    // Closing the window (or quitting) while an export runs, as the desktop app asks.
+    w.__askClose = (quit) => {
+      if (!exporting) return false;
+      emit('confirm-close', { status: { accountId: exporting.accountId, done: exporting.done, total: exporting.total }, quit });
+      return true;
     };
     // A long sync, as after days away: list reads slow, the Inboxes reported changed over and
     // over (bodies arriving).
@@ -1467,6 +1474,7 @@ export function createMockBackend(): Backend {
   let listDelay = 0;
 
   const forgotten = new Set<string>();
+  let exporting: { accountId: number; done: number; total: number; cancel: boolean } | null = null;
   let mailDefault = false;
   const handlers: { [K in CommandName]: (args: CommandMap[K]['args']) => Promise<CommandMap[K]['ret']> } = {
     async list_accounts() {
@@ -1868,6 +1876,50 @@ export function createMockBackend(): Backend {
     },
     async make_default_mail() {
       mailDefault = true;
+    },
+    async export_plan({ accountId }) {
+      const n = [...folders.values()].filter((f) => f.accountId === accountId).reduce((k, f) => k + (folderMsgs.get(f.id)?.length ?? 0), 0);
+      return { messages: n, toDownload: Math.ceil(n / 7), downloadBytes: Math.ceil(n / 7) * 410_000 };
+    },
+    async export_account({ accountId, dir }) {
+      if (exporting) throw 'An export is already under way.';
+      const total = 40;
+      exporting = { accountId, done: 0, total, cancel: false };
+      void (async () => {
+        const job = exporting!;
+        for (let i = 1; i <= total && !job.cancel; i++) {
+          await sleep(60);
+          job.done = i;
+          emit('export-progress', { accountId, done: i, total });
+        }
+        exporting = null;
+        const name = `${accounts.find((a) => a.id === accountId)?.email ?? 'mail'} mail 2026-11-17`;
+        emit('export-finished', {
+          accountId,
+          path: `${dir}/${name}${job.cancel ? ' (incomplete)' : ''}`,
+          written: job.done,
+          partial: 0,
+          failed: 0,
+          cancelled: job.cancel,
+          error: null,
+        });
+      })();
+    },
+    async cancel_export() {
+      if (exporting) exporting.cancel = true;
+    },
+    async export_status() {
+      return exporting ? { accountId: exporting.accountId, done: exporting.done, total: exporting.total } : null;
+    },
+    async close_anyway() {
+      if (exporting) exporting.cancel = true;
+    },
+    async remove_account({ accountId }) {
+      await sleep(5);
+      const i = accounts.findIndex((a) => a.id === accountId);
+      if (i >= 0) accounts.splice(i, 1);
+      for (const f of [...folders.values()]) if (f.accountId === accountId) folders.delete(f.id);
+      emit('folders-changed', { accountId });
     },
     async forget_address({ addr }) {
       forgotten.add(addr.trim().toLowerCase());

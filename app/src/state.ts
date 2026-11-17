@@ -1,5 +1,5 @@
 import { batch, createEffect, createMemo, createRoot, createSignal, on, untrack } from 'solid-js';
-import { createStore, reconcile } from 'solid-js/store';
+import { createStore, produce, reconcile } from 'solid-js/store';
 import { api, events, type Account, type Folder, type MessageSummary, type SyncStatus, type ThreadSummary, type ConversationScope, type SearchField } from './api';
 import { accountMarks, type AccountMark } from './lib/accountMarks';
 import { loadPref, savePref } from './lib/format';
@@ -387,6 +387,21 @@ export async function reloadAccounts(): Promise<Account[]> {
   await Promise.all(list.map((a) => loadFolders(a.id).catch((e) => console.error('list_folders', e))));
   ensureFolderSelected();
   return list;
+}
+
+/** After remove_account: its folders go, and if one was open, another account's Inbox opens. */
+export async function onAccountRemoved(id: number): Promise<void> {
+  batch(() => {
+    const open = folderById(selectedFolderId())?.accountId === id;
+    setFoldersByAccount(produce((all) => void delete all[id]));
+    setSyncByAccount(id, undefined);
+    if (open) {
+      setSelectedFolderId(null);
+      selectMessage(null);
+      selectThread(null);
+    }
+  });
+  await reloadAccounts();
 }
 
 /** After add_account succeeds: refresh and jump to the new account's inbox. */

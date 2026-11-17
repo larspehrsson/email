@@ -453,6 +453,76 @@ describe('compose', () => {
 });
 
 describe('accounts', () => {
+  test('closing during an export asks: keep exporting, or stop it', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const who = (await page.locator('.sidebar .account-name').allTextContents())[1];
+      const exportIt = async () => {
+        await page.keyboard.press('Control+,');
+        await page.locator('.st-acct', { hasText: who }).getByRole('button', { name: 'Export…' }).click();
+        await page.getByRole('button', { name: 'Choose folder and export…' }).click();
+        await page.waitForSelector('.acct-dialog', { state: 'detached' });
+        await page.keyboard.press('Escape');
+      };
+      await exportIt();
+      assert.ok(await page.evaluate(() => window.__askClose(false)));
+      const ask = page.locator('.modal.confirm');
+      await ask.getByText(/An export of .* is still running/).waitFor();
+      assert.match(await ask.textContent(), /Closing Email’s window stops it/);
+      await ask.getByRole('button', { name: 'Keep exporting' }).click();
+      await page.locator('.toast', { hasText: /Exported 40 messages/ }).waitFor({ timeout: 8000 });
+
+      await exportIt();
+      await page.evaluate(() => window.__askClose(true));
+      await ask.getByRole('button', { name: 'Stop export and quit' }).click();
+      await page.locator('.toast', { hasText: /Export stopped/ }).waitFor({ timeout: 8000 });
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('export an account, then remove it', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const names = () => page.locator('.sidebar .account-name').allTextContents();
+      const before = await names();
+      const who = before[1];
+      await page.keyboard.press('Control+,');
+      const card = page.locator('.st-acct', { hasText: who });
+      // Esc closes a dialog over Settings, not Settings
+      await card.getByRole('button', { name: 'Remove account…' }).click();
+      await page.waitForSelector('.acct-dialog');
+      await page.keyboard.press('Escape');
+      await page.waitForSelector('.acct-dialog', { state: 'detached' });
+      assert.equal(await page.locator('.settings').count(), 1, 'Settings still open');
+      await card.getByRole('button', { name: 'Export…' }).click();
+      const dialog = page.locator('.acct-dialog');
+      await dialog.getByText(/messages, as one mbox file per folder/).waitFor();
+      await dialog.getByText(/downloaded for the export first/).waitFor();
+      await dialog.getByRole('button', { name: 'Choose folder and export…' }).click();
+      await page.waitForSelector('.acct-dialog', { state: 'detached' });
+      // progress: in the card and in the sync status row
+      await card.getByText(/Exporting · /).waitFor();
+      await page.waitForFunction(() => /Exporting .* \d+ \/ 40/.test(document.querySelector('.sf-summary')?.getAttribute('title') ?? ''));
+      await page.locator('.toast', { hasText: /Exported 40 messages to/ }).waitFor({ timeout: 8000 });
+      assert.match(await page.locator('.toast').textContent(), /Show in folder/);
+      await card.getByText('Its mail as mbox files').waitFor();
+
+      // remove: says what goes and what stays; then it's gone
+      await card.getByRole('button', { name: 'Remove account…' }).click();
+      await dialog.getByText('Nothing changes on the server.').waitFor();
+      await dialog.getByRole('button', { name: 'Remove account' }).click();
+      await page.waitForSelector('.acct-dialog', { state: 'detached' });
+      await page.keyboard.press('Escape');
+      await page.waitForFunction((w) => ![...document.querySelectorAll('.sidebar .account-name')].some((e) => e.textContent === w), who);
+      assert.deepEqual(await names(), before.filter((n) => n !== who));
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('a Microsoft account can turn on tags and snooze', async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {

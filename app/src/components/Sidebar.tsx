@@ -4,6 +4,7 @@ import { createStore } from 'solid-js/store';
 import { api, type Account, type Folder, type FolderRole, type SyncStatus } from '../api';
 import { folderById, foldersByAccount, moveAccount, selectedFolderId, selectFolder, syncByAccount, accounts } from '../state';
 import { AccountDot } from './FolderSwitcher';
+import { cancelExport, exportLabel, exportNow } from '../lib/exports';
 import { fmtNum, loadPref, savePref } from '../lib/format';
 import { AlertIcon, CheckIcon, ChevronIcon, FolderIcon, LockIcon, PlusIcon, RoleIcon, SidebarIcon } from './Icons';
 import { PasswordDialog } from './PasswordPrompt';
@@ -298,6 +299,11 @@ export function SyncFooter(props: { compact?: boolean }) {
         pct: null as number | null,
       };
     }
+    // An export running: its progress, in the same row (nothing moves).
+    const ex = exportNow();
+    if (ex) {
+      return { phase: 'headers', text: exportLabel(ex), active: true, pct: ex.total > 0 ? ex.done / ex.total : null };
+    }
     if (activeList.length === 0) return { phase: 'idle', text: 'All accounts up to date', active: false, pct: null };
     const counted = activeList.filter((x) => (x.status!.phase === 'headers' || x.status!.phase === 'bodies') && x.status!.total > 0);
     const done = counted.reduce((n, x) => n + x.status!.done, 0);
@@ -349,6 +355,16 @@ export function SyncFooter(props: { compact?: boolean }) {
     <footer class="sync-footer" classList={{ compact: !!props.compact }}>
       <Show when={open()}>
         <div class="sync-popover" classList={{ 'in-rail': !!props.compact }} ref={popEl} role="dialog" aria-label="Account sync status">
+          <Show when={exportNow()}>
+            {(ex) => (
+              <div class="sp-export">
+                <span class="sp-export-text">{exportLabel(ex())}</span>
+                <button class="link-btn" onClick={cancelExport}>
+                  Stop
+                </button>
+              </div>
+            )}
+          </Show>
           <For each={snap()}>
             {(x) => <SyncPopoverRow account={x.account} status={x.status} onFix={() => setFixFor(x.account)} />}
           </For>

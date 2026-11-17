@@ -57,9 +57,9 @@ export function useDismiss(el: () => HTMLElement | undefined, anchor: HTMLElemen
 
 // ------------------------------------------------------------- confirm dialog
 
-const [confirmReq, setConfirmReq] = createSignal<{ text: string; ok: string; resolve: (v: boolean) => void } | null>(null);
-export function confirmDialog(text: string, ok: string): Promise<boolean> {
-  return new Promise((resolve) => setConfirmReq({ text, ok, resolve }));
+const [confirmReq, setConfirmReq] = createSignal<{ text: string; ok: string; cancel: string; resolve: (v: boolean) => void } | null>(null);
+export function confirmDialog(text: string, ok: string, cancel = 'Cancel'): Promise<boolean> {
+  return new Promise((resolve) => setConfirmReq({ text, ok, cancel, resolve }));
 }
 export function ConfirmHost() {
   const done = (v: boolean) => {
@@ -82,7 +82,7 @@ export function ConfirmHost() {
             <p class="confirm-text">{r().text}</p>
             <div class="form-actions">
               <button class="btn secondary" onClick={() => done(false)}>
-                Cancel
+                {r().cancel}
               </button>
               <button class="btn danger" ref={(el) => queueMicrotask(() => el.focus())} onClick={() => done(true)}>
                 {r().ok}

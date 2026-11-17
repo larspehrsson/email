@@ -19,6 +19,7 @@ import { ChevronIcon, CloseIcon } from './Icons';
 import { api, errorMessage, events, type Account, type AccountDetails, type AccountStorage, type AttachmentCounts } from '../api';
 import { accountMark, accounts, notifyNewMail, reloadAccounts, setNotifyNewMail } from '../state';
 import { MARK_COLORS } from '../lib/accountMarks';
+import { AccountTools } from './AccountTools';
 import { fmtNum, fmtSize, loadPref, savePref } from '../lib/format';
 import { AccountDot } from './FolderSwitcher';
 
@@ -613,6 +614,7 @@ function AccountCard(props: { d: AccountDetails }) {
           </button>
         </Show>
       </p>
+      <AccountTools account={props.d} Field={Field} />
       <Show when={msg()}>{(m) => <p class="st-acct-msg" classList={{ error: !!m().error }}>{m().text}</p>}</Show>
     </section>
   );
@@ -762,6 +764,9 @@ function Panel() {
       return;
     }
     if (e.key === 'Escape') {
+      // A dialog opened over Settings (Export, Remove account…) closes first, on its own.
+      const top = [...document.querySelectorAll('.modal-backdrop')].pop();
+      if (top && top !== card.parentElement) return;
       e.preventDefault();
       e.stopPropagation();
       if (presetMenu()) setPresetMenu(false);

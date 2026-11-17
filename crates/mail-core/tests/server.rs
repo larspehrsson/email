@@ -396,6 +396,50 @@ async fn snoozed_mail_stays_put_and_comes_back_unread() {
 }
 
 /// Mailpit's messages, by subject (its HTTP API, without an HTTP client crate).
+#[tokio::test]
+async fn an_account_exports_to_mbox_files_whole() {
+    let Some(s) = servers() else { return };
+    let user = new_user("export");
+    let mut other = other_client(&s, &user).await;
+    other.session.create("Projects").await.expect("CREATE");
+    // One with a line that would read as a message boundary, one with an attachment (stored
+    // here without it: the export fetches it whole).
+    let tricky = raw_message("Jane Doe <jane@example.test>", &user, "Boundary", 1).replace("\r\n\r\n", "\r\n\r\nFrom the top, then.\r\n");
+    append(&mut other, "INBOX", &tricky, Some("(\\Seen)")).await;
+    let with_file = format!(
+        "From: Jane Doe <jane@example.test>\r\nTo: {user}\r\nSubject: Report\r\nMessage-ID: <report@example.test>\r\n\
+         Date: 9 Nov 2026 10:00:00 +0000\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=b1\r\n\r\n\
+         --b1\r\nContent-Type: text/plain\r\n\r\nSee attached.\r\n\
+         --b1\r\nContent-Type: application/pdf; name=report.pdf\r\nContent-Disposition: attachment; filename=report.pdf\r\n\
+         Content-Transfer-Encoding: base64\r\n\r\nQVRUQUNITUVOVC1CWVRFUw==\r\n--b1--\r\n"
+    );
+    append(&mut other, "Projects", &with_file, Some("(\\Seen)")).await;
+    let a = app(&s, &user).await;
+    folders_listed(&a).await;
+    until("the Inbox message", 30, || a.messages(FolderRole::Inbox).len() == 1).await;
+    let projects = a.core.folders(a.account.id).unwrap().into_iter().find(|f| f.raw_name == "Projects").unwrap();
+    until("the Projects message", 30, || a.core.list_messages(projects.id, 0, 10).unwrap().total == 1).await;
+    let plan = a.core.export_plan(a.account.id).unwrap();
+    assert_eq!(plan.messages, 2);
+
+    let dir = std::env::temp_dir().join(format!("mail-export-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    a.core.export_account(a.account.id, &dir).await.expect("export");
+    let out = std::fs::read_dir(&dir).unwrap().next().unwrap().unwrap().path();
+    let name = out.file_name().unwrap().to_string_lossy().to_string();
+    assert!(name.contains(" mail ") && !name.contains("incomplete"), "named when done: {name}");
+    let inbox = std::fs::read_to_string(out.join("Inbox.mbox")).unwrap();
+    assert!(inbox.starts_with("From - "), "{inbox}");
+    assert!(inbox.contains("\n>From the top, then.\n"), "a From line is quoted: {inbox}");
+    let projects = std::fs::read_to_string(out.join("Projects.mbox")).unwrap();
+    assert!(projects.contains("QVRUQUNITUVOVC1CWVRFUw=="), "the attachment is in, fetched whole: {projects}");
+    let readme = std::fs::read_to_string(out.join("README.txt")).unwrap();
+    assert!(readme.contains("Inbox: 1 message") && readme.contains("Projects: 1 message"), "{readme}");
+    assert!(a.core.export_status().is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 async fn mailpit_subjects(base: &str) -> Vec<String> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let hostport = base.trim_start_matches("http://");

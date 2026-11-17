@@ -29,6 +29,8 @@ import type {
   ThreadView,
   TagDef,
   DefaultMail,
+  ExportPlan,
+  ExportStatus,
 } from './types';
 
 export * from './types';
@@ -199,6 +201,16 @@ export const api = {
   defaultMailStatus: (): Promise<DefaultMail> => call('default_mail_status', {}),
   /** Make Email the program mailto: links open. */
   makeDefaultMail: (): Promise<void> => call('make_default_mail', {}),
+  /** What exporting an account involves (how much must be downloaded). */
+  exportPlan: (accountId: number): Promise<ExportPlan> => call('export_plan', { accountId }),
+  /** Start exporting into a new folder in `dir`: runs on, with export-progress / export-finished. */
+  exportAccount: (accountId: number, dir: string): Promise<void> => call('export_account', { accountId, dir }),
+  cancelExport: (): Promise<void> => call('cancel_export', {}),
+  exportStatus: (): Promise<ExportStatus | null> => call('export_status', {}),
+  /** Stop the export and close the window (or quit) after all. */
+  closeAnyway: (quit: boolean): Promise<void> => call('close_anyway', { quit }),
+  /** Remove an account from this computer (nothing changes on the server). */
+  removeAccount: (accountId: number): Promise<void> => call('remove_account', { accountId }),
   /** Leave an address out of the suggestions from now on. */
   forgetAddress: (addr: string): Promise<void> => call('forget_address', { addr }),
   /** Microsoft accounts: tags and snooze through Microsoft Graph (a browser sign-in). */
@@ -231,4 +243,7 @@ export const events = {
   onOpenMessage: (cb: (p: EventMap['open-message']) => void) => on('open-message', cb),
   onMenuAction: (cb: (p: EventMap['menu-action']) => void) => on('menu-action', cb),
   onMailto: (cb: () => void) => on('mailto', cb),
+  onExportProgress: (cb: (p: EventMap['export-progress']) => void) => on('export-progress', cb),
+  onExportFinished: (cb: (p: EventMap['export-finished']) => void) => on('export-finished', cb),
+  onConfirmClose: (cb: (p: EventMap['confirm-close']) => void) => on('confirm-close', cb),
 };
