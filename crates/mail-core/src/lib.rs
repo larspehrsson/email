@@ -343,6 +343,11 @@ impl Core {
             bail!("You signed in as {email}, not {}. Sign in with that account instead.", account.email);
         }
         self.secrets.set(&account.email, &refresh)?;
+        // Graph's own refresh token, kept apart from the mail one (see `oauth::graph_key`).
+        let graph_token = oauth::microsoft_refresh_for(&refresh, oauth::GRAPH_SCOPES)
+            .await
+            .map_err(|e| anyhow!("Signed in, but Microsoft Graph isn't available for this account: {e:#}"))?;
+        self.secrets.set(&oauth::graph_key(&account.email), graph_token.refresh_token.as_deref().unwrap_or(&refresh))?;
         let store: Arc<dyn oauth::TokenStore> = self.secrets.clone();
         let check = graph::Graph::new(Arc::new(oauth::MicrosoftSession::graph(&account.email, store)));
         if let Err(e) = check.check().await {
@@ -358,6 +363,8 @@ impl Core {
     /// Stop keeping tags and snooze through Graph (they stay on the messages in Outlook).
     pub fn disable_graph(&self, account_id: i64) -> Result<()> {
         self.store.set_account_graph(account_id, false)?;
+        let account = self.account(account_id)?;
+        self.secrets.delete(&oauth::graph_key(&account.email));
         self.restart_account(account_id)?;
         let _ = self.events.send(CoreEvent::FoldersChanged { account_id });
         Ok(())
@@ -492,6 +499,7 @@ impl Core {
         }
         if let Some(a) = self.store.accounts()?.into_iter().find(|a| a.id == account_id) {
             self.secrets.delete(&a.email);
+            self.secrets.delete(&oauth::graph_key(&a.email));
         }
         self.needs_password.lock().unwrap().remove(&account_id);
         self.store.delete_account(account_id)?;

@@ -34,6 +34,8 @@ pub const GRAPH_SCOPES: &str =
 
 /// How long the browser sign-in may take before the app stops waiting.
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+/// A refused Graph renewal is tried again after this long.
+const GRAPH_RETRY: Duration = Duration::from_secs(60 * 60);
 /// Renew an access token this long before it expires.
 const RENEW_EARLY: Duration = Duration::from_secs(5 * 60);
 
@@ -338,9 +340,18 @@ pub trait TokenStore: Send + Sync {
     fn save_refresh_token(&self, email: &str, token: &str) -> Result<()>;
 }
 
+/// Where an account's Graph refresh token is kept: apart from the mail one. A token renewed for
+/// mail comes back good for mail only (personal accounts), so sharing one let mail's renewals
+/// take Graph's permission away (AADSTS70000 "scopes … unauthorized or expired").
+pub fn graph_key(email: &str) -> String {
+    format!("{email}#graph")
+}
+
 /// Current access tokens for one Microsoft account, renewed when they're about to expire.
 pub struct MicrosoftSession {
     email: String,
+    /// The refresh token's entry in the store (`email`, or `graph_key(email)` for Graph).
+    key: String,
     /// What its tokens are for: mail (IMAP, SMTP) or Graph.
     scopes: &'static str,
     store: Arc<dyn TokenStore>,
@@ -348,28 +359,36 @@ pub struct MicrosoftSession {
     /// while the computer sleeps, so after a night asleep a token would look fresh when it
     /// expired hours ago.
     current: tokio::sync::Mutex<Option<(String, SystemTime)>>,
-    /// The last renewal failed for good: don't hammer Microsoft until a new sign-in.
-    refused: Mutex<Option<String>>,
+    /// The last renewal was refused: don't hammer Microsoft until a new sign-in (mail), or
+    /// (Graph, whose refusal can be a one-off: a token two renewals raced for) until the time
+    /// given, when it tries again.
+    refused: Mutex<Option<(String, Option<SystemTime>)>>,
 }
 
 impl MicrosoftSession {
     pub fn new(email: &str, store: Arc<dyn TokenStore>) -> MicrosoftSession {
-        Self::for_scopes(email, store, MICROSOFT_SCOPES)
+        Self::for_scopes(email, email.to_string(), store, MICROSOFT_SCOPES)
     }
 
-    /// Tokens for Microsoft Graph (`GRAPH_SCOPES`), from the account's same refresh token.
+    /// Tokens for Microsoft Graph (`GRAPH_SCOPES`), from the account's own Graph refresh token
+    /// (`graph_key`; an account set up before there was one starts from the mail one, once).
     pub fn graph(email: &str, store: Arc<dyn TokenStore>) -> MicrosoftSession {
-        Self::for_scopes(email, store, GRAPH_SCOPES)
+        Self::for_scopes(email, graph_key(email), store, GRAPH_SCOPES)
     }
 
-    fn for_scopes(email: &str, store: Arc<dyn TokenStore>, scopes: &'static str) -> MicrosoftSession {
-        MicrosoftSession { email: email.to_string(), scopes, store, current: tokio::sync::Mutex::new(None), refused: Mutex::new(None) }
+    fn for_scopes(email: &str, key: String, store: Arc<dyn TokenStore>, scopes: &'static str) -> MicrosoftSession {
+        MicrosoftSession { email: email.to_string(), key, scopes, store, current: tokio::sync::Mutex::new(None), refused: Mutex::new(None) }
     }
 
     /// A token good for at least a few more minutes.
     pub async fn access_token(&self) -> Result<String> {
-        if let Some(why) = self.refused.lock().unwrap().clone() {
-            return Err(SignInNeeded(why).into());
+        {
+            let mut refused = self.refused.lock().unwrap();
+            match refused.clone() {
+                Some((_, Some(until))) if SystemTime::now() >= until => *refused = None,
+                Some((why, _)) => return Err(SignInNeeded(why).into()),
+                None => {}
+            }
         }
         let mut current = self.current.lock().await;
         if let Some((token, until)) = current.as_ref() {
@@ -377,18 +396,25 @@ impl MicrosoftSession {
                 return Ok(token.clone());
             }
         }
-        let refresh = self.store.refresh_token(&self.email)?;
+        // Its own entry; else (Graph, set up before it had one) the mail one, to be kept apart now.
+        let (refresh, borrowed) = match self.store.refresh_token(&self.key) {
+            Ok(t) => (t, false),
+            Err(_) if self.key != self.email => (self.store.refresh_token(&self.email)?, true),
+            Err(e) => return Err(e),
+        };
         let tokens = match microsoft_refresh_for(&refresh, self.scopes).await {
             Ok(t) => t,
             Err(e) => {
                 if let Some(s) = e.downcast_ref::<SignInNeeded>() {
-                    *self.refused.lock().unwrap() = Some(s.0.clone());
+                    let retry = (self.key != self.email).then(|| SystemTime::now() + GRAPH_RETRY);
+                    *self.refused.lock().unwrap() = Some((s.0.clone(), retry));
                 }
                 return Err(e);
             }
         };
-        if let Some(new) = tokens.refresh_token.as_deref().filter(|t| *t != refresh) {
-            if let Err(e) = self.store.save_refresh_token(&self.email, new) {
+        let renewed = tokens.refresh_token.as_deref().filter(|t| *t != refresh);
+        if let Some(keep) = renewed.or(borrowed.then_some(refresh.as_str())) {
+            if let Err(e) = self.store.save_refresh_token(&self.key, keep) {
                 tracing::warn!("saving the renewed sign-in: {e:#}");
             }
         }

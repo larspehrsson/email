@@ -71,7 +71,10 @@ every copy found by Message-ID); changes made elsewhere come in by `sync::graph_
 3 minutes and after our own. IMAP flag sync leaves those keywords alone on such accounts.
 Turning it on is a browser sign-in that adds `GRAPH_SCOPES` (Mail.ReadWrite,
 MailboxSettings.ReadWrite; delegated permissions on the Entra registration) to the mail
-scopes; the same refresh token then serves both. `mailsync graph-probe <email>` checks it,
+scopes; Graph then keeps a refresh token of its own (keychain entry `<address>#graph`,
+`oauth::graph_key`), apart from the mail one: two renewals racing with one rotating token left
+the second refused. A refused Graph renewal is retried after an hour (mail's stay refused until
+a new sign-in). `mailsync graph-probe <email>` checks it,
 read-only.
 
 ## Test against real servers
