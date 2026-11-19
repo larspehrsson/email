@@ -76,7 +76,8 @@ between them and Enter opens or closes one.
 
 **And also:** notifications for new mail, email links from your browser opening a new message
 (Settings › General › Make Email the default), your own order and markers for accounts, and
-images in messages blocked until you choose to load them. Marking mail as spam or not spam
+images in messages blocked until you choose to load them. Pictures too wide for the reader
+shrink to fit; click one to see it at its actual size. Marking mail as spam or not spam
 also teaches your provider's spam filter.
 
 ## Good to know

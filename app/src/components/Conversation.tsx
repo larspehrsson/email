@@ -22,6 +22,7 @@ import { pendingSnooze } from './Snooze';
 import { searchTag, TagChips, TagDots } from './Tags';
 import { runAction } from '../lib/actions';
 import { forwardFrameKeys } from '../lib/frameKeys';
+import { zoomableImages } from '../lib/images';
 import { SendState } from './MessageList';
 import { editDraft } from '../lib/compose';
 import { commandFor } from '../lib/shortcuts';
@@ -29,8 +30,9 @@ import { isTextInput } from './ShortcutsSheet';
 
 // ------------------------------------------------------------- auto-height frame
 
-/** Extra CSS for card bodies: compact padding, never scroll vertically inside the frame. */
-const CARD_FRAME_CSS = 'html{overflow-y:hidden}body{padding:4px 20px 20px}';
+/** Extra CSS for card bodies: compact padding, never scroll inside the frame: the conversation
+ * does, down and (for a message wider than the pane) sideways. */
+const CARD_FRAME_CSS = 'html{overflow:hidden}body{padding:4px 20px 20px}';
 
 /**
  * Sandboxed HTML body that grows to its content height.
@@ -47,7 +49,6 @@ export function AutoHeightFrame(props: { doc: string }) {
     f.title = 'Message body';
     f.setAttribute('sandbox', 'allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox');
     f.setAttribute('referrerpolicy', 'no-referrer');
-    f.setAttribute('scrolling', 'no');
     // Until its images are in (they give most HTML mail its height), the frame keeps at least
     // the room left in the pane: a long message opens at about its size instead of growing from
     // a strip as each image arrives; a short one shrinks once, at the end.
@@ -58,6 +59,19 @@ export function AutoHeightFrame(props: { doc: string }) {
     f.style.height = `${floor}px`;
     f.srcdoc = props.doc;
 
+    // A message wider than the pane (a picture at its actual size, a too-wide email) widens its
+    // card, and the conversation scrolls sideways: one scrollbar, at the bottom of the pane,
+    // not one at the end of a long message. Its width is measured at the pane's width (so a
+    // picture fitted again lets the card narrow back).
+    let wide = false;
+    const widen = (de: HTMLElement) => {
+      const card = host.closest<HTMLElement>('.card-msg');
+      if (!card || (!wide && de.scrollWidth <= de.clientWidth + 1)) return;
+      card.style.width = '';
+      const extra = de.scrollWidth - de.clientWidth;
+      wide = extra > 1;
+      if (wide) card.style.width = `${card.offsetWidth + extra}px`;
+    };
     let ro: ResizeObserver | undefined;
     let settleTimer: ReturnType<typeof setTimeout> | undefined;
     let last = -1;
@@ -70,6 +84,7 @@ export function AutoHeightFrame(props: { doc: string }) {
       const margins = cs ? parseFloat(cs.marginTop) + parseFloat(cs.marginBottom) : 0;
       // The html box's own height shrinks with content (unlike scrollHeight, which is floored
       // at the viewport); body.scrollHeight catches overflowing children.
+      widen(de);
       const h = Math.ceil(Math.max(de.getBoundingClientRect().height, body.scrollHeight + margins, settled ? 24 : floor));
       if (Math.abs(h - last) > 1) {
         last = h;
@@ -80,6 +95,7 @@ export function AutoHeightFrame(props: { doc: string }) {
       const doc = f.contentDocument;
       if (!doc) return;
       forwardFrameKeys(f);
+      zoomableImages(doc, () => measure());
       last = -1;
       measure();
       ro?.disconnect();

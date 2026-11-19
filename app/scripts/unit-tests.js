@@ -9,6 +9,7 @@ import { switchRecipients } from '../src/lib/recipients.ts';
 import { accountMarks, hash } from '../src/lib/accountMarks.ts';
 import { parseMailto } from '../src/lib/mailto.ts';
 import { monthGrid, parseTime, stepTime } from '../src/lib/clock.ts';
+import { declaredSize } from '../src/lib/images.ts';
 
 const a = (addr, name = null) => ({ name, addr });
 const addrs = (list) => list.map((x) => x.addr);
@@ -141,4 +142,17 @@ test('a month grid starts on the week of the 1st', () => {
   const m = monthGrid(2026, 10, 1); // weeks from Monday
   assert.equal(m[0].getMonth(), 9);
   assert.equal(m[0].getDate(), 26);
+});
+
+test('an image keeps the shape it is declared at', () => {
+  // Outlook: attributes in pixels, inline style in inches (the style is what shows)
+  assert.deepEqual(declaredSize('514', '867', 'width:5.3541in;height:9.0312in'), { w: 5.3541 * 96, h: 9.0312 * 96 });
+  assert.deepEqual(declaredSize('600', '1', null), { w: 600, h: 1 });
+  assert.deepEqual(declaredSize('300px', null, 'height: 150px'), { w: 300, h: 150 });
+  assert.deepEqual(declaredSize(null, null, 'border:0; width:2in; height:72pt'), { w: 192, h: 96 });
+  // max-width or a percentage is no declared size
+  assert.equal(declaredSize('100%', '200', null), null);
+  assert.equal(declaredSize(null, '200', 'max-width:300px'), null);
+  assert.equal(declaredSize('300', null, null), null);
+  assert.equal(declaredSize('0', '10', null), null);
 });

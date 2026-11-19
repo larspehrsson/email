@@ -398,6 +398,16 @@ interface QuoteSample {
   text?: string;
 }
 
+/** A picture as the whole message (also in demo mode with `?picture`, for the UI tests). */
+const PICTURE_SAMPLE: QuoteSample = {
+  // Outlook: a picture as the whole message, sized in inches (wider than the reader)
+  label: '(h) picture as the body',
+  from: { name: 'Priya Shah', addr: 'priya.shah@initech.example.com' },
+  html: `<div><p class="MsoNormal"><img width="1400" height="700" style="width:14.5833in;height:7.2916in" id="Picture_x0020_1" src="data:image/svg+xml;base64,${btoa(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="700" viewBox="0 0 1400 700"><rect width="1400" height="700" fill="#e8eef8"/><circle cx="700" cy="350" r="300" fill="#4f7cc9"/><text x="700" y="380" font-family="Helvetica,Arial" font-size="96" font-weight="700" fill="#fff" text-anchor="middle">2 : 1</text></svg>',
+  )}"></p></div>`,
+};
+
 const QUOTE_SAMPLES: QuoteSample[] = [
   {
     label: '(a) Thunderbird top-post',
@@ -486,6 +496,7 @@ Agreed — I gave it a full hour this time.
 Zoe
 `,
   },
+  PICTURE_SAMPLE,
 ];
 
 // ---------------------------------------------------------------- backend state
@@ -1142,7 +1153,7 @@ export function createMockBackend(): Backend {
       const inbox = [...folders.values()].find((f) => f.accountId === g.id && f.role === 'inbox');
       const list = inbox ? folderMsgs.get(inbox.id) ?? [] : [];
       const free = list.filter((m, i) => i >= 6 && !threads.has(threadOf(m)) && meta.get(m.id)?.kind === 'person');
-      (demo ? [] : QUOTE_SAMPLES).forEach((qs, i) => {
+      (demo ? (new URLSearchParams(location.search).has('picture') ? [PICTURE_SAMPLE] : []) : QUOTE_SAMPLES).forEach((qs, i) => {
         const m = free[i];
         if (!m) return;
         quoteSampleFor.set(m.id, qs);

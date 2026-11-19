@@ -13,6 +13,7 @@ import { runAction } from '../lib/actions';
 import { ForwardIcon, ImageIcon, MailIcon, PaperclipIcon, ReplyIcon } from './Icons';
 import { DRAG } from '../lib/platform';
 import { forwardFrameKeys } from '../lib/frameKeys';
+import { keepImageShapes, ZOOM_CSS, zoomableImages } from '../lib/images';
 import { editDraft } from '../lib/compose';
 import { allKeys, label, MOD } from '../lib/shortcuts';
 
@@ -20,7 +21,7 @@ import { allKeys, label, MOD } from '../lib/shortcuts';
 
 export function buildSrcdoc(rawHtml: string, allowRemote: boolean, extraCss = ''): string {
   // Collapse a trailing reply history behind a pill — only when it is unambiguous.
-  const html = collapseHtmlQuotes(rawHtml);
+  const html = keepImageShapes(collapseHtmlQuotes(rawHtml));
   const csp =
     // script-src 'none' is the guard against code in an email (with the sanitiser): the frame
     // itself has allow-scripts, which WebKit needs for the app's key listener (lib/frameKeys.ts).
@@ -42,6 +43,7 @@ blockquote blockquote blockquote blockquote{border-left-color:#c3c8d1}
 .moz-cite-prefix,.gmail_attr{color:#6b7078}
 a{color:#0a64d6}
 ${QUOTE_FRAME_CSS}
+${ZOOM_CSS}
 ${extraCss}
 </style></head><body>${html}</body></html>`;
 }
@@ -64,7 +66,10 @@ function HtmlFrame(props: { doc: string }) {
     f.setAttribute('sandbox', 'allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox');
     f.setAttribute('referrerpolicy', 'no-referrer');
     f.srcdoc = props.doc;
-    f.addEventListener('load', () => forwardFrameKeys(f));
+    f.addEventListener('load', () => {
+      forwardFrameKeys(f);
+      if (f.contentDocument) zoomableImages(f.contentDocument);
+    });
     host.replaceChildren(f);
   });
   return <div class="html-wrap" ref={host} />;

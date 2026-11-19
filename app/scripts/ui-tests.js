@@ -32,14 +32,14 @@ after(async () => {
 });
 
 /** The demo in a fresh window, as a list of messages or of conversations. */
-async function open({ threaded }) {
+async function open({ threaded, query = '' }) {
   const context = await browser.newContext({ viewport: { width: 1400, height: 850 }, locale: 'en-US', timezoneId: 'America/New_York' });
   await context.clock.setFixedTime(NOW);
   await context.addInitScript((t) => localStorage.setItem('ui.threaded', JSON.stringify(t)), threaded);
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto(base + '?demo');
+  await page.goto(base + '?demo' + query);
   await page.waitForSelector('.folder-layer .row');
   await page.waitForTimeout(300);
   return { page, errors, context, close: () => context.close() };
@@ -229,6 +229,86 @@ describe('compose', () => {
 });
 
 describe('reader', () => {
+  test('a picture wider than the reader shrinks and keeps its shape', async () => {
+    const { page, errors, close } = await open({ threaded: false, query: '&picture' });
+    try {
+      await page.locator('.folder-layer .row', { hasText: 'picture as the body' }).first().click();
+      const img = page.frameLocator('.reader iframe').first().locator('img');
+      await img.waitFor();
+      await page.waitForFunction(() => {
+        const i = document.querySelector('.reader iframe')?.contentDocument?.querySelector('img');
+        return i && i.getBoundingClientRect().width > 0;
+      });
+      const { w, h, room } = await img.evaluate((el) => ({ w: el.getBoundingClientRect().width, h: el.getBoundingClientRect().height, room: el.ownerDocument.body.clientWidth }));
+      assert.ok(w < 1400 && w <= room, `shrunk to the reader (${w} of ${room})`);
+      assert.ok(Math.abs(w / h - 2) < 0.02, `still 2:1, not squished (${w}×${h})`);
+      // a click shows it at its actual size, another fits it again
+      assert.equal(await img.evaluate((el) => getComputedStyle(el).cursor), 'zoom-in');
+      await img.click();
+      const full = await img.evaluate((el) => [el.getBoundingClientRect().width, el.getBoundingClientRect().height]);
+      assert.ok(Math.abs(full[0] - 1400) < 1 && Math.abs(full[1] - 700) < 1, `actual size: ${full}`);
+      assert.equal(await img.evaluate((el) => getComputedStyle(el).cursor), 'zoom-out');
+      // and the reader scrolls sideways to the rest of it
+      const across = await img.evaluate((el) => {
+        const s = el.ownerDocument.scrollingElement;
+        s.scrollLeft = 10_000;
+        return { left: s.scrollLeft, room: s.clientWidth, right: el.getBoundingClientRect().right };
+      });
+      assert.ok(across.left > 0 && Math.abs(across.right - across.room) < 30, `scrolled to its right edge: ${JSON.stringify(across)}`);
+      await img.evaluate((el) => (el.ownerDocument.scrollingElement.scrollLeft = 0));
+      await img.click({ position: { x: 20, y: 20 } });
+      assert.ok(Math.abs((await img.evaluate((el) => el.getBoundingClientRect().width)) - w) < 1, 'fits again');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+  test('in a conversation, a picture at its actual size widens its card; the pane scrolls sideways', async () => {
+    const { page, errors, close } = await open({ threaded: true, query: '&picture' });
+    try {
+      await page.locator('.folder-layer .row', { hasText: 'picture as the body' }).first().click();
+      const img = page.frameLocator('.card-frame').first().locator('img');
+      await img.waitFor();
+      await page.waitForFunction(() => document.querySelector('.card-frame')?.contentDocument?.querySelector('img')?.classList.contains('mail-zoom'));
+      const pane = () =>
+        page.evaluate(() => {
+          const s = document.querySelector('.conv-scroll');
+          const f = document.querySelector('.card-frame');
+          const de = f.contentDocument.documentElement;
+          return { scroll: s.scrollWidth, room: s.clientWidth, frameScrolls: de.scrollWidth > de.clientWidth + 1, frameH: f.getBoundingClientRect().height };
+        });
+      const before = await pane();
+      assert.ok(before.scroll <= before.room + 1, 'nothing to scroll sideways yet');
+      await img.click();
+      await page.waitForFunction(() => {
+        const s = document.querySelector('.conv-scroll');
+        return s.scrollWidth > s.clientWidth + 500;
+      });
+      const zoomed = await pane();
+      assert.ok(!zoomed.frameScrolls, 'the message itself never scrolls sideways');
+      assert.ok(zoomed.frameH > 700, `the frame holds the whole picture (${zoomed.frameH})`);
+      // the pane's scrollbar reaches its right edge
+      const edge = await page.evaluate(() => {
+        const s = document.querySelector('.conv-scroll');
+        s.scrollLeft = 10_000;
+        const i = document.querySelector('.card-frame').contentDocument.querySelector('img');
+        const f = document.querySelector('.card-frame').getBoundingClientRect();
+        return { left: s.scrollLeft, imgRight: f.left + i.getBoundingClientRect().right, paneRight: s.getBoundingClientRect().right };
+      });
+      assert.ok(edge.left > 0 && edge.imgRight <= edge.paneRight, `its right edge in view: ${JSON.stringify(edge)}`);
+      // fitted again, the card narrows back
+      await page.evaluate(() => (document.querySelector('.conv-scroll').scrollLeft = 0));
+      await img.click({ position: { x: 20, y: 20 } });
+      await page.waitForFunction(() => {
+        const s = document.querySelector('.conv-scroll');
+        return s.scrollWidth <= s.clientWidth + 1;
+      });
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('a long To line shows a few, then "and N more"', async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {
