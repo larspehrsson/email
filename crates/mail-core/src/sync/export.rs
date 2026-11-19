@@ -3,6 +3,11 @@
 //! there. Messages this computer has whole are written from here; the others (stored without
 //! their attachments, or not yet downloaded) are fetched from the server for the export only,
 //! never stored. The folder is named "… (incomplete)" until it's done.
+//!
+//! Gmail is one mailbox with labels, its All Mail holding every message (but Spam and Trash): as
+//! Google Takeout does, each message is written once, to `All Mail.mbox`, with its labels in an
+//! `X-Gmail-Labels` header; Spam and Trash get files of their own. (An account hiding All Mail
+//! from IMAP is exported folder by folder.)
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -65,6 +70,18 @@ pub fn mboxrd(raw: &[u8], out: &mut impl Write) -> std::io::Result<()> {
     out.write_all(b"\n")
 }
 
+/// The message with an `X-Gmail-Labels: Inbox, Work` header in front (none: as it is).
+pub fn with_labels(raw: &[u8], labels: &[String]) -> Vec<u8> {
+    if labels.is_empty() {
+        return raw.to_vec();
+    }
+    // One line, no line breaks or commas inside a label (a comma separates them).
+    let list: Vec<String> = labels.iter().map(|l| l.replace(['\r', '\n'], " ").replace(',', " ")).collect();
+    let mut out = format!("X-Gmail-Labels: {}\r\n", list.join(",")).into_bytes();
+    out.extend_from_slice(raw);
+    out
+}
+
 /// A new folder `base` (or `base (2)` …) in `dir`.
 fn unused(dir: &Path, base: &str) -> PathBuf {
     let mut n = 1;
@@ -94,7 +111,17 @@ impl Exporter {
         let tmp = work.join(".fetched");
 
         let folders: HashMap<i64, crate::model::Folder> = store.folders(account.id)?.into_iter().map(|f| (f.id, f)).collect();
-        let entries = store.export_entries(account.id)?;
+        // Gmail with All Mail: All Mail (labels in a header), Spam and Trash only.
+        use crate::model::FolderRole;
+        let takeout = account.provider == crate::model::Provider::Gmail
+            && folders.values().any(|f| f.role == Some(FolderRole::All) && f.selectable);
+        let mut entries = store.export_entries(account.id)?;
+        if takeout {
+            entries.retain(|(id, _)| {
+                folders.get(id).is_some_and(|f| matches!(f.role, Some(FolderRole::All | FolderRole::Junk | FolderRole::Trash)))
+            });
+        }
+        let label_of = |f: &crate::model::Folder| if f.path.len() == 1 { f.display_name.clone() } else { f.path.join("/") };
         let total: u32 = entries.iter().map(|(_, l)| l.len() as u32).sum();
         let mut summary = ExportSummary { path: work.clone(), written: 0, partial: 0, failed: 0, cancelled: false };
         let mut fetched: HashMap<i64, PathBuf> = HashMap::new();
@@ -175,7 +202,21 @@ impl Exporter {
                 match raw {
                     Some(raw) => {
                         out.write_all(from_line(date).as_bytes())?;
-                        mboxrd(&raw, &mut out)?;
+                        if takeout {
+                            // Its labels: every other folder it's in (All Mail itself isn't one).
+                            let mut labels: Vec<String> = store
+                                .message_folder_ids(id)?
+                                .into_iter()
+                                .filter_map(|fid| folders.get(&fid))
+                                .filter(|f| f.role != Some(FolderRole::All))
+                                .map(label_of)
+                                .collect();
+                            labels.sort();
+                            labels.dedup();
+                            mboxrd(&with_labels(&raw, &labels), &mut out)?;
+                        } else {
+                            mboxrd(&raw, &mut out)?;
+                        }
                         here += 1;
                         if unfetchable.contains(&id) {
                             partial += 1;
@@ -213,7 +254,10 @@ impl Exporter {
             account.email,
             chrono::Local::now().format("%Y-%m-%d %H:%M"),
             if summary.cancelled { " (stopped before the end: incomplete)" } else { "" },
-            if account.provider == crate::model::Provider::Gmail {
+            if takeout {
+                " Gmail: every message is in All Mail.mbox once, its labels in an X-Gmail-Labels header \
+                 (as Google Takeout writes them); Spam and Trash have files of their own."
+            } else if account.provider == crate::model::Provider::Gmail {
                 " Gmail's labels are folders here, so a message with several labels is in several files."
             } else {
                 ""
@@ -253,6 +297,14 @@ mod tests {
         mboxrd(b"Subject: x\r\n\r\nFrom here on\r\n>From quoted\r\nnot From\r\n", &mut out).unwrap();
         assert_eq!(String::from_utf8(out).unwrap(), "Subject: x\n\n>From here on\n>>From quoted\nnot From\n\n\n");
         assert_eq!(from_line(1_794_236_400), "From - Mon Nov  9 15:00:00 2026\n");
+    }
+
+    #[test]
+    fn gmail_labels_go_in_a_header() {
+        let raw = b"Subject: x\r\n\r\nHi\r\n";
+        assert_eq!(with_labels(raw, &[]), raw.to_vec());
+        let out = String::from_utf8(with_labels(raw, &["Inbox".into(), "Work/Clients".into(), "a,b".into()])).unwrap();
+        assert_eq!(out, "X-Gmail-Labels: Inbox,Work/Clients,a b\r\nSubject: x\r\n\r\nHi\r\n");
     }
 
     #[test]

@@ -51,7 +51,10 @@ Data lives in `~/.local/share/dev.mailclient.desktop/` on Linux (`~/Library/Appl
 
 Settings › Accounts › Export… writes an account's mail to a new folder: one mboxrd file per mail
 folder, in subfolders like the account's, and a README.txt with counts and anything that
-couldn't be fetched (`crates/mail-core/src/sync/export.rs`). Messages stored whole are written
+couldn't be fetched (`crates/mail-core/src/sync/export.rs`). Gmail, like Google Takeout:
+each message once, in `All Mail.mbox`, with an `X-Gmail-Labels` header listing its labels (the
+other folders it's in); Spam and Trash in files of their own; an account hiding All Mail from
+IMAP is exported folder by folder. Messages stored whole are written
 from `bodies.db`; those stored without attachments, or not downloaded, are fetched from the
 server on a connection of the export's own, only for the export (never stored). One export at a
 time, in the background (`Core::export_account`; `export-progress` / `export-finished` events),
