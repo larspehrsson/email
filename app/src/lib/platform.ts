@@ -1,3 +1,4 @@
+import { createSignal } from 'solid-js';
 /** Platform class on <html> ("macos" | "windows" | "linux") for platform-specific chrome.
  *  `?mac` forces macOS (browser mock / design checks). */
 export type Platform = 'macos' | 'windows' | 'linux';
@@ -29,7 +30,27 @@ export const DRAG: 'true' | 'false' = platform === 'macos' ? 'true' : 'false';
 // progress bar, loading shimmer) pause while another window, like a compose window, has
 // focus. In WebKitGTK every window draws on one thread, so they'd steal the frames the focused
 // window needs; it also saves battery.
-const setActive = (active: boolean) => document.documentElement.classList.toggle('inactive', !active);
+//
+// It also shows it: in the background its selection and folder icons turn from blue to grey
+// (keys go elsewhere). Set as variables on the page itself, which everything inherits, rather
+// than by a selector on `html.inactive`: WebKitGTK sometimes misses restyling for those.
+const [windowActive, setWindowActive] = createSignal(true);
+/** This window has the focus (keys come here). */
+export { windowActive };
+const AWAY: Record<string, string> = {
+  '--away-sel-folder-bg': 'var(--sel-bg-away)',
+  '--away-sel-folder-fg': 'var(--text)',
+  '--away-accent-icon': 'var(--text-3)',
+};
+const setActive = (active: boolean) => {
+  const root = document.documentElement;
+  root.classList.toggle('inactive', !active);
+  for (const [k, v] of Object.entries(AWAY)) {
+    if (active) root.style.removeProperty(k);
+    else root.style.setProperty(k, v);
+  }
+  setWindowActive(active);
+};
 window.addEventListener('focus', () => setActive(true));
 window.addEventListener('blur', () => setActive(false));
 setActive(document.hasFocus());

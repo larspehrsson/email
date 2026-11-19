@@ -52,7 +52,7 @@ import { commandFor, hint } from '../lib/shortcuts';
 import { hideToast, showToast } from './Toast';
 import { badgeFor, railOrder } from './Sidebar';
 
-import { DRAG } from '../lib/platform';
+import { DRAG, windowActive } from '../lib/platform';
 
 type Item = MessageSummary | ThreadSummary;
 
@@ -64,9 +64,11 @@ export const ROW_HEIGHT = 72;
 const LIST_PAD = 3;
 
 /** The selected row's colours, set on the row itself (see styles.css, `.row:hover`): the
- *  selected background, and while the list has the focus the colours of its contents. */
-function selectedRowVars(selected: boolean, active: boolean): Record<string, string> {
+ *  selected background, and while the list has the focus the colours of its contents; grey
+ *  while the window is in the background (keys go elsewhere). */
+function selectedRowVars(selected: boolean, active: boolean, away = false): Record<string, string> {
   if (!selected) return {};
+  if (away) return { '--row-bg': 'var(--sel-bg-away)' };
   if (!active) return { '--row-bg': 'var(--sel-bg-inactive)' };
   return {
     '--row-bg': 'var(--sel-bg)',
@@ -824,7 +826,7 @@ export function MessageList(props: {
                   aria-selected={!!m() && isSelected(m()!.id)}
                   style={{
                     transform: `translateY(${item.start}px)`,
-                    ...selectedRowVars(!!m() && isSelected(m()!.id), listFocused()),
+                    ...selectedRowVars(!!m() && isSelected(m()!.id), listFocused(), !windowActive()),
                   }}
                   onMouseDown={(e) => {
                     if (e.button !== 0) return;

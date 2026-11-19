@@ -248,6 +248,39 @@ describe('a busy sync', () => {
 });
 
 describe('selected row colours', () => {
+  test('in the background the window greys its selection and folder icons', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.locator('.folder-layer .row').nth(1).click();
+      await page.mouse.move(5, 5);
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      const look = () =>
+        page.evaluate(() => ({
+          row: getComputedStyle(document.querySelector('.folder-layer .row.selected .row-inner')).backgroundColor,
+          icon: getComputedStyle(document.querySelector('.folder .folder-icon')).color,
+          folder: getComputedStyle(document.querySelector('.folder.selected')).backgroundColor,
+        }));
+      await page.waitForTimeout(150);
+      const front = await look();
+      assert.equal(front.row, 'rgb(10, 108, 255)', 'solid blue in front');
+      await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+      await page.waitForTimeout(150);
+      const back = await look();
+      for (const k of ['row', 'icon', 'folder']) assert.notEqual(back[k], front[k], `${k} changes`);
+      const grey = (c) => {
+        const [r, g, b] = c.match(/[\d.]+/g).map(Number);
+        return Math.max(r, g, b) - Math.min(r, g, b) < 16;
+      };
+      assert.ok(grey(back.row) && grey(back.icon), `grey: ${JSON.stringify(back)}`);
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await page.waitForTimeout(150);
+      assert.deepEqual(await look(), front, 'back to blue');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('only the selected row has them, and only in full while the list has the focus', async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {

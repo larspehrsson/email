@@ -37,6 +37,8 @@
   --sel-text: #ffffff;
   --sel-muted: rgba(255, 255, 255, 0.8);
   --sel-bg-inactive: #e6e6eb;
+  /* the selection while the window is in the background: grey, not blue */
+  --sel-bg-away: rgba(0, 0, 0, 0.08);
   --sidebar-sel: rgba(0, 0, 0, 0.075);
 
   --unread: #0a6cff;
@@ -86,6 +88,7 @@
     --sel-bg: #2d6ae0;
     --sel-muted: rgba(255, 255, 255, 0.75);
     --sel-bg-inactive: rgba(255, 255, 255, 0.085);
+    --sel-bg-away: rgba(255, 255, 255, 0.1);
     --sidebar-sel: rgba(255, 255, 255, 0.09);
 
     --unread: #3d8bff;
@@ -436,7 +439,7 @@ body.resizing iframe {
   margin-right: -2px;
 }
 .folder-icon {
-  color: var(--accent);
+  color: var(--away-accent-icon, var(--accent));
   display: grid;
   place-items: center;
   width: 18px;
@@ -2998,7 +3001,7 @@ html.macos .rail-top {
   background: var(--bg-hover);
 }
 .rail-marker.selected {
-  background: var(--sel-folder-bg);
+  background: var(--away-sel-folder-bg, var(--sel-folder-bg));
 }
 
 .rail-letter {
@@ -3024,7 +3027,7 @@ html.macos .rail-top {
   transition: background 80ms;
 }
 .rail-acct .rail-btn {
-  color: var(--accent);
+  color: var(--away-accent-icon, var(--accent));
 }
 .rail-btn:hover {
   background: var(--bg-hover);
@@ -4385,15 +4388,15 @@ html.macos .app.rail-mode .search-bar {
 }
 .folder.selected,
 .rail-btn.selected {
-  background: var(--sel-folder-bg);
+  background: var(--away-sel-folder-bg, var(--sel-folder-bg));
 }
 .folder.selected .folder-name {
   font-weight: 650;
-  color: var(--sel-folder-fg);
+  color: var(--away-sel-folder-fg, var(--sel-folder-fg));
 }
 .folder.selected .folder-icon,
 .rail-btn.selected {
-  color: var(--sel-folder-fg);
+  color: var(--away-sel-folder-fg, var(--sel-folder-fg));
 }
 /* the account holding the selection: its name bold (the others regular) */
 .account-head .acct-dot {
