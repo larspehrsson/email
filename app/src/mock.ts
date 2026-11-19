@@ -1049,7 +1049,10 @@ export function createMockBackend(): Backend {
       tags: [...m.tags],
       subject: m.subject,
       from: { name: m.fromName, addr: m.fromAddr },
-      to: [{ name: me.name, addr: me.addr }],
+      // Meeting notes go to the whole team: a long To line (folded in the reader).
+      to: /notes from today/i.test(m.subject)
+        ? [{ name: me.name, addr: me.addr }, ...PEOPLE.slice(0, 11).map((p) => ({ name: p.name, addr: p.addr }))]
+        : [{ name: me.name, addr: me.addr }],
       cc: md?.cc ? [pick(rnd, PEOPLE), pick(rnd, PEOPLE)].map((p) => ({ name: p.name, addr: p.addr })) : [],
       date: m.date,
       html,

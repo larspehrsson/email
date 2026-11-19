@@ -94,21 +94,43 @@ function addrLabel(a: Addr) {
   return a.name ? a.name : a.addr;
 }
 
+/** More than this many: the first few, then "and N more" (a click shows them all). */
+const ADDR_FOLD = 5;
+const ADDR_SHOWN = 3;
+
 export function AddrList(props: { label: string; list: Addr[] }) {
+  const [open, setOpen] = createSignal(false);
+  const folds = () => props.list.length > ADDR_FOLD;
+  const shown = () => (folds() && !open() ? props.list.slice(0, ADDR_SHOWN) : props.list);
+  // In a conversation card the header expands/collapses the message: not these clicks.
+  const toggle = (e: MouseEvent) => {
+    e.stopPropagation();
+    setOpen(!open());
+  };
   return (
     <Show when={props.list.length > 0}>
       <div class="recips-line">
         <span class="recips-label">{props.label}</span>
-        <For each={props.list}>
+        <For each={shown()}>
           {(a, i) => (
             <>
               <span class="recip" title={a.addr}>
                 {addrLabel(a)}
               </span>
-              {i() < props.list.length - 1 ? ', ' : ''}
+              {i() < shown().length - 1 ? ', ' : ''}
             </>
           )}
         </For>
+        <Show when={folds()}>
+          {' '}
+          <button
+            class="link-btn recips-more"
+            onClick={toggle}
+            title={open() ? undefined : props.list.slice(ADDR_SHOWN).map((a) => a.addr).join(', ')}
+          >
+            {open() ? 'show less' : `and ${props.list.length - ADDR_SHOWN} more`}
+          </button>
+        </Show>
       </div>
     </Show>
   );

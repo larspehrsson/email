@@ -228,6 +228,29 @@ describe('compose', () => {
   });
 });
 
+describe('reader', () => {
+  test('a long To line shows a few, then "and N more"', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.locator('.folder-layer .row', { hasText: 'Notes from today' }).first().click();
+      const line = page.locator('.reader .recips-line', { hasText: 'To' }).first();
+      const more = line.locator('.recips-more');
+      await more.waitFor();
+      assert.equal(await line.locator('.recip').count(), 3);
+      assert.match(await more.textContent(), /^and \d+ more$/);
+      const n = Number((await more.textContent()).match(/\d+/)[0]);
+      await more.click();
+      assert.equal(await line.locator('.recip').count(), 3 + n);
+      assert.equal((await more.textContent()).trim(), 'show less');
+      await more.click();
+      assert.equal(await line.locator('.recip').count(), 3);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('a busy sync', () => {
   test('new mail shows while the Inbox keeps changing and reads are slow', async () => {
     const { page, errors, close } = await open({ threaded: false });
