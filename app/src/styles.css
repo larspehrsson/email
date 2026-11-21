@@ -550,6 +550,30 @@ body.resizing iframe {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+/* The header's counts: shortcuts to the quick filter (all / only unread). */
+.list-sub .count-btn {
+  appearance: none;
+  border: 0;
+  margin: 0 -3px;
+  padding: 1px 3px;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.list-sub .count-btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.list-sub .count-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.list-sub .count-unread.on {
+  color: var(--accent);
+  font-weight: 600;
+}
 
 .list-scroll {
   flex: 1;

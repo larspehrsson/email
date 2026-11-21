@@ -1020,20 +1020,30 @@ export function MessageList(props: {
         <div class="list-title" data-tauri-drag-region={DRAG}>
           <FolderCrumbs folder={props.folder} />
           <div class="list-sub" data-tauri-drag-region={DRAG}>
+            {/* The counts are the quick filter's shortcuts: unread shows only unread (again: all),
+                the others show everything. */}
             <Show when={threaded}>
-              <span>
+              <button class="count-btn" title="Show all messages" onClick={() => setListFilter(NO_FILTER)}>
                 {fmtNum(props.folder.syncedCount)} {props.folder.syncedCount === 1 ? 'message' : 'messages'}
-              </span>
+              </button>
               <span class="dot-sep">·</span>
             </Show>
-            <span>
+            <button class="count-btn" title="Show all messages" onClick={() => setListFilter(NO_FILTER)}>
               <Show when={model.state.total != null} fallback={threaded ? 'Conversations' : `${fmtNum(count())} messages`}>
                 {fmtNum(model.state.total ?? 0)} {threaded ? (model.state.total === 1 ? 'conversation' : 'conversations') : 'messages'}
               </Show>
-            </span>
+            </button>
             <Show when={props.folder.unread > 0}>
               <span class="dot-sep">·</span>
-              <span>{fmtNum(props.folder.unread)} unread</span>
+              <button
+                class="count-btn count-unread"
+                classList={{ on: listFilter().read === false }}
+                aria-pressed={listFilter().read === false}
+                title={listFilter().read === false ? 'Show all messages' : 'Show only unread messages'}
+                onClick={() => setListFilter({ ...listFilter(), read: listFilter().read === false ? null : false })}
+              >
+                {fmtNum(props.folder.unread)} unread
+              </button>
             </Show>
           </div>
         </div>

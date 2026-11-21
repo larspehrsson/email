@@ -944,6 +944,31 @@ describe('size and filters', () => {
     }
   });
 
+  test('the header counts: unread shows only unread (again: all), the message count shows all', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const unread = page.locator('.folder-layer .list-sub .count-unread');
+      const bar = page.locator('.folder-layer .filter-bar');
+      await unread.click();
+      await bar.waitFor();
+      assert.match(await page.locator('.folder-layer .filter-what').textContent(), /Unread/);
+      assert.equal(await unread.getAttribute('aria-pressed'), 'true');
+      assert.equal(await page.locator('.folder-layer .row:not(.unread)').count(), 0, 'only unread rows');
+      await unread.click();
+      await bar.waitFor({ state: 'detached' });
+      assert.equal(await unread.getAttribute('aria-pressed'), 'false');
+      assert.ok((await page.locator('.folder-layer .row:not(.unread)').count()) > 0, 'read ones back');
+      // The message count shows all, from any filter.
+      await unread.click();
+      await bar.waitFor();
+      await page.locator('.folder-layer .list-sub .count-btn', { hasText: 'messages' }).click();
+      await bar.waitFor({ state: 'detached' });
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('with attachments, in conversations too', async () => {
     const { page, errors, close } = await open({ threaded: true });
     try {
@@ -1490,7 +1515,7 @@ describe('several messages', () => {
   test('⌘/Ctrl+A picks the whole folder, conversations too; ⇧-arrows extend', async () => {
     const { page, errors, close } = await open({ threaded: true });
     try {
-      const total = Number((await page.locator('.folder-layer .list-sub span').nth(2).textContent()).replace(/[^\d]/g, ''));
+      const total = Number((await page.locator('.folder-layer .list-sub .count-btn').nth(1).textContent()).replace(/[^\d]/g, ''));
       await rows(page).nth(1).click();
       await page.keyboard.press('Shift+ArrowDown');
       await page.keyboard.press('Shift+ArrowDown');
