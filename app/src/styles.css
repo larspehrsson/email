@@ -5764,3 +5764,33 @@ body.dragging-account * {
   margin: 0;
   font-size: 11.5px;
 }
+
+/* Settings › Signatures › HTML: paste a signature made elsewhere, see it as it's sent */
+.sig-editor.hidden {
+  display: none;
+}
+.sig-html-btn {
+  width: auto;
+  padding: 0 7px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+.sig-html {
+  min-height: 150px;
+  resize: vertical;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.sig-preview-label {
+  font-size: 11.5px;
+  margin-top: 4px;
+}
+.sig-preview {
+  padding: 10px 12px;
+  border: 1px dashed var(--sep-strong);
+  border-radius: 8px;
+  background: #fff;
+  color: #222;
+  overflow: auto;
+  max-height: 220px;
+}

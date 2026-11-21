@@ -970,6 +970,9 @@ describe('signatures', () => {
       w.on('pageerror', (e) => errors.push(e.message));
       await w.locator('.cmp-sig-body').waitFor();
       assert.equal((await w.locator('.cmp-sig-body').textContent()).trim(), 'Lars Pehrsson, Example AB');
+      // The picker shows the one in use (not "No signature").
+      await w.waitForTimeout(300);
+      assert.equal(await w.locator('select.cmp-sig-select').evaluate((e) => e.options[e.selectedIndex]?.text), 'Work');
       await w.locator('select.cmp-sig-select').selectOption({ label: 'Short' });
       await hasText(w.locator('.cmp-sig-body'), '/L', 'switched');
       await w.locator('select.cmp-sig-select').selectOption({ label: 'No signature' });
@@ -1011,6 +1014,41 @@ describe('signature defaults', () => {
       await page.locator('.sig-name').fill('Work 2');
       await page.waitForTimeout(800);
       assert.deepEqual((await shown()).slice(0, 4), ['Home', 'Short', 'Work 2', 'Home']);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('signature html', () => {
+  test('a signature pasted as HTML keeps its colours, opens as HTML again, and goes into the message', async () => {
+    const { page, errors, context, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+,' : 'Control+,');
+      await page.locator('.st-nav-item', { hasText: 'Signatures' }).click();
+      await page.locator('.sig-add').click();
+      await page.waitForFunction(() => document.querySelector('.sig-name')?.value === 'Signature');
+      await page.locator('.sig-html-btn').click();
+      assert.equal(await page.locator('.sig-editor').isVisible(), false);
+      await page.locator('textarea.sig-html').fill('<p style="color:#c00">Lars</p><table><tr><td style="color:navy">PaperCut</td></tr></table>');
+      await page.waitForTimeout(800);
+      await page.locator('.sig-preview p[style*="color"]').waitFor();
+      assert.equal(await page.locator('.sig-html-btn').getAttribute('aria-pressed'), 'true');
+      // Going back to the simple editor would lose the colours: asked first.
+      await page.locator('.sig-html-btn').click();
+      await page.locator('.confirm-backdrop').waitFor();
+      await page.locator('.confirm-backdrop .btn', { hasText: 'Cancel' }).click();
+      assert.equal(await page.locator('textarea.sig-html').count(), 1, 'still HTML');
+      await page.locator('select.sig-default').first().selectOption({ label: 'Signature' });
+      await page.waitForTimeout(200);
+      await page.keyboard.press('Escape');
+      const popup = context.waitForEvent('page');
+      await page.keyboard.press('c');
+      const w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      await w.locator('.cmp-sig-body p[style*="color"]').waitFor();
+      assert.match(await w.locator('.cmp-sig-body').textContent(), /PaperCut/);
       assert.deepEqual(errors, []);
     } finally {
       await close();

@@ -8,6 +8,9 @@ import { accounts } from '../state';
 import { loadSignatures, pictureForSignature, reloadSignatures, setDefaultsHere, sigs } from '../lib/signatures';
 import { confirmDialog } from './Actions';
 import { MOD } from '../lib/shortcuts';
+
+/** HTML the simple editor can't keep (colours, fonts, tables, layout attributes). */
+const needsHtml = (html: string) => /<(table|font|center|style)\b|\sstyle\s*=|\s(bgcolor|color|face|align|valign|cellpadding)\s*=/i.test(html);
 import { ImageIcon } from './Icons';
 
 // Settings › Signatures: the list on the left, the one chosen on the right (saved as it's
@@ -22,6 +25,29 @@ export function SignaturesSection() {
   let editorEl!: HTMLDivElement;
   let editor: Editor | undefined;
   let pictureInput!: HTMLInputElement;
+  /** Edited as the simple editor, or as HTML (pasted from elsewhere: colours, tables…). */
+  const [mode, setMode] = createSignal<'rich' | 'html'>('rich');
+  const [htmlDraft, setHtmlDraft] = createSignal('');
+  /** The saved HTML (sanitized by the core), as the preview under the HTML. */
+  const savedHtml = () => sigs().signatures.find((x) => x.id === current())?.html ?? '';
+  async function switchMode() {
+    if (!editor || current() == null) return;
+    if (mode() === 'rich') {
+      setHtmlDraft(editor.isEmpty ? '' : editor.getHTML());
+      setMode('html');
+      return;
+    }
+    if (
+      needsHtml(htmlDraft()) &&
+      !(await confirmDialog("The simple editor can't keep colours, fonts or tables: they'd be lost. Switch anyway?", 'Switch'))
+    )
+      return;
+    loading = true;
+    editor.commands.setContent(htmlDraft());
+    loading = false;
+    setMode('rich');
+    changed();
+  }
 
   /** Put pictures (pasted, dropped or chosen) in at the cursor (or at `pos`). */
   async function addPictures(files: File[], pos?: number) {
@@ -95,12 +121,15 @@ export function SignaturesSection() {
     }
   });
 
-  // The chosen one into the fields.
+  // The chosen one into the fields: one made with colours or a table (pasted HTML) opens as
+  // HTML, which the simple editor would lose.
   createEffect(
     on(current, (id) => {
       const s = sigs().signatures.find((x) => x.id === id);
       loading = true;
       setName(s?.name ?? '');
+      setHtmlDraft(s?.html ?? '');
+      setMode(s && needsHtml(s.html) ? 'html' : 'rich');
       editor?.commands.setContent(s?.html ?? '');
       editor?.setEditable(s != null);
       loading = false;
@@ -123,7 +152,7 @@ export function SignaturesSection() {
       return;
     }
     try {
-      await api.saveSignature(id, name(), editor.isEmpty ? '' : editor.getHTML());
+      await api.saveSignature(id, name(), mode() === 'html' ? htmlDraft().trim() : editor.isEmpty ? '' : editor.getHTML());
       await reloadSignatures();
       setMsg(null);
     } catch (e) {
@@ -193,7 +222,7 @@ export function SignaturesSection() {
       classList={{ on: (tick(), editor?.isActive(mark) ?? false) }}
       title={`${label}${key ? ` (${key})` : ''}`}
       aria-label={label}
-      disabled={current() == null}
+      disabled={current() == null || mode() === 'html'}
       onMouseDown={(e) => e.preventDefault()}
       onClick={() => editor && run(editor)}
     >
@@ -246,7 +275,7 @@ export function SignaturesSection() {
               tabIndex={-1}
               title="Insert a picture (or paste or drop one)"
               aria-label="Insert picture"
-              disabled={current() == null}
+              disabled={current() == null || mode() === 'html'}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => pictureInput.click()}
             >
@@ -263,6 +292,17 @@ export function SignaturesSection() {
                 void addPictures(files);
               }}
             />
+            <button
+              class="fmt-btn sig-html-btn"
+              classList={{ on: mode() === 'html' }}
+              aria-pressed={mode() === 'html'}
+              title={mode() === 'html' ? 'Back to the simple editor' : 'Edit as HTML (paste a signature made elsewhere, with colours and layout)'}
+              disabled={current() == null}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => void switchMode()}
+            >
+              HTML
+            </button>
             <span class="fmt-fill" />
             <Show when={current() != null}>
               <button class="link-btn sig-delete" onClick={() => void remove()}>
@@ -270,7 +310,28 @@ export function SignaturesSection() {
               </button>
             </Show>
           </div>
-          <div class="sig-editor cmp-editor" ref={editorEl} onMouseDown={(e) => e.target === e.currentTarget && editor?.commands.focus('end')} />
+          <div
+            class="sig-editor cmp-editor"
+            classList={{ hidden: mode() === 'html' }}
+            ref={editorEl}
+            onMouseDown={(e) => e.target === e.currentTarget && editor?.commands.focus('end')}
+          />
+          <Show when={mode() === 'html'}>
+            <textarea
+              class="st-input sig-html"
+              aria-label="Signature HTML"
+              spellcheck={false}
+              placeholder="Paste the signature's HTML here"
+              value={htmlDraft()}
+              onInput={(e) => {
+                setHtmlDraft(e.currentTarget.value);
+                changed();
+              }}
+            />
+            <div class="sig-preview-label st-muted">As it's sent (scripts and the like taken out):</div>
+            {/* The core's sanitized copy, never the raw text. */}
+            <div class="sig-preview" innerHTML={savedHtml()} />
+          </Show>
           <Show when={current() == null}>
             <p class="st-muted sig-none">No signatures yet. Add one, then choose where it’s used below.</p>
           </Show>
