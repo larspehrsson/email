@@ -2,6 +2,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    // Started by an AI app (MCP client) as `Email --mcp`: a relay to the running app, no window.
+    if std::env::args().skip(1).any(|a| a == "--mcp") {
+        std::process::exit(mail_app_lib::mcp_bridge());
+    }
     // WebKitGTK paces its frames by the vblank of the display the window was first shown on.
     // When that display goes off (a laptop's lid closed, an external monitor in use) each wait
     // times out and the window gets about one frame a second: selecting and scrolling the list

@@ -6,6 +6,7 @@ pub mod addressbook;
 pub mod ai;
 pub mod gcontacts;
 pub mod icons;
+pub mod mcp;
 pub mod compose;
 pub mod contacts;
 pub mod graph;
@@ -905,7 +906,7 @@ impl Core {
     }
 
     /// A message's detail, downloading its body first if it isn't local yet (waits up to 30 s).
-    async fn detail_now(&self, id: i64) -> Result<MessageDetail> {
+    pub async fn detail_now(&self, id: i64) -> Result<MessageDetail> {
         let mut rx = self.events.subscribe();
         if let Some(d) = self.get_message(id)? {
             return Ok(d);

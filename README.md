@@ -93,6 +93,8 @@ at once — the quickest way to clear out a newsletter.
 
 **Message source** (⌥⌘U, or right-click a message), with questions to Claude about it: why wasn't this marked as spam, is it genuine, who really sent it.
 
+**AI apps:** let Claude Desktop, Claude Code or another MCP app read, search, draft and tidy your mail (Settings › AI apps; off until you turn it on; deleting and sending always ask you first).
+
 **Sender pictures** beside each message: the company's logo or website icon, or initials.
 
 **Several at once:** Ctrl/⌘-click or Shift-click messages in the list (or Ctrl/⌘+A for all of

@@ -173,6 +173,45 @@ export interface Card {
   google?: number | null;
 }
 
+/** What AI apps (MCP clients) may do (Settings › AI apps). */
+export interface McpSettings {
+  enabled: boolean;
+  drafts: boolean;
+  organize: boolean;
+  delete: boolean;
+  send: boolean;
+  /** allowed accounts; null: all */
+  accounts: number[] | null;
+}
+export interface McpStatus {
+  settings: McpSettings;
+  /** the program an MCP client starts, with --mcp */
+  command: string;
+}
+export interface McpConfirm {
+  id: number;
+  client: string;
+  title: string;
+  lines: string[];
+  body: string | null;
+  ok: string;
+}
+export interface McpActivity {
+  client: string;
+  tool: string;
+  summary: string;
+  ok: boolean;
+  undoOp: number | null;
+  undoSend: number | null;
+}
+export interface McpLogEntry {
+  at: number;
+  client: string;
+  tool: string;
+  summary: string;
+  ok: boolean;
+}
+
 /** An account linked to its Google contacts. */
 export interface GoogleLink {
   accountId: number;
@@ -542,6 +581,11 @@ export interface EventMap {
   mailto: null;
   /** writing help: a piece of the text being written for request `requestId` */
   'ai-text': { requestId: number; text: string };
+  /** an AI app asks before deleting or sending (answer with mcp_answer) */
+  'mcp-confirm': McpConfirm;
+  /** a question nobody answered in time (or answered elsewhere): drop it */
+  'mcp-confirm-done': number;
+  'mcp-activity': McpActivity;
 }
 
 export interface CommandMap {
@@ -608,6 +652,10 @@ export interface CommandMap {
   account_logos: { args: undefined; ret: { accountId: number; dataUrl: string }[] };
   google_status: { args: undefined; ret: GoogleStatus };
   message_source: { args: { id: number }; ret: string };
+  mcp_status: { args: undefined; ret: McpStatus };
+  set_mcp_settings: { args: { settings: McpSettings }; ret: void };
+  mcp_log: { args: undefined; ret: McpLogEntry[] };
+  mcp_answer: { args: { id: number; allow: boolean }; ret: void };
   set_google_client: { args: { id: string | null; secret: string | null }; ret: void };
   google_connect: { args: { accountId: number }; ret: string };
   google_disconnect: { args: { accountId: number }; ret: void };
