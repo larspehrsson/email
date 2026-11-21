@@ -48,5 +48,16 @@ export async function loadPicture(file: Blob): Promise<HTMLImageElement> {
   return img;
 }
 
+/** The pictures a paste carries: its files, or (WebKit fills only these for a screenshot on
+ *  the clipboard) its items that are files. */
+export function pastedPictures(data: DataTransfer | null | undefined): File[] {
+  const files = picturesIn(data?.files);
+  if (files.length) return files;
+  return [...(data?.items ?? [])]
+    .filter((i) => i.kind === 'file' && i.type.startsWith('image/'))
+    .map((i) => i.getAsFile())
+    .filter((f): f is File => !!f);
+}
+
 /** The pictures among pasted or dropped files. */
 export const picturesIn = (list: FileList | null | undefined): File[] => [...(list ?? [])].filter((f) => f.type.startsWith('image/'));

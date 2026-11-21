@@ -1,4 +1,5 @@
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from 'solid-js';
+import { pastedPictures } from '../lib/pictures';
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -89,7 +90,7 @@ export function SignaturesSection() {
       ],
       editorProps: {
         handlePaste: (_view, event) => {
-          const files = pictures(event.clipboardData?.files);
+          const files = pastedPictures(event.clipboardData);
           if (!files.length) return false;
           void addPictures(files);
           return true;

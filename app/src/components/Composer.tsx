@@ -3,7 +3,7 @@ import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import Image from '@tiptap/extension-image';
-import { picturesIn, scalePicture } from '../lib/pictures';
+import { pastedPictures, scalePicture } from '../lib/pictures';
 import type { Addr } from '../api';
 import { accounts } from '../state';
 import {
@@ -479,7 +479,7 @@ export function Composer() {
         // A picture on the clipboard (a screenshot, an image copied from a page): into the
         // message where the cursor is, not attached. Files dropped on the window still attach.
         handlePaste: (_view, event) => {
-          const files = picturesIn(event.clipboardData?.files);
+          const files = pastedPictures(event.clipboardData);
           if (!files.length) return false;
           void (async () => {
             for (const f of files) {
