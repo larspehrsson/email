@@ -1,4 +1,5 @@
 import { createEffect, createResource, createSignal, For, Match, onCleanup, onMount, Show, Switch, type JSX } from 'solid-js';
+import { accountLogo, logoFromFile, setAccountLogo } from '../lib/accountLogos';
 import {
   bindKey,
   COMMANDS,
@@ -272,7 +273,9 @@ function MarkField(props: { account: Account; onError: (text: string) => void })
     }
   };
   const pick = (color: string | null) => void save(props.account.markLetter, color);
+  let picInput!: HTMLInputElement;
   return (
+    <>
     <Field label="Marker">
       <input
         class="st-input st-mark-letter"
@@ -316,6 +319,35 @@ function MarkField(props: { account: Account; onError: (text: string) => void })
         </For>
       </span>
     </Field>
+    <Field label="Picture">
+      <span class="st-mark-pic">
+        <AccountDot account={props.account} size={22} />
+        <button class="link-btn" onClick={() => picInput.click()}>
+          {accountLogo(props.account.id) ? 'Change picture…' : 'Use a picture…'}
+        </button>
+        <Show when={accountLogo(props.account.id)}>
+          <button class="link-btn" onClick={() => void setAccountLogo(props.account.id, null).catch((e) => props.onError(errorMessage(e)))}>
+            Remove
+          </button>
+        </Show>
+        <input
+          ref={picInput}
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
+          hidden
+          aria-label={`Picture for ${props.account.email}`}
+          onChange={(e) => {
+            const f = e.currentTarget.files?.[0];
+            e.currentTarget.value = '';
+            if (!f) return;
+            void logoFromFile(f)
+              .then((url) => setAccountLogo(props.account.id, url))
+              .catch((err) => props.onError(errorMessage(err)));
+          }}
+        />
+      </span>
+    </Field>
+    </>
   );
 }
 

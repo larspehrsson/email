@@ -1785,6 +1785,27 @@ export function createMockBackend(): Backend {
         setTimeout(() => void simulateSync(acc, 6_000, 'mail.example.org'), 300);
       }
     },
+    async account_logos() {
+      await sleep(3);
+      try {
+        return JSON.parse(localStorage.getItem('mock.accountLogos') ?? '[]') as { accountId: number; dataUrl: string }[];
+      } catch {
+        return [];
+      }
+    },
+    async set_account_logo({ accountId, dataUrl }) {
+      await sleep(3);
+      if (dataUrl && !/^data:image\/(png|jpeg|gif|webp|svg\+xml);base64,/.test(dataUrl)) throw "That isn't a picture the app can show.";
+      let list: { accountId: number; dataUrl: string }[] = [];
+      try {
+        list = JSON.parse(localStorage.getItem('mock.accountLogos') ?? '[]');
+      } catch {
+        list = [];
+      }
+      list = list.filter((l) => l.accountId !== accountId);
+      if (dataUrl) list.push({ accountId, dataUrl });
+      localStorage.setItem('mock.accountLogos', JSON.stringify(list));
+    },
     async allow_remote_sender({ id }) {
       await sleep(3);
       const m = byId.get(id);

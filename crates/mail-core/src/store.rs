@@ -218,6 +218,12 @@ CREATE TABLE IF NOT EXISTS address_book (
     updated INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
+-- A picture of the user's own for an account's marker (a data: URL), instead of the letter.
+CREATE TABLE IF NOT EXISTS account_logos (
+    account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    data_url   TEXT NOT NULL
+);
+
 -- Senders whose remote images always load ("Always load images from …"), lowercase addresses.
 CREATE TABLE IF NOT EXISTS remote_senders (
     addr  TEXT PRIMARY KEY,
@@ -2731,6 +2737,39 @@ impl Store {
             .unwrap_or(false))
     }
 
+    /// Every account's own marker picture (data: URLs).
+    pub fn account_logos(&self) -> Result<Vec<(i64, String)>> {
+        let db = self.rdb();
+        let mut stmt = db.prepare_cached("SELECT account_id, data_url FROM account_logos")?;
+        Ok(stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Set (or with None take away) an account's marker picture: a data: URL of a PNG, JPEG,
+    /// GIF, WebP or SVG image, small (the app scales it down first).
+    pub fn set_account_logo(&self, account_id: i64, data_url: Option<&str>) -> Result<()> {
+        match data_url {
+            Some(url) => {
+                let ok = ["data:image/png;", "data:image/jpeg;", "data:image/gif;", "data:image/webp;", "data:image/svg+xml;"]
+                    .iter()
+                    .any(|p| url.starts_with(p));
+                if !ok || !url.contains(";base64,") {
+                    anyhow::bail!("That isn't a picture the app can show.");
+                }
+                if url.len() > 512 * 1024 {
+                    anyhow::bail!("That picture is too big.");
+                }
+                self.db().execute(
+                    "INSERT OR REPLACE INTO account_logos (account_id, data_url) VALUES (?1, ?2)",
+                    params![account_id, url],
+                )?;
+            }
+            None => {
+                self.db().execute("DELETE FROM account_logos WHERE account_id=?1", [account_id])?;
+            }
+        }
+        Ok(())
+    }
+
     /// Always (or no longer) load remote images in mail from `addr`.
     pub fn set_remote_sender(&self, addr: &str, on: bool) -> Result<()> {
         let addr = addr.trim().to_lowercase();
@@ -4279,6 +4318,21 @@ mod tests {
         let s = store.signatures().unwrap();
         assert_eq!(s.signatures.len(), 1);
         assert_eq!((s.defaults[0].new_id, s.defaults[0].reply_id), (None, Some(home)), "a deleted default goes");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn account_logos() {
+        let dir = std::env::temp_dir().join(format!("mail-core-logos-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = Store::open(&dir).unwrap();
+        let a = store.insert_account("x@example.com", "x", Provider::Imap, "h", 993).unwrap();
+        assert!(store.set_account_logo(a.id, Some("data:text/html;base64,PGI+")).is_err(), "only pictures");
+        assert!(store.set_account_logo(a.id, Some("https://x.com/a.png")).is_err());
+        store.set_account_logo(a.id, Some("data:image/png;base64,iVBORw0KGgo=")).unwrap();
+        assert_eq!(store.account_logos().unwrap(), vec![(a.id, "data:image/png;base64,iVBORw0KGgo=".to_string())]);
+        store.set_account_logo(a.id, None).unwrap();
+        assert!(store.account_logos().unwrap().is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

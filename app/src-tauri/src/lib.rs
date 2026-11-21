@@ -93,6 +93,27 @@ async fn set_read(core: State<'_, Arc<Core>>, id: i64, read: bool) -> Res<()> {
     core.set_read(id, read).map_err(err)
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AccountLogo {
+    account_id: i64,
+    data_url: String,
+}
+
+/// The accounts' own marker pictures.
+#[tauri::command]
+async fn account_logos(core: State<'_, Arc<Core>>) -> Res<Vec<AccountLogo>> {
+    core.account_logos()
+        .map(|v| v.into_iter().map(|(account_id, data_url)| AccountLogo { account_id, data_url }).collect())
+        .map_err(err)
+}
+
+/// Set (data: URL) or take away (null) an account's marker picture.
+#[tauri::command]
+async fn set_account_logo(core: State<'_, Arc<Core>>, account_id: i64, data_url: Option<String>) -> Res<()> {
+    core.set_account_logo(account_id, data_url.as_deref()).map_err(err)
+}
+
 /// Always load images from this message's sender; returns the address.
 #[tauri::command]
 async fn allow_remote_sender(core: State<'_, Arc<Core>>, id: i64) -> Res<String> {
@@ -1336,6 +1357,8 @@ pub fn run() {
             sender_folders,
             sender_icon,
             allow_remote_sender,
+            account_logos,
+            set_account_logo,
             remote_senders,
             set_remote_sender,
             get_thread,

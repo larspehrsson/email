@@ -585,6 +585,8 @@ export interface CommandMap {
   selection_info: { args: { folderId: number; items: number[]; threaded: boolean }; ret: SelectionInfo };
   sender_folders: { args: { messageIds: number[] }; ret: { folderId: number; count: number }[] };
   sender_icon: { args: { addr: string }; ret: string | null };
+  account_logos: { args: undefined; ret: { accountId: number; dataUrl: string }[] };
+  set_account_logo: { args: { accountId: number; dataUrl: string | null }; ret: void };
   list_tags: { args: undefined; ret: TagDef[] };
   set_tag: { args: { keyword: string | null; name: string; color: string }; ret: string };
   delete_tag: { args: { keyword: string }; ret: void };

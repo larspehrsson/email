@@ -1392,6 +1392,16 @@ impl Core {
     }
 
     /// Remember the user's "Load images" choice for a message.
+    pub fn account_logos(&self) -> Result<Vec<(i64, String)>> {
+        self.store.account_logos()
+    }
+
+    pub fn set_account_logo(&self, account_id: i64, data_url: Option<&str>) -> Result<()> {
+        self.store.set_account_logo(account_id, data_url)?;
+        let _ = self.events.send(CoreEvent::FoldersChanged { account_id });
+        Ok(())
+    }
+
     /// Always load remote images in mail from this message's sender; returns the address.
     pub fn allow_remote_from_sender(&self, id: i64) -> Result<String> {
         let addr = self.store.message_from_addr(id)?.filter(|a| !a.trim().is_empty()).ok_or_else(|| anyhow!("This message has no sender."))?;

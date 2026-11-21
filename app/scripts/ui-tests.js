@@ -1085,6 +1085,42 @@ describe('images', () => {
   });
 });
 
+describe('account picture', () => {
+  test('a picture of your own for an account shows in the sidebar and the sync status', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'Accounts' }).click();
+      const png = await page.evaluate(() => {
+        const c = document.createElement('canvas');
+        c.width = c.height = 300;
+        const g = c.getContext('2d');
+        g.fillStyle = '#e33';
+        g.fillRect(0, 0, 300, 300);
+        return c.toDataURL('image/png').split(',')[1];
+      });
+      await page.locator('.st-mark-pic input[type="file"]').first().setInputFiles({ name: 'me.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
+      await page.locator('.st-mark-pic .acct-dot img').first().waitFor();
+      const natural = await page.locator('.st-mark-pic .acct-dot img').first().evaluate((i) => i.naturalWidth);
+      assert.equal(natural, 128, 'scaled down');
+      await page.keyboard.press('Escape');
+      await page.locator('.sidebar .account-head .acct-dot img').first().waitFor();
+      await page.click('.sf-summary');
+      assert.equal(await page.locator('.sync-popover .acct-dot img').count(), 1, 'in the sync status too');
+      // Taken away again: the letter.
+      await page.keyboard.press('Escape');
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-mark-pic .link-btn', { hasText: 'Remove' }).first().click();
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(200);
+      assert.equal(await page.locator('.sidebar .account-head .acct-dot img').count(), 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('move list', () => {
   test("the folders with most of the sender's mail come first", async () => {
     const { page, errors, close } = await open({ threaded: false });

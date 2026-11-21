@@ -114,6 +114,8 @@ export const api = {
   /** The list's row ids from `offset` in its order (⇧-click ranges, Select All). */
   listItemIds: (folderId: number, threaded: boolean, sort: ListSort, filter: ListFilter | undefined, offset: number, limit: number): Promise<number[]> =>
     call('list_item_ids', { folderId, threaded, sort, filter, offset, limit }),
+  accountLogos: (): Promise<{ accountId: number; dataUrl: string }[]> => call('account_logos', undefined),
+  setAccountLogo: (accountId: number, dataUrl: string | null): Promise<void> => call('set_account_logo', { accountId, dataUrl }),
   /** A sender's picture (data: URL) from their domain; null when there's none. */
   senderIcon: (addr: string): Promise<string | null> => call('sender_icon', { addr }),
   /** Where these messages' senders' mail is kept, most first (the Move list's order). */

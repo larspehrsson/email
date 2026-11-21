@@ -2008,15 +2008,25 @@ body.resizing iframe {
 
 /* popover rows: two fixed lines (email / status) so neither is squeezed */
 .sync-popover .sp-row {
-  height: 46px;
-  grid-template-columns: 14px minmax(0, 1fr);
+  height: 48px;
+  grid-template-columns: 22px minmax(0, 1fr);
+  column-gap: 10px;
   grid-template-rows: 17px 16px;
   align-content: center;
   row-gap: 1px;
 }
-.sync-popover .sp-row .sf-icon {
+.sync-popover .sp-row .acct-dot {
+  margin: 0;
   grid-row: 1 / span 2;
   align-self: center;
+  font-size: 11px;
+}
+.sync-popover .sp-status {
+  gap: 5px;
+}
+.sync-popover .sp-status .sf-icon {
+  width: 12px;
+  height: 12px;
 }
 .sync-popover .sp-row .sf-email {
   grid-column: 2;
@@ -5083,7 +5093,7 @@ body.dragging-account * {
   overflow-y: auto;
   padding: 4px 0 16px;
 }
-.sp-row {
+.sender-pane .sp-row {
   display: flex;
   align-items: flex-start;
   gap: 8px;
@@ -5091,13 +5101,13 @@ body.dragging-account * {
   cursor: default;
   border-left: 2px solid transparent;
 }
-.sp-row:hover {
+.sender-pane .sp-row:hover {
   background: var(--bg-hover);
 }
-.sp-row.on {
+.sender-pane .sp-row.on {
   background: var(--sel-bg-inactive);
 }
-.sp-row.current {
+.sender-pane .sp-row.current {
   border-left-color: var(--accent);
 }
 .sp-check {
@@ -5122,7 +5132,7 @@ body.dragging-account * {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.sp-row.unread .sp-subject {
+.sender-pane .sp-row.unread .sp-subject {
   font-weight: 600;
 }
 .sp-date {
@@ -5572,4 +5582,25 @@ body.dragging-account * {
   display: flex;
   gap: 10px;
   align-items: baseline;
+}
+
+/* an account's own picture in its marker (Settings › Accounts › Marker) */
+.acct-dot.has-logo,
+.rail-letter.has-logo {
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--sep);
+}
+.acct-dot.has-logo img,
+.rail-letter.has-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.st-mark-pic {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.st-mark-pic .acct-dot {
+  margin: 0;
 }

@@ -241,11 +241,12 @@ function SyncPopoverRow(props: { account: Account; status: SyncStatus | undefine
   return (
     <div class="sp-item">
       <div class="sf-row sp-row" classList={{ error: isAttention(phase()), warn: isWarning(phase()), active: active() }}>
-        <StatusGlyph phase={phase()} />
+        <AccountDot account={props.account} size={22} />
         <span class="sf-email" title={props.account.email}>
           {props.account.email}
         </span>
         <span class="sf-status sp-status">
+          <StatusGlyph phase={phase()} />
           <span class="sf-text">{props.status ? syncLabel(props.status) : 'Up to date'}</span>
           <Show when={phase() === 'auth'}>
             <button class="link-btn sf-fix" onClick={() => props.onFix()}>
