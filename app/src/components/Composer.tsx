@@ -2,6 +2,8 @@ import { createEffect, createSelector, createSignal, For, onCleanup, onMount, Sh
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
+import Image from '@tiptap/extension-image';
+import { pastedPictures, scalePicture } from '../lib/pictures';
 import type { Addr } from '../api';
 import { accounts } from '../state';
 import {
@@ -25,11 +27,13 @@ import { GMAIL_LIMIT } from '../lib/compose';
 import { MOD } from '../lib/shortcuts';
 import { DRAG } from '../lib/platform';
 import { confirmDialog } from './Actions';
-import { CloseIcon, ForwardIcon, PaperclipIcon, ReplyAllIcon, ReplyIcon, TrashIcon } from './Icons';
+import { CloseIcon, ForwardIcon, MailIcon, PaperclipIcon, ReplyAllIcon, ReplyIcon, TrashIcon } from './Icons';
 import { AutoHeightFrame } from './Conversation';
 import { buildSrcdoc } from './Reader';
 import { fmtSize } from '../lib/format';
 import { showToast } from './Toast';
+import { defaultSignature, loadSignatures, signatureById, sigs } from '../lib/signatures';
+import { AiPanel } from './AiPanel';
 
 /** The quoted original under the text: read-only, at the composer's margins. */
 const QUOTE_FRAME_CSS = 'html{overflow-y:hidden}body{padding:0 0 12px}';
@@ -291,6 +295,8 @@ function Toolbar(props: {
   linking: boolean;
   setLinking: (v: boolean) => void;
   onAttach: () => void;
+  ai: boolean;
+  onAi: () => void;
 }) {
   const linking = () => props.linking;
   const setLinking = props.setLinking;
@@ -392,6 +398,18 @@ function Toolbar(props: {
           ❝
         </B>
         <span class="fmt-fill" />
+        <button
+          class="fmt-btn fmt-ai"
+          tabIndex={-1}
+          classList={{ on: props.ai }}
+          title={`Writing help (${MOD}J)`}
+          aria-label="Writing help"
+          aria-pressed={props.ai}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => props.onAi()}
+        >
+          ✨ AI
+        </button>
         <button class="fmt-btn fmt-attach" tabIndex={-1} title="Attach files" aria-label="Attach files" onClick={() => props.onAttach()}>
           <PaperclipIcon size={15} />
         </button>
@@ -411,6 +429,7 @@ export function Composer() {
   const [tick, setTick] = createSignal(0);
   const [linking, setLinking] = createSignal(false);
   const [showQuote, setShowQuote] = createSignal(false);
+  const [aiOpen, setAiOpen] = createSignal(false);
   const [dropping, setDropping] = createSignal(false);
   onMount(() => onFileDrop(setDropping, addFiles));
   const c = () => compose() as ComposeState;
@@ -449,7 +468,33 @@ export function Composer() {
           link: { openOnClick: false, autolink: true, defaultProtocol: 'https' },
         }),
         Placeholder.configure({ placeholder: 'Write your message…' }),
+        // Pictures pasted in sit in the text (sized by dragging a corner); sent as inline parts.
+        Image.configure({
+          inline: true,
+          allowBase64: true,
+          resize: { enabled: true, directions: ['top-left', 'top-right', 'bottom-left', 'bottom-right'], alwaysPreserveAspectRatio: true, minWidth: 24, minHeight: 24 },
+        }),
       ],
+      editorProps: {
+        // A picture on the clipboard (a screenshot, an image copied from a page): into the
+        // message where the cursor is, not attached. Files dropped on the window still attach.
+        handlePaste: (_view, event) => {
+          const files = pastedPictures(event.clipboardData);
+          if (!files.length) return false;
+          void (async () => {
+            for (const f of files) {
+              try {
+                const p = await scalePicture(f, { max: 1600, budget: 900_000, showMax: 640 });
+                const ed = editor();
+                ed?.chain().focus().insertContentAt(ed.state.selection.to, { type: 'image', attrs: p }).run();
+              } catch {
+                showToast({ kind: 'error', text: 'Couldn’t read the picture.' });
+              }
+            }
+          })();
+          return true;
+        },
+      },
       content: c0.html,
       onUpdate: ({ editor: e }) => updateCompose({ html: e.isEmpty ? '' : e.getHTML() }),
       onTransaction: () => setTick((t) => t + 1),
@@ -504,12 +549,17 @@ export function Composer() {
     } else if (mod && !e.shiftKey && e.key.toLowerCase() === 'k' && editorEl.contains(document.activeElement)) {
       e.preventDefault();
       setLinking(true);
+    } else if (mod && !e.shiftKey && e.key.toLowerCase() === 'j') {
+      e.preventDefault();
+      setAiOpen(!aiOpen());
     } else if (mod && !e.shiftKey && e.key.toLowerCase() === 'w') {
       e.preventDefault();
       void close();
     } else if (
       e.key === 'Escape' &&
       !(e.target as Element).closest?.('.link-edit') &&
+      // writing help handles its own Esc (stop, then close the panel)
+      !(e.target as Element).closest?.('.ai-panel') &&
       // an address field's Esc that closed its suggestions
       !(e.defaultPrevented && (e.target as Element).closest?.('.addr-field')) &&
       !document.querySelector('.modal-backdrop')
@@ -527,6 +577,22 @@ export function Composer() {
 
   const accountList = () => accounts() ?? [];
   const from = () => accountList().find((a) => a.id === c().accountId);
+
+  // Signatures: the one picked shows under the text (it isn't part of the editor, so switching
+  // never touches what's written). Another account: its default, unless one was picked by hand.
+  onMount(() => void loadSignatures().catch(() => {}));
+  const pickSignature = (id: number | null) => {
+    const s = signatureById(id);
+    updateCompose({ signatureId: s?.id ?? null, signatureHtml: s?.html ?? null });
+  };
+  const changeAccount = (accountId: number) => {
+    const cur = c();
+    const reply = cur.mode !== 'new';
+    const was = defaultSignature(sigs(), cur.accountId, reply);
+    if ((cur.signatureId ?? null) !== (was?.id ?? null)) return updateCompose({ accountId });
+    const next = defaultSignature(sigs(), accountId, reply);
+    updateCompose({ accountId, signatureId: next?.id ?? null, signatureHtml: next?.html ?? null });
+  };
 
   // Reply ⇄ Reply all: the recipients each would fill in, to switch between them.
   const [replyCtx, setReplyCtx] = createSignal<{ reply: ReplyRecipients; replyAll: ReplyRecipients } | null>(null);
@@ -632,7 +698,7 @@ export function Composer() {
               class="cmp-select"
               aria-label="From"
               value={String(c().accountId)}
-              onChange={(e) => updateCompose({ accountId: Number(e.currentTarget.value) })}
+              onChange={(e) => changeAccount(Number(e.currentTarget.value))}
             >
               <For each={accountList()}>{(a) => <option value={String(a.id)}>{a.email}</option>}</For>
             </select>
@@ -672,7 +738,42 @@ export function Composer() {
           />
         </div>
       </div>
-      <Toolbar editor={editor} tick={tick} linking={linking()} setLinking={setLinking} onAttach={() => void pickFiles().then(addFiles)} />
+      <Toolbar
+        editor={editor}
+        tick={tick}
+        linking={linking()}
+        setLinking={setLinking}
+        onAttach={() => void pickFiles().then(addFiles)}
+        ai={aiOpen()}
+        onAi={() => setAiOpen(!aiOpen())}
+      />
+      <Show when={aiOpen()}>
+        <AiPanel
+          mode={c().mode}
+          context={() => {
+            const cur = c();
+            const a = from();
+            return {
+              me: a ? (a.displayName ? `${a.displayName} <${a.email}>` : a.email) : '',
+              subject: cur.subject,
+              to: [...cur.to, ...cur.cc].map((x) => (x.name ? `${x.name} <${x.addr}>` : x.addr)),
+              html: cur.html,
+              quoteHtml: cur.quoteHtml,
+            };
+          }}
+          onUse={(html) => {
+            const ed = editor();
+            if (!ed) return;
+            ed.commands.setContent(html, { emitUpdate: true });
+            updateCompose({ html: ed.isEmpty ? '' : ed.getHTML() });
+            ed.commands.focus('end');
+          }}
+          onClose={() => {
+            setAiOpen(false);
+            editor()?.commands.focus();
+          }}
+        />
+      </Show>
       <Show when={dropping()}>
         <div class="cmp-drop" aria-hidden="true">
           <span>Drop files to attach</span>
@@ -680,8 +781,52 @@ export function Composer() {
       </Show>
       <div class="cmp-scroll" onMouseDown={(e) => e.target === e.currentTarget && (e.preventDefault(), editor()?.commands.focus('end'))}>
         <div class="cmp-editor" classList={{ 'has-quote': !!c().quoteHtml || c().fwdAttachments.length > 0 }} ref={editorEl} />
-        <Show when={c().fwdAttachments.length + (c().files?.length ?? 0) > 0}>
+        <Show when={sigs().signatures.length > 0 || c().signatureHtml}>
+          <div class="cmp-sig" onMouseDown={(e) => e.stopPropagation()}>
+            <select
+              class="cmp-sig-select"
+              aria-label="Signature"
+              title="Signature"
+              onChange={(e) => pickSignature(e.currentTarget.value ? Number(e.currentTarget.value) : null)}
+            >
+              {/* The chosen one marked on its option: the options are remade when the signatures
+                  change in Settings, and the select's own value would fall back to the first. */}
+              <option value="" selected={c().signatureId == null}>
+                No signature
+              </option>
+              <For each={sigs().signatures}>
+                {(s) => (
+                  <option value={String(s.id)} selected={c().signatureId === s.id}>
+                    {s.name}
+                  </option>
+                )}
+              </For>
+            </select>
+            <Show when={c().signatureHtml}>
+              {/* Sanitized by the core when it was saved. */}
+              <div class="cmp-sig-body" innerHTML={c().signatureHtml!} />
+            </Show>
+          </div>
+        </Show>
+        <Show when={c().fwdAttachments.length + (c().files?.length ?? 0) + (c().fwdMessages?.length ?? 0) > 0}>
           <div class="cmp-atts" aria-label="Attachments">
+            <For each={c().fwdMessages ?? []}>
+              {(m) => (
+                <span class="cmp-att cmp-att-msg" title={`${m.subject || '(no subject)'} — sent as an attachment`}>
+                  <MailIcon size={12} />
+                  <span class="cmp-att-name">{m.subject || '(no subject)'}.eml</span>
+                  <span class="cmp-att-size">{fmtSize(m.size)}</span>
+                  <button
+                    class="addr-x"
+                    aria-label={`Don't send ${m.subject || 'this message'}`}
+                    title="Remove"
+                    onClick={() => updateCompose({ fwdMessages: (c().fwdMessages ?? []).filter((x) => x.id !== m.id) })}
+                  >
+                    <CloseIcon size={9} />
+                  </button>
+                </span>
+              )}
+            </For>
             <For each={c().files ?? []}>
               {(f) => (
                 <span class="cmp-att" title={f.path}>

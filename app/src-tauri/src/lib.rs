@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mail_core::model::*;
+use mail_core::sort::{ListFilter, ListGroup, ListSort};
 use mail_core::{Core, NewAccount, Secrets};
 use serde::Serialize;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
@@ -53,8 +54,30 @@ async fn open_folder(core: State<'_, Arc<Core>>, folder_id: i64) -> Res<()> {
 }
 
 #[tauri::command]
-async fn list_messages(core: State<'_, Arc<Core>>, folder_id: i64, offset: u32, limit: u32) -> Res<MessagePage> {
-    timed("list_messages", || core.list_messages(folder_id, offset, limit)).map_err(err)
+async fn list_messages(
+    core: State<'_, Arc<Core>>,
+    folder_id: i64,
+    offset: u32,
+    limit: u32,
+    sort: Option<ListSort>,
+    filter: Option<ListFilter>,
+) -> Res<MessagePage> {
+    let filter = filter.unwrap_or_default();
+    timed("list_messages", || core.list_messages_by(folder_id, sort.unwrap_or_default(), &filter, offset, limit)).map_err(err)
+}
+
+/// The groups the folder's list is shown in (see `Store::list_groups`).
+#[tauri::command]
+async fn list_groups(
+    core: State<'_, Arc<Core>>,
+    folder_id: i64,
+    threaded: bool,
+    sort: Option<ListSort>,
+    filter: Option<ListFilter>,
+    bounds: Vec<i64>,
+) -> Res<Vec<ListGroup>> {
+    let filter = filter.unwrap_or_default();
+    timed("list_groups", || core.list_groups(folder_id, threaded, sort.unwrap_or_default(), &filter, &bounds)).map_err(err)
 }
 
 /// `allow_remote` is enforced by the reader's iframe CSP; the core always returns the same
@@ -68,6 +91,43 @@ async fn get_message(core: State<'_, Arc<Core>>, id: i64, allow_remote: Option<b
 #[tauri::command]
 async fn set_read(core: State<'_, Arc<Core>>, id: i64, read: bool) -> Res<()> {
     core.set_read(id, read).map_err(err)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AccountLogo {
+    account_id: i64,
+    data_url: String,
+}
+
+/// The accounts' own marker pictures.
+#[tauri::command]
+async fn account_logos(core: State<'_, Arc<Core>>) -> Res<Vec<AccountLogo>> {
+    core.account_logos()
+        .map(|v| v.into_iter().map(|(account_id, data_url)| AccountLogo { account_id, data_url }).collect())
+        .map_err(err)
+}
+
+/// Set (data: URL) or take away (null) an account's marker picture.
+#[tauri::command]
+async fn set_account_logo(core: State<'_, Arc<Core>>, account_id: i64, data_url: Option<String>) -> Res<()> {
+    core.set_account_logo(account_id, data_url.as_deref()).map_err(err)
+}
+
+/// Always load images from this message's sender; returns the address.
+#[tauri::command]
+async fn allow_remote_sender(core: State<'_, Arc<Core>>, id: i64) -> Res<String> {
+    core.allow_remote_from_sender(id).map_err(err)
+}
+
+#[tauri::command]
+async fn remote_senders(core: State<'_, Arc<Core>>) -> Res<Vec<String>> {
+    core.remote_senders().map_err(err)
+}
+
+#[tauri::command]
+async fn set_remote_sender(core: State<'_, Arc<Core>>, addr: String, on: bool) -> Res<()> {
+    core.set_remote_sender(&addr, on).map_err(err)
 }
 
 #[tauri::command]
@@ -90,8 +150,10 @@ async fn list_threads(
     limit: u32,
     scope: Option<ConversationScope>,
     include_trash: Option<bool>,
+    filter: Option<ListFilter>,
 ) -> Res<ThreadPage> {
-    timed("list_threads", || core.list_threads(folder_id, thread_scope(scope, include_trash), offset, limit)).map_err(err)
+    let filter = filter.unwrap_or_default();
+    timed("list_threads", || core.list_threads(folder_id, thread_scope(scope, include_trash), &filter, offset, limit)).map_err(err)
 }
 
 #[tauri::command]
@@ -235,6 +297,49 @@ async fn disable_graph(core: State<'_, Arc<Core>>, account_id: i64) -> Res<()> {
     core.disable_graph(account_id).map_err(err)
 }
 
+/// A message's whole source as text.
+#[tauri::command]
+async fn message_source(core: State<'_, Arc<Core>>, id: i64) -> Res<String> {
+    core.message_source(id).await.map_err(err)
+}
+
+/// Google Contacts: the OAuth client and the linked accounts.
+#[tauri::command]
+async fn google_status(core: State<'_, Arc<Core>>) -> Res<mail_core::GoogleStatus> {
+    core.google_status().map_err(err)
+}
+
+/// The user's own Google OAuth client (null: forget it).
+#[tauri::command]
+async fn set_google_client(core: State<'_, Arc<Core>>, id: Option<String>, secret: Option<String>) -> Res<()> {
+    let client = id.map(|id| mail_core::oauth::GoogleClient { id, secret: secret.unwrap_or_default() });
+    core.set_google_client(client).map_err(err)
+}
+
+/// Connect an account to its Google contacts (browser sign-in), then sync them in.
+#[tauri::command]
+async fn google_connect(app: tauri::AppHandle, core: State<'_, Arc<Core>>, account_id: i64) -> Res<String> {
+    let core = core.inner().clone();
+    let email = core.google_connect(account_id, |url| open_sign_in(&app, &url)).await.map_err(err)?;
+    let _ = core.google_sync(account_id).await;
+    Ok(email)
+}
+
+#[tauri::command]
+async fn google_disconnect(core: State<'_, Arc<Core>>, account_id: i64) -> Res<()> {
+    core.google_disconnect(account_id).map_err(err)
+}
+
+/// Sync one account's Google contacts (null: all); whether anything changed here.
+#[tauri::command]
+async fn google_sync(core: State<'_, Arc<Core>>, account_id: Option<i64>) -> Res<bool> {
+    let core = core.inner().clone();
+    match account_id {
+        Some(id) => core.google_sync(id).await.map(|r| r.added + r.changed + r.removed > 0).map_err(err),
+        None => Ok(core.google_sync_all().await),
+    }
+}
+
 /// Stop waiting for a browser sign-in.
 #[tauri::command]
 fn cancel_sign_in(core: State<'_, Arc<Core>>) {
@@ -373,14 +478,71 @@ async fn apply_action(
     core.apply_action(action, &message_ids, folder_id).map_err(err)
 }
 
+/// The list's row ids from `offset` (⇧-click ranges, Select All).
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn list_item_ids(
+    core: State<'_, Arc<Core>>,
+    folder_id: i64,
+    threaded: bool,
+    sort: Option<ListSort>,
+    filter: Option<ListFilter>,
+    offset: u32,
+    limit: u32,
+) -> Res<Vec<i64>> {
+    let filter = filter.unwrap_or_default();
+    timed("list_item_ids", || core.list_item_ids(folder_id, threaded, sort.unwrap_or_default(), &filter, offset, limit)).map_err(err)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FolderCount {
+    folder_id: i64,
+    count: u32,
+}
+
+/// A sender's picture (data: URL) from their domain, kept or looked up now; null: none.
+#[tauri::command]
+async fn sender_icon(core: State<'_, Arc<Core>>, addr: String) -> Res<Option<String>> {
+    core.sender_icon(&addr).await.map_err(err)
+}
+
+/// Where these messages' senders' mail is kept, most first (the Move list's order).
+#[tauri::command]
+async fn sender_folders(core: State<'_, Arc<Core>>, message_ids: Vec<i64>) -> Res<Vec<FolderCount>> {
+    timed("sender_folders", || core.sender_folders(&message_ids))
+        .map(|v| v.into_iter().map(|(folder_id, count)| FolderCount { folder_id, count }).collect())
+        .map_err(err)
+}
+
+/// The messages behind several picked rows, with their state.
+#[tauri::command]
+async fn selection_info(core: State<'_, Arc<Core>>, folder_id: i64, items: Vec<i64>, threaded: bool) -> Res<SelectionInfo> {
+    timed("selection_info", || core.selection_info(folder_id, &items, threaded)).map_err(err)
+}
+
+/// Mark every message in the folder read; returns how many were unread.
+#[tauri::command]
+async fn mark_folder_read(core: State<'_, Arc<Core>>, folder_id: i64) -> Res<usize> {
+    core.mark_folder_read(folder_id).map_err(err)
+}
+
 #[tauri::command]
 async fn undo_action(core: State<'_, Arc<Core>>, op_id: i64) -> Res<()> {
     core.undo_action(op_id).map_err(err)
 }
 
 #[tauri::command]
-async fn index_of(core: State<'_, Arc<Core>>, folder_id: i64, id: i64, threaded: bool) -> Res<Option<u32>> {
-    timed("index_of", || core.index_of(folder_id, id, threaded)).map_err(err)
+async fn index_of(
+    core: State<'_, Arc<Core>>,
+    folder_id: i64,
+    id: i64,
+    threaded: bool,
+    sort: Option<ListSort>,
+    filter: Option<ListFilter>,
+) -> Res<Option<u32>> {
+    let filter = filter.unwrap_or_default();
+    timed("index_of", || core.index_of(folder_id, id, threaded, sort.unwrap_or_default(), &filter)).map_err(err)
 }
 
 #[derive(Serialize)]
@@ -391,8 +553,16 @@ struct Located {
 }
 
 #[tauri::command]
-async fn locate_message(core: State<'_, Arc<Core>>, folder_id: i64, message_id: i64, threaded: bool) -> Res<Option<Located>> {
-    timed("locate_message", || core.locate_message(folder_id, message_id, threaded))
+async fn locate_message(
+    core: State<'_, Arc<Core>>,
+    folder_id: i64,
+    message_id: i64,
+    threaded: bool,
+    sort: Option<ListSort>,
+    filter: Option<ListFilter>,
+) -> Res<Option<Located>> {
+    let filter = filter.unwrap_or_default();
+    timed("locate_message", || core.locate_message(folder_id, message_id, threaded, sort.unwrap_or_default(), &filter))
         .map(|l| l.map(|(id, index)| Located { id, index }))
         .map_err(err)
 }
@@ -404,8 +574,10 @@ async fn next_unread(
     after: Option<i64>,
     threaded: bool,
     back: bool,
+    sort: Option<ListSort>,
+    filter: Option<ListFilter>,
 ) -> Res<Option<NextUnread>> {
-    core.next_unread(folder_id, after, threaded, back).map_err(err)
+    core.next_unread(folder_id, after, threaded, back, sort.unwrap_or_default(), &filter.unwrap_or_default()).map_err(err)
 }
 
 #[tauri::command]
@@ -422,6 +594,130 @@ async fn set_tag(core: State<'_, Arc<Core>>, keyword: Option<String>, name: Stri
 #[tauri::command]
 async fn delete_tag(core: State<'_, Arc<Core>>, keyword: String) -> Res<()> {
     core.delete_tag(&keyword).map_err(err)
+}
+
+/// Everything from a sender, newest first (the sender pane): the sender of `message_id`, or
+/// `addr` in `account_id`.
+#[tauri::command]
+async fn sender_messages(
+    core: State<'_, Arc<Core>>,
+    message_id: Option<i64>,
+    account_id: Option<i64>,
+    addr: Option<String>,
+    offset: u32,
+    limit: u32,
+) -> Res<Option<SenderPage>> {
+    timed("sender_messages", || match (message_id, account_id, addr) {
+        (Some(id), _, _) => core.sender_messages(id, offset, limit),
+        (None, Some(a), Some(addr)) => core.messages_from(a, &addr, offset, limit).map(Some),
+        _ => Ok(None),
+    })
+    .map_err(err)
+}
+
+// ---- writing help (Claude, with the user's own API key; see mail_core::ai)
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AiStatus {
+    configured: bool,
+    models: Vec<&'static str>,
+    default_model: &'static str,
+}
+
+#[tauri::command]
+async fn ai_status(core: State<'_, Arc<Core>>) -> Res<AiStatus> {
+    Ok(AiStatus { configured: core.ai_configured(), models: mail_core::ai::MODELS.to_vec(), default_model: mail_core::ai::DEFAULT_MODEL })
+}
+
+/// Keep the API key in the keychain (empty or null: forget it).
+#[tauri::command]
+async fn ai_set_key(core: State<'_, Arc<Core>>, key: Option<String>) -> Res<()> {
+    core.set_ai_key(key.as_deref()).map_err(err)
+}
+
+/// Writing tasks under way, by the id their window gave them: how to stop each.
+#[derive(Default)]
+struct AiRuns(std::sync::Mutex<std::collections::HashMap<u64, tokio::sync::watch::Sender<bool>>>);
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AiText<'a> {
+    request_id: u64,
+    text: &'a str,
+}
+
+/// Run a writing task: its text comes as `ai-text` events ({requestId, text}) as it's written;
+/// the answer is how it ended.
+#[tauri::command]
+async fn ai_run(
+    app: tauri::AppHandle,
+    core: State<'_, Arc<Core>>,
+    runs: State<'_, AiRuns>,
+    request_id: u64,
+    model: String,
+    task: mail_core::ai::Task,
+    request: mail_core::ai::Request,
+) -> Res<mail_core::ai::Outcome> {
+    let (tx, rx) = tokio::sync::watch::channel(false);
+    runs.0.lock().unwrap().insert(request_id, tx);
+    let result = core
+        .ai_run(&model, &task, &request, rx, |text| {
+            let _ = app.emit("ai-text", AiText { request_id, text });
+        })
+        .await;
+    runs.0.lock().unwrap().remove(&request_id);
+    result.map_err(err)
+}
+
+#[tauri::command]
+async fn ai_cancel(runs: State<'_, AiRuns>, request_id: u64) -> Res<()> {
+    if let Some(tx) = runs.0.lock().unwrap().remove(&request_id) {
+        let _ = tx.send(true);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn list_cards(core: State<'_, Arc<Core>>) -> Res<Vec<mail_core::addressbook::Card>> {
+    core.cards().map_err(err)
+}
+
+/// Save a contact (new when its id is 0); returns its id.
+#[tauri::command]
+async fn save_card(core: State<'_, Arc<Core>>, card: mail_core::addressbook::Card) -> Res<i64> {
+    core.save_card(card).map_err(err)
+}
+
+#[tauri::command]
+async fn delete_card(core: State<'_, Arc<Core>>, id: i64) -> Res<()> {
+    core.delete_card(id).map_err(err)
+}
+
+#[tauri::command]
+async fn list_signatures(core: State<'_, Arc<Core>>) -> Res<mail_core::signatures::Signatures> {
+    core.signatures().map_err(err)
+}
+
+/// Create (id omitted) or change a signature; returns its id.
+#[tauri::command]
+async fn save_signature(core: State<'_, Arc<Core>>, id: Option<i64>, name: String, html: String) -> Res<i64> {
+    core.save_signature(id, &name, &html).map_err(err)
+}
+
+#[tauri::command]
+async fn delete_signature(core: State<'_, Arc<Core>>, id: i64) -> Res<()> {
+    core.delete_signature(id).map_err(err)
+}
+
+#[tauri::command]
+async fn set_signature_defaults(
+    core: State<'_, Arc<Core>>,
+    account_id: i64,
+    new_id: Option<i64>,
+    reply_id: Option<i64>,
+) -> Res<()> {
+    core.set_signature_defaults(account_id, new_id, reply_id).map_err(err)
 }
 
 /// "0.1.44 (8ff8ea1)": the same for a commit on every machine (see build.rs).
@@ -709,7 +1005,11 @@ fn macos_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
         app,
         "File",
         true,
-        &[&MenuItem::with_id(app, "new-message", "New Message", true, None::<&str>)?],
+        &[
+            &MenuItem::with_id(app, "new-message", "New Message", true, None::<&str>)?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "address-book", "Address Book", true, Some("CmdOrCtrl+Shift+B"))?,
+        ],
     )?;
     let edit = Submenu::with_items(
         app,
@@ -733,6 +1033,14 @@ fn macos_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
             &MenuItem::with_id(app, "search", "Search", true, None::<&str>)?,
             &MenuItem::with_id(app, "toggle-threaded", "Group by Conversation", true, Some("CmdOrCtrl+T"))?,
             &MenuItem::with_id(app, "toggle-scope", "Show All Mail in Conversations", true, Some("CmdOrCtrl+Shift+A"))?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "sort-received", "Sort by Received", true, None::<&str>)?,
+            &MenuItem::with_id(app, "sort-from", "Sort by From", true, None::<&str>)?,
+            &MenuItem::with_id(app, "sort-to", "Sort by To", true, None::<&str>)?,
+            &MenuItem::with_id(app, "sort-size", "Sort by Size", true, None::<&str>)?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "sender-panel", "Sender Panel", true, Some("CmdOrCtrl+2"))?,
+            &MenuItem::with_id(app, "show-source", "Show Source", true, Some("CmdOrCtrl+Alt+U"))?,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::fullscreen(app, None)?,
         ],
@@ -830,6 +1138,7 @@ struct MailtoLinks(std::sync::Mutex<Vec<String>>);
 fn mailto_links(app: &tauri::App) {
     use tauri_plugin_deep_link::DeepLinkExt;
     app.manage(MailtoLinks::default());
+    app.manage(AiRuns::default());
     let handle = app.handle().clone();
     app.deep_link().on_open_url(move |event| {
         let urls: Vec<String> = event.urls().iter().map(|u| u.to_string()).collect();
@@ -1029,7 +1338,7 @@ pub fn run() {
                 let _ = std::fs::remove_dir_all(dir);
             }
             let dir = app.path().app_data_dir()?;
-            let core = match Core::open(&dir, Secrets::Keyring) {
+            let core = match Core::open(&dir, Secrets::keyring()) {
                 Ok(core) => Arc::new(core),
                 Err(e) => {
                     cannot_open(app.handle(), &e);
@@ -1068,11 +1377,40 @@ pub fn run() {
             list_folders,
             open_folder,
             list_messages,
+            list_groups,
+            list_signatures,
+            sender_messages,
+            list_cards,
+            save_card,
+            delete_card,
+            ai_status,
+            ai_set_key,
+            ai_run,
+            ai_cancel,
+            save_signature,
+            delete_signature,
+            set_signature_defaults,
             get_message,
             get_sync_status,
             set_read,
             set_allow_remote,
             list_threads,
+            mark_folder_read,
+            list_item_ids,
+            selection_info,
+            sender_folders,
+            sender_icon,
+            allow_remote_sender,
+            account_logos,
+            google_status,
+            message_source,
+            set_google_client,
+            google_connect,
+            google_disconnect,
+            google_sync,
+            set_account_logo,
+            remote_senders,
+            set_remote_sender,
             get_thread,
             update_password,
             set_keep_attachments,

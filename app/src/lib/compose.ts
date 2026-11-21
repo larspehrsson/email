@@ -4,6 +4,7 @@ import { api, errorMessage, events, type Addr, type Attachment, type FileInfo, t
 import { hideToast, showToast } from '../components/Toast';
 import { broadcast, closeThisWindow, composeDraftId, isComposeWindow, onBroadcast, openComposeWindow } from './windows';
 import { parseMailto } from './mailto';
+import { defaultSignature, loadSignatures, withSignature } from './signatures';
 
 // Writing mail happens in compose windows, one per draft (see lib/windows.ts). The main window
 // starts them (new message, reply, forward) and shows "Sending… Undo" once one sends; the core
@@ -32,8 +33,13 @@ export interface ComposeState {
   fwdAttachments: Attachment[];
   /** files attached from disk */
   files?: FileInfo[];
+  /** whole messages sent along as .eml attachments (Forward of several) */
+  fwdMessages?: { id: number; subject: string; size: number }[];
   /** the user has changed something (only then is it a draft worth keeping or listing) */
   edited?: boolean;
+  /** the signature under the text (null: none), and its HTML as it was put in */
+  signatureId?: number | null;
+  signatureHtml?: string | null;
 }
 
 let keySeq = 0;
@@ -46,12 +52,13 @@ function request(c: ComposeState, draftId: number | null): SendRequest {
     cc: c.cc,
     bcc: c.bcc,
     subject: c.subject,
-    // Top-posting: the new text, then the original.
-    html: c.html + (c.quoteHtml ?? ''),
+    // Top-posting: the new text and the signature, then the original.
+    html: withSignature(c.html, c.signatureHtml) + (c.quoteHtml ?? ''),
     attachments: (c.files ?? []).map((f) => f.path),
     replyingTo: c.replyingTo,
     forwarding: c.forwarding,
     forwardAttachments: c.fwdAttachments.map((a) => a.index),
+    forwardMessages: (c.fwdMessages ?? []).map((m) => m.id),
     draft: c,
     draftId,
     listed: !!c.edited,
@@ -62,7 +69,8 @@ function request(c: ComposeState, draftId: number | null): SendRequest {
 export function hasContent(c: ComposeState): boolean {
   if (!c.edited) return false;
   const text = c.html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
-  return text.length > 0 || c.subject.trim().length > 0 || c.to.length + c.cc.length + c.bcc.length > 0;
+  // A picture pasted in is something written too.
+  return text.length > 0 || /<img\b/i.test(c.html) || c.subject.trim().length > 0 || c.to.length + c.cc.length + c.bcc.length > 0;
 }
 
 // ------------------------------------------------------------- main window: starting one
@@ -73,9 +81,14 @@ function defaultAccount(): number | null {
   return f?.accountId ?? accounts()?.[0]?.id ?? null;
 }
 
-/** Save `state` as a new draft and open it in its own window. */
+/** Save `state` as a new draft and open it in its own window. A new message, reply or forward
+ *  gets the account's default signature for it (one reopened keeps what it had). */
 async function openDraftWindow(state: Omit<ComposeState, 'key'>): Promise<void> {
   try {
+    if (state.signatureId === undefined) {
+      const sig = defaultSignature(await loadSignatures().catch(() => ({ signatures: [], defaults: [] })), state.accountId, state.mode !== 'new');
+      state = { ...state, signatureId: sig?.id ?? null, signatureHtml: sig?.html ?? null };
+    }
     const id = await api.saveDraft(null, request({ ...state, key: 0 }, null));
     await openComposeWindow(id);
   } catch (e) {
@@ -99,6 +112,48 @@ export function newMessage(): void {
     forwarding: null,
     quoteHtml: null,
     fwdAttachments: [],
+  });
+}
+
+/** A new message to these people (the address book's "Write"). */
+export function newMessageTo(to: Addr[]): void {
+  const accountId = defaultAccount();
+  if (accountId == null) return;
+  void openDraftWindow({
+    mode: 'new',
+    accountId,
+    to,
+    cc: [],
+    bcc: [],
+    showCc: false,
+    subject: '',
+    html: '',
+    replyingTo: null,
+    forwarding: null,
+    quoteHtml: null,
+    fwdAttachments: [],
+  });
+}
+
+/** Forward several messages at once: a new message with each attached whole (.eml), from the
+ *  account they're in. */
+export function forwardAsAttachments(accountId: number, messages: { id: number; subject: string; size: number }[]): void {
+  if (!messages.length) return;
+  const one = messages.length === 1 ? messages[0]!.subject.trim() : '';
+  void openDraftWindow({
+    mode: 'new',
+    accountId,
+    to: [],
+    cc: [],
+    bcc: [],
+    showCc: false,
+    subject: one ? `Fwd: ${one.replace(/^(fwd?|fw):\s*/i, '')}` : `Fwd: ${messages.length} messages`,
+    html: '',
+    replyingTo: null,
+    forwarding: null,
+    quoteHtml: null,
+    fwdAttachments: [],
+    fwdMessages: messages,
   });
 }
 
@@ -230,7 +285,11 @@ export const GMAIL_LIMIT = 25 * 1024 * 1024;
 
 /** Total size of everything attached (files and a forward's originals), bytes. */
 export function attachedBytes(c: ComposeState): number {
-  return (c.files ?? []).reduce((n, f) => n + f.size, 0) + c.fwdAttachments.reduce((n, a) => n + a.size, 0);
+  return (
+    (c.files ?? []).reduce((n, f) => n + f.size, 0) +
+    c.fwdAttachments.reduce((n, a) => n + a.size, 0) +
+    (c.fwdMessages ?? []).reduce((n, m) => n + m.size, 0)
+  );
 }
 
 export function updateCompose(patch: Partial<ComposeState>): void {

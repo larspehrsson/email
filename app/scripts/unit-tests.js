@@ -156,3 +156,69 @@ test('an image keeps the shape it is declared at', () => {
   assert.equal(declaredSize('300', null, null), null);
   assert.equal(declaredSize('0', '10', null), null);
 });
+
+// ------------------------------------------------------------- list groups
+
+import { datePeriods, insertRow, labelDateCounts, layoutGroups, removeRows, startsGroup, startsThrough } from '../src/lib/listGroups.ts';
+
+test('date periods: today, yesterday, this week by name, weeks, months, years', () => {
+  // Saturday 21 November 2026, weeks starting on Monday.
+  const p = datePeriods(new Date(2026, 10, 21, 15, 30), 1, 'en-US');
+  assert.deepEqual(
+    p.slice(0, 12).map((x) => x.label),
+    ['Today', 'Yesterday', 'Thursday', 'Wednesday', 'Tuesday', 'Monday', 'Last week', 'Two weeks ago', 'Three weeks ago', 'October', 'September', 'August'],
+  );
+  assert.equal(p[0].from, new Date(2026, 10, 21).getTime() / 1000);
+  assert.equal(p[6].from, new Date(2026, 10, 9).getTime() / 1000, 'last week starts the Monday before');
+  assert.equal(p[9].from, new Date(2026, 9, 1).getTime() / 1000, 'October: the rest of it');
+  assert.ok(p.some((x) => x.label === 'January') && p.some((x) => x.label === '2025'));
+  for (let i = 1; i < p.length; i++) assert.ok(p[i].from < p[i - 1].from, 'strictly older');
+});
+
+test('date periods early in a week and a year', () => {
+  // Monday 4 January 2027: no weekday names; the weeks reach into 2026, then years.
+  const p = datePeriods(new Date(2027, 0, 4, 9), 1, 'en-US');
+  assert.deepEqual(p.slice(0, 6).map((x) => x.label), ['Today', 'Yesterday', 'Last week', 'Two weeks ago', 'Three weeks ago', '2026']);
+  // Sunday-first weeks: on a Sunday nothing but Today/Yesterday before the weeks.
+  const s = datePeriods(new Date(2026, 10, 22, 9), 0, 'en-US');
+  assert.deepEqual(s.slice(0, 3).map((x) => x.label), ['Today', 'Yesterday', 'Last week']);
+});
+
+test('groups: where they start, and keeping them right through removes and undo', () => {
+  const g = layoutGroups(labelDateCounts([{ label: 'Today', from: 0 }, { label: 'Yesterday', from: 0 }], [2, 0, 3]));
+  assert.deepEqual(g, [
+    { label: 'Today', count: 2, start: 0 },
+    { label: 'Older', count: 3, start: 2 },
+  ]);
+  assert.equal(startsThrough(g, 0), 1);
+  assert.equal(startsThrough(g, 4), 2);
+  assert.equal(startsGroup(g, 2)?.label, 'Older');
+  assert.equal(startsGroup(g, 3), undefined);
+  const less = removeRows(g, [0, 1]);
+  assert.deepEqual(less, [{ label: 'Older', count: 3, start: 0 }]);
+  const back = insertRow(removeRows(g, [1]), 1, 'today');
+  assert.deepEqual(back, g, 'put back into the group it is named after');
+  assert.deepEqual(insertRow(g, 2), [{ label: 'Today', count: 2, start: 0 }, { label: 'Older', count: 4, start: 2 }]);
+});
+
+// ------------------------------------------------------------- writing help text
+
+import { clipOriginal, htmlToText, textToHtml } from '../src/lib/aiText.ts';
+
+test('the model’s plain text becomes paragraphs, line breaks and lists', () => {
+  assert.equal(textToHtml('Hi Anna,\n\nThursday works.\nSee you <then>.\n\n- one\n- two'), '<p>Hi Anna,</p><p>Thursday works.<br>See you &lt;then&gt;.</p><ul><li><p>one</p></li><li><p>two</p></li></ul>');
+  assert.equal(textToHtml('  \n'), '<p></p>');
+});
+
+test('a very long original keeps its newest part', () => {
+  const long = 'x'.repeat(70_000);
+  const c = clipOriginal(long);
+  assert.ok(c.length < 61_000 && c.endsWith('left out]'));
+  assert.equal(clipOriginal('short'), 'short');
+});
+
+test('an email’s text for the prompt leaves out its CSS and scripts', () => {
+  const parse = (h) => ({ body: { textContent: h.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&') } });
+  const html = '<html><head><title>T</title><style>.a{color:red}</style></head><body><p>Hi&amp;bye</p><STYLE type="text/css">p{x:y}</STYLE><ul><li>one</li></ul><script>x()</script>Done</body></html>';
+  assert.equal(htmlToText(html, parse), 'Hi&bye\n- one\nDone');
+});

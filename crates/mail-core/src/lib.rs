@@ -2,6 +2,10 @@
 
 pub mod imap;
 pub mod actions;
+pub mod addressbook;
+pub mod ai;
+pub mod gcontacts;
+pub mod icons;
 pub mod compose;
 pub mod contacts;
 pub mod graph;
@@ -10,7 +14,9 @@ pub mod oauth;
 pub mod model;
 pub mod partial;
 pub mod search;
+pub mod signatures;
 pub mod smtp;
+pub mod sort;
 pub mod store;
 pub mod sync;
 pub mod tags;
@@ -28,13 +34,43 @@ use crate::store::Store;
 use crate::sync::{AccountSync, HeaderSync, SyncOptions};
 
 const KEYRING_SERVICE: &str = "dev.mail-client.imap";
+/// The one keychain item holding every secret (a JSON object, name → secret). macOS asks
+/// whether the app may read an item once per item for each new build of the app; one item, one
+/// question.
+const VAULT_SERVICE: &str = "dev.mail-client";
+const VAULT_NAME: &str = "secrets";
 
 /// Where account secrets live.
 pub enum Secrets {
-    /// OS keychain (macOS Keychain, Secret Service on Linux).
-    Keyring,
+    /// OS keychain (macOS Keychain, Secret Service on Linux): one item for all of them, read
+    /// once and kept in memory. Secrets saved by earlier versions (an item each, under
+    /// `KEYRING_SERVICE`) move into it as they're first read; those items stay, for older builds.
+    Keyring(Mutex<Option<HashMap<String, String>>>),
     /// In-memory only; for tests and benchmarks.
     Memory(Mutex<HashMap<String, String>>),
+}
+
+fn vault_entry() -> Result<keyring::Entry> {
+    Ok(keyring::Entry::new(VAULT_SERVICE, VAULT_NAME)?)
+}
+
+/// The vault's secrets: read from the keychain the first time.
+fn vault_loaded(cache: &mut Option<HashMap<String, String>>) -> Result<&mut HashMap<String, String>> {
+    if cache.is_none() {
+        let map = match vault_entry()?.get_password() {
+            Ok(json) => serde_json::from_str(&json).context("reading the app's keychain item")?,
+            Err(keyring::Error::NoEntry) => HashMap::new(),
+            Err(e) => return Err(anyhow::Error::new(e).context("reading the app's secrets from the system keychain")),
+        };
+        *cache = Some(map);
+    }
+    Ok(cache.as_mut().unwrap())
+}
+
+fn vault_save(map: &HashMap<String, String>) -> Result<()> {
+    vault_entry()?
+        .set_password(&serde_json::to_string(map)?)
+        .context("saving to the system keychain")
 }
 
 impl Secrets {
@@ -42,11 +78,18 @@ impl Secrets {
         Secrets::Memory(Mutex::new(HashMap::new()))
     }
 
+    pub fn keyring() -> Secrets {
+        Secrets::Keyring(Mutex::new(None))
+    }
+
     fn set(&self, email: &str, password: &str) -> Result<()> {
         match self {
-            Secrets::Keyring => keyring::Entry::new(KEYRING_SERVICE, email)?
-                .set_password(password)
-                .context("saving password to the system keychain"),
+            Secrets::Keyring(cache) => {
+                let mut cache = cache.lock().unwrap();
+                let map = vault_loaded(&mut cache)?;
+                map.insert(email.into(), password.into());
+                vault_save(map)
+            }
             Secrets::Memory(m) => {
                 m.lock().unwrap().insert(email.into(), password.into());
                 Ok(())
@@ -56,9 +99,22 @@ impl Secrets {
 
     fn get(&self, email: &str) -> Result<String> {
         match self {
-            Secrets::Keyring => keyring::Entry::new(KEYRING_SERVICE, email)?
-                .get_password()
-                .context("reading password from the system keychain"),
+            Secrets::Keyring(cache) => {
+                let mut cache = cache.lock().unwrap();
+                let map = vault_loaded(&mut cache)?;
+                if let Some(s) = map.get(email) {
+                    return Ok(s.clone());
+                }
+                // Saved by an earlier version: move it in.
+                let old = keyring::Entry::new(KEYRING_SERVICE, email)?
+                    .get_password()
+                    .context("reading password from the system keychain")?;
+                map.insert(email.into(), old.clone());
+                if let Err(e) = vault_save(map) {
+                    tracing::warn!("couldn't move a secret into the app's keychain item: {e:#}");
+                }
+                Ok(old)
+            }
             Secrets::Memory(m) => m
                 .lock()
                 .unwrap()
@@ -70,7 +126,13 @@ impl Secrets {
 
     fn delete(&self, email: &str) {
         match self {
-            Secrets::Keyring => {
+            Secrets::Keyring(cache) => {
+                let mut cache = cache.lock().unwrap();
+                if let Ok(map) = vault_loaded(&mut cache)
+                    && map.remove(email).is_some()
+                {
+                    let _ = vault_save(map);
+                }
                 if let Ok(e) = keyring::Entry::new(KEYRING_SERVICE, email) {
                     let _ = e.delete_credential();
                 }
@@ -93,7 +155,31 @@ pub struct NewAccount {
 /// The undo-send window: queued mail waits this long before it goes out.
 pub const SEND_DELAY_MS: i64 = 10_000;
 
+/// Keychain names: the user's Google OAuth client, and each account's Google sign-in.
+const GOOGLE_CLIENT_KEY: &str = "#google:client";
+fn google_key(account_id: i64) -> String {
+    format!("#google-contacts:{account_id}")
+}
+
+/// Google Contacts as Settings shows it.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoogleStatus {
+    /// The OAuth client's ID (None: not set yet).
+    pub client_id: Option<String>,
+    pub links: Vec<gcontacts::GoogleLink>,
+}
+
+/// A picture found is looked up again after this long; a domain without one, sooner.
+const ICON_KEEP_SECS: i64 = 30 * 24 * 3600;
+const ICON_MISS_SECS: i64 = 7 * 24 * 3600;
+
 pub struct Core {
+    /// One Google Contacts sync per account at a time.
+    google_locks: Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>,
+    /// Sender pictures being looked up (one lookup per domain), and at most a few at a time.
+    icon_lookups: Mutex<HashMap<String, Arc<tokio::sync::OnceCell<Option<String>>>>>,
+    icon_slots: tokio::sync::Semaphore,
     pub store: Arc<Store>,
     events: broadcast::Sender<CoreEvent>,
     secrets: Arc<Secrets>,
@@ -146,6 +232,9 @@ impl Core {
         // Actions interrupted mid-send (quit, crash) are sent again.
         store.reset_started_ops()?;
         Ok(Core {
+            google_locks: Mutex::new(HashMap::new()),
+            icon_lookups: Mutex::new(HashMap::new()),
+            icon_slots: tokio::sync::Semaphore::new(4),
             store: Arc::new(store),
             events,
             secrets: Arc::new(secrets),
@@ -502,6 +591,9 @@ impl Core {
             self.secrets.delete(&oauth::graph_key(&a.email));
         }
         self.needs_password.lock().unwrap().remove(&account_id);
+        // Its Google contacts here go with it (nothing changes in Google).
+        self.store.remove_google_link(account_id)?;
+        self.secrets.delete(&google_key(account_id));
         self.store.delete_account(account_id)?;
         tracing::info!(account_id, "account removed");
         let store = self.store.clone();
@@ -535,6 +627,16 @@ impl Core {
         self.store.list_messages(folder_id, offset, limit)
     }
 
+    /// A page of the folder's messages in `sort`'s order.
+    pub fn list_messages_by(&self, folder_id: i64, sort: sort::ListSort, filter: &sort::ListFilter, offset: u32, limit: u32) -> Result<MessagePage> {
+        self.store.list_messages_by(folder_id, sort, filter, offset, limit)
+    }
+
+    /// The groups of a folder's list (see `Store::list_groups`).
+    pub fn list_groups(&self, folder_id: i64, threaded: bool, sort: sort::ListSort, filter: &sort::ListFilter, bounds: &[i64]) -> Result<Vec<sort::ListGroup>> {
+        self.store.list_groups(folder_id, threaded, sort, filter, bounds)
+    }
+
     /// An attachment's (name, mime, bytes): from the stored message, the attachment cache, or
     /// (for attachments omitted from the body download) fetched from the server and cached.
     pub async fn attachment(&self, message_id: i64, index: usize) -> Result<(String, String, Vec<u8>)> {
@@ -560,6 +662,7 @@ impl Core {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let req = sync::PartRequest {
             message_id,
+            whole: false,
             ordinal,
             section: part.section.clone(),
             encoding: part.encoding.clone(),
@@ -572,6 +675,33 @@ impl Core {
         let data = rx.await.map_err(|_| anyhow!("download was cancelled"))??;
         self.store.cache_attachment(message_id, index, &data)?;
         Ok((part.name.clone(), part.mime.clone(), data))
+    }
+
+    /// The whole message as sent (RFC 822 bytes) and its subject: the stored copy when it's
+    /// complete, else downloaded (bodies kept without their attachments). For forwarding as an
+    /// attachment.
+    pub async fn whole_message(&self, message_id: i64) -> Result<(Vec<u8>, String)> {
+        let subject = self.store.message_subject(message_id)?.unwrap_or_default();
+        let complete = self.store.omitted(message_id)?.is_none_or(|j| j.trim().is_empty() || j.trim() == "[]");
+        if complete && let Some(raw) = self.store.body(message_id)? {
+            return Ok((raw, subject));
+        }
+        let account_id = self.store.message_account(message_id)?.ok_or_else(|| anyhow!("no such message"))?;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let req = sync::PartRequest { message_id, whole: true, ordinal: 0, section: None, encoding: None, reply: tx };
+        match self.running.lock().unwrap().get(&account_id) {
+            Some(s) => s.fetch_part(req),
+            None => return Err(anyhow!("This account isn't connected.")),
+        }
+        let raw = rx.await.map_err(|_| anyhow!("download was cancelled"))??;
+        Ok((raw, subject))
+    }
+
+    /// A message's source as text (the whole message as sent; downloaded if it's kept here
+    /// without its attachments).
+    pub async fn message_source(&self, message_id: i64) -> Result<String> {
+        let (raw, _) = self.whole_message(message_id).await?;
+        Ok(String::from_utf8_lossy(&raw).into_owned())
     }
 
     /// Number of attachments (stored + omitted) and the message subject, for "save all".
@@ -603,6 +733,84 @@ impl Core {
         Ok(result)
     }
 
+    /// The picture for a sender's address (a data: URL), from what's kept or looked up now
+    /// (see `icons`). None: no picture (a shared mail service, or the domain has none).
+    pub async fn sender_icon(&self, addr: &str) -> Result<Option<String>> {
+        let Some(domain) = icons::icon_domain(addr) else { return Ok(None) };
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
+        if let Some((icon, fetched)) = self.store.sender_icon(&domain)? {
+            let fresh = now - fetched < if icon.is_some() { ICON_KEEP_SECS } else { ICON_MISS_SECS };
+            if fresh {
+                return Ok(icon.map(|i| i.data_url()));
+            }
+        }
+        let cell = self.icon_lookups.lock().unwrap().entry(domain.clone()).or_default().clone();
+        let url = cell
+            .get_or_init(|| async {
+                let _slot = self.icon_slots.acquire().await.ok();
+                let found = match tokio::time::timeout(std::time::Duration::from_secs(25), icons::fetch(&domain)).await {
+                    Ok(Ok(found)) => found,
+                    Ok(Err(e)) => {
+                        tracing::debug!(domain, "sender picture: {e:#}");
+                        None
+                    }
+                    Err(_) => None,
+                };
+                if let Err(e) = self.store.save_sender_icon(&domain, found.as_ref(), now) {
+                    tracing::warn!("keeping a sender picture: {e:#}");
+                }
+                found.map(|i| i.data_url())
+            })
+            .await
+            .clone();
+        self.icon_lookups.lock().unwrap().remove(&domain);
+        Ok(url)
+    }
+
+    /// Where these messages' senders' mail is kept: (folder, count), most first.
+    pub fn sender_folders(&self, message_ids: &[i64]) -> Result<Vec<(i64, u32)>> {
+        self.store.sender_folder_counts(message_ids)
+    }
+
+    /// The list's row ids from `offset` (see `Store::list_item_ids`).
+    pub fn list_item_ids(
+        &self,
+        folder_id: i64,
+        threaded: bool,
+        sort: sort::ListSort,
+        filter: &sort::ListFilter,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<i64>> {
+        self.store.list_item_ids(folder_id, threaded, sort, filter, offset, limit)
+    }
+
+    /// The messages behind several picked rows, and their state for the action bar.
+    pub fn selection_info(&self, folder_id: i64, items: &[i64], threaded: bool) -> Result<SelectionInfo> {
+        let rows = self.store.selection_messages(folder_id, items, threaded)?;
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
+        Ok(SelectionInfo {
+            any_unread: rows.iter().any(|r| r.1 & flags::SEEN == 0),
+            all_flagged: !rows.is_empty() && rows.iter().all(|r| r.1 & flags::FLAGGED != 0),
+            tag_sets: rows.iter().map(|r| tags::visible(&r.2)).collect(),
+            snoozed_until: rows.iter().filter_map(|r| tags::snoozed_until(&r.2)).filter(|&t| t > now).max(),
+            size: rows.iter().map(|r| r.3).sum(),
+            sizes: rows.iter().map(|r| r.3).collect(),
+            subjects: rows.iter().map(|r| r.4.clone()).collect(),
+            ids: rows.into_iter().map(|r| r.0).collect(),
+        })
+    }
+
+    /// Mark every message in a folder read (on the server too, in one command per folder).
+    /// Returns how many were unread.
+    pub fn mark_folder_read(&self, folder_id: i64) -> Result<usize> {
+        let ids = self.store.unread_in_folder(folder_id)?;
+        if !ids.is_empty() {
+            self.apply_action(actions::Action::Read, &ids, folder_id)?;
+        }
+        Ok(ids.len())
+    }
+
     /// Undo an action that hasn't been sent yet (within the undo window).
     pub fn undo_action(&self, op_id: i64) -> Result<()> {
         let snapshot = self
@@ -621,16 +829,23 @@ impl Core {
         Ok(())
     }
 
-    pub fn index_of(&self, folder_id: i64, id: i64, threaded: bool) -> Result<Option<u32>> {
-        self.store.index_of(folder_id, id, threaded)
+    pub fn index_of(&self, folder_id: i64, id: i64, threaded: bool, sort: sort::ListSort, filter: &sort::ListFilter) -> Result<Option<u32>> {
+        self.store.index_of_by(folder_id, id, threaded, sort, filter)
     }
 
     /// Where a message shows in the folder's list: its row (the message, or with `threaded` its
     /// conversation) and that row's position; None if it isn't in the folder.
-    pub fn locate_message(&self, folder_id: i64, message_id: i64, threaded: bool) -> Result<Option<(i64, u32)>> {
+    pub fn locate_message(
+        &self,
+        folder_id: i64,
+        message_id: i64,
+        threaded: bool,
+        sort: sort::ListSort,
+        filter: &sort::ListFilter,
+    ) -> Result<Option<(i64, u32)>> {
         let item = if threaded { self.store.message_thread_id(message_id)? } else { Some(message_id) };
         let Some(item) = item else { return Ok(None) };
-        Ok(self.store.index_of(folder_id, item, threaded)?.map(|i| (item, i)))
+        Ok(self.store.index_of_by(folder_id, item, threaded, sort, filter)?.map(|i| (item, i)))
     }
 
     /// A message's detail, downloading its body first if it isn't local yet (waits up to 30 s).
@@ -723,6 +938,10 @@ impl Core {
                 let (name, content_type, data) = self.attachment(fwd, index).await?;
                 msg.attachments.push(compose::OutAttachment { name, content_type, data });
             }
+        }
+        for &id in &req.forward_messages {
+            let (data, subject) = self.whole_message(id).await?;
+            msg.attachments.push(compose::OutAttachment { name: eml_name(&subject), content_type: "message/rfc822".into(), data });
         }
         for path in &req.attachments {
             let p = std::path::Path::new(path);
@@ -969,9 +1188,147 @@ impl Core {
             c.list.get_or_insert(list);
             c.built.get_or_insert_with(std::time::Instant::now);
         }
+        // The address book first (its names), then the people from the mail not in it.
+        let mut out = addressbook::suggest(&self.store.cards()?, query, limit);
         let c = self.contacts.lock().unwrap();
         let now = chrono::Utc::now().timestamp();
-        Ok(contacts::suggest(c.list.as_deref().unwrap_or_default(), query, limit, now))
+        for a in contacts::suggest(c.list.as_deref().unwrap_or_default(), query, limit, now) {
+            if out.len() >= limit {
+                break;
+            }
+            if !out.iter().any(|x| x.addr.eq_ignore_ascii_case(&a.addr)) {
+                out.push(a);
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn cards(&self) -> Result<Vec<addressbook::Card>> {
+        self.store.cards()
+    }
+
+    /// Save a card the user changed or made. A Google contact is marked to send at the next
+    /// sync; a new card with `google` set is made in that account's Google contacts.
+    pub fn save_card(&self, card: addressbook::Card) -> Result<i64> {
+        let new_in = (card.id == 0).then_some(card.google).flatten();
+        if let Some(acct) = new_in
+            && self.store.google_link(acct)?.is_none()
+        {
+            bail!("Google Contacts isn't connected for that account.");
+        }
+        let id = self.store.save_card(card)?;
+        if let Some(account_id) = new_in {
+            self.store.save_card_link(&gcontacts::CardLink { card_id: id, account_id, resource: None, etag: None, raw: None, dirty: true })?;
+        } else if let Some(mut l) = self.store.card_link(id)? {
+            l.dirty = true;
+            self.store.save_card_link(&l)?;
+        }
+        Ok(id)
+    }
+
+    /// Delete a card; a Google contact is deleted there too at the next sync.
+    pub fn delete_card(&self, id: i64) -> Result<()> {
+        if let Some(l) = self.store.card_link(id)?
+            && let Some(res) = &l.resource
+        {
+            self.store.add_card_tombstone(l.account_id, res)?;
+        }
+        self.store.delete_card(id)
+    }
+
+    // ---- Google Contacts ---------------------------------------------------------------------
+
+    fn google_client(&self) -> Option<oauth::GoogleClient> {
+        self.secrets.get(GOOGLE_CLIENT_KEY).ok().and_then(|j| serde_json::from_str(&j).ok())
+    }
+
+    /// The OAuth client to sign in with (None: forget it).
+    pub fn set_google_client(&self, client: Option<oauth::GoogleClient>) -> Result<()> {
+        match client {
+            Some(c) => {
+                let c = oauth::GoogleClient { id: c.id.trim().to_string(), secret: c.secret.trim().to_string() };
+                if !c.id.ends_with(".apps.googleusercontent.com") {
+                    bail!("That isn't a Google client ID (it ends in .apps.googleusercontent.com).");
+                }
+                self.secrets.set(GOOGLE_CLIENT_KEY, &serde_json::to_string(&c)?)
+            }
+            None => {
+                self.secrets.delete(GOOGLE_CLIENT_KEY);
+                Ok(())
+            }
+        }
+    }
+
+    /// Whether the client is set, and the accounts linked to their Google contacts.
+    pub fn google_status(&self) -> Result<GoogleStatus> {
+        Ok(GoogleStatus { client_id: self.google_client().map(|c| c.id), links: self.store.google_links()? })
+    }
+
+    /// Connect an account to its Google contacts: a browser sign-in (`open` shows the page),
+    /// then a first sync (reading only). Returns the Google address signed in with.
+    pub async fn google_connect(&self, account_id: i64, open: impl FnOnce(String)) -> Result<String> {
+        let client = self.google_client().ok_or_else(|| anyhow!("Add your Google client ID and secret first."))?;
+        let account = self.account(account_id)?;
+        let redirect = oauth::Redirect::listen().await?;
+        let uri = oauth::google_redirect(&redirect.uri);
+        let pkce = oauth::Pkce::new();
+        open(oauth::google_authorize_url(&client, &uri, redirect.state(), &pkce.challenge, Some(&account.email)));
+        let code = tokio::select! {
+            code = redirect.code() => code?,
+            _ = self.sign_in_cancel.notified() => bail!("Sign-in cancelled."),
+        };
+        let tokens = oauth::google_exchange(&client, &code, &pkce.verifier, &uri).await?;
+        let refresh = tokens.refresh_token.clone().ok_or_else(|| anyhow!("Google didn't allow staying signed in (no refresh token)."))?;
+        let email = tokens.id_token.as_deref().and_then(oauth::email_from_id_token).unwrap_or_else(|| account.email.clone());
+        self.secrets.set(&google_key(account_id), &refresh)?;
+        self.store.set_google_link(account_id, &email)?;
+        Ok(email)
+    }
+
+    /// Stop syncing an account's Google contacts: its cards here go; Google is left as it is.
+    pub fn google_disconnect(&self, account_id: i64) -> Result<()> {
+        self.store.remove_google_link(account_id)?;
+        self.secrets.delete(&google_key(account_id));
+        Ok(())
+    }
+
+    /// Sync one account's Google contacts (one sync per account at a time); what it did.
+    pub async fn google_sync(&self, account_id: i64) -> Result<gcontacts::SyncReport> {
+        let lock = self.google_locks.lock().unwrap().entry(account_id).or_default().clone();
+        let _held = lock.lock().await;
+        let result = async {
+            let client = self.google_client().ok_or_else(|| anyhow!("Add your Google client ID and secret first."))?;
+            let refresh = self.secrets.get(&google_key(account_id)).map_err(|_| anyhow!(gcontacts::PeopleError::SignIn("no saved sign-in".into())))?;
+            let tokens = oauth::google_refresh(&client, &refresh).await?;
+            let api = gcontacts::GoogleApi { access_token: tokens.access_token };
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
+            gcontacts::sync(&self.store, account_id, &api, now).await
+        }
+        .await;
+        match &result {
+            Ok(r) => tracing::info!(account_id, sent = r.sent, added = r.added, changed = r.changed, removed = r.removed, "google contacts synced"),
+            Err(e) => {
+                tracing::warn!(account_id, "google contacts: {e:#}");
+                let why = if e.downcast_ref::<gcontacts::PeopleError>().is_some_and(|p| matches!(p, gcontacts::PeopleError::SignIn(_))) {
+                    "Google needs you to connect again.".to_string()
+                } else {
+                    format!("{e:#}")
+                };
+                let _ = self.store.set_google_sync(account_id, None, None, Some(&why));
+            }
+        }
+        result
+    }
+
+    /// Sync every linked account; whether anything changed here.
+    pub async fn google_sync_all(&self) -> bool {
+        let mut any = false;
+        for l in self.store.google_links().unwrap_or_default() {
+            if let Ok(r) = self.google_sync(l.account_id).await {
+                any |= r.added + r.changed + r.removed > 0;
+            }
+        }
+        any
     }
 
     fn build_contacts(&self) -> Result<Vec<contacts::Contact>> {
@@ -1036,8 +1393,16 @@ impl Core {
 
     /// The next unread item below `after` in a folder list (wrapping to the top), or with `back`
     /// the previous one above it (wrapping to the bottom).
-    pub fn next_unread(&self, folder_id: i64, after: Option<i64>, threaded: bool, back: bool) -> Result<Option<NextUnread>> {
-        Ok(self.store.next_unread(folder_id, after, threaded, back)?.map(|(id, index)| NextUnread { id, index }))
+    pub fn next_unread(
+        &self,
+        folder_id: i64,
+        after: Option<i64>,
+        threaded: bool,
+        back: bool,
+        sort: sort::ListSort,
+        filter: &sort::ListFilter,
+    ) -> Result<Option<NextUnread>> {
+        Ok(self.store.next_unread_by(folder_id, after, threaded, back, sort, filter)?.map(|(id, index)| NextUnread { id, index }))
     }
 
     pub fn tags(&self) -> Result<Vec<tags::TagDef>> {
@@ -1052,12 +1417,72 @@ impl Core {
         self.store.delete_tag(keyword)
     }
 
+    /// The messages from a message's sender (see `Store::sender_messages`).
+    pub fn sender_messages(&self, message_id: i64, offset: u32, limit: u32) -> Result<Option<SenderPage>> {
+        self.store.sender_messages(message_id, offset, limit)
+    }
+
+    /// The messages from an address in an account (see `Store::messages_from`).
+    pub fn messages_from(&self, account_id: i64, addr: &str, offset: u32, limit: u32) -> Result<SenderPage> {
+        self.store.messages_from(account_id, "", addr, offset, limit)
+    }
+
+    // ---- writing help (see `ai`) ---------------------------------------------------------
+
+    /// Keep (Some) or forget (None) the Anthropic API key, in the system keychain.
+    pub fn set_ai_key(&self, key: Option<&str>) -> Result<()> {
+        match key.map(str::trim).filter(|k| !k.is_empty()) {
+            Some(k) => self.secrets.set(ai::SECRET_NAME, k),
+            None => {
+                self.secrets.delete(ai::SECRET_NAME);
+                Ok(())
+            }
+        }
+    }
+
+    /// Is there an API key to use?
+    pub fn ai_configured(&self) -> bool {
+        self.secrets.get(ai::SECRET_NAME).is_ok_and(|k| !k.is_empty())
+    }
+
+    /// Run a writing task with `model`, its text streamed to `on_text` as it comes.
+    pub async fn ai_run(
+        &self,
+        model: &str,
+        task: &ai::Task,
+        request: &ai::Request,
+        cancel: tokio::sync::watch::Receiver<bool>,
+        on_text: impl FnMut(&str),
+    ) -> Result<ai::Outcome> {
+        let key = self
+            .secrets
+            .get(ai::SECRET_NAME)
+            .map_err(|_| anyhow!("Add your Anthropic API key in Settings › AI first."))?;
+        ai::run(&key, model, task, request, cancel, on_text).await
+    }
+
+    pub fn signatures(&self) -> Result<signatures::Signatures> {
+        self.store.signatures()
+    }
+
+    pub fn save_signature(&self, id: Option<i64>, name: &str, html: &str) -> Result<i64> {
+        self.store.save_signature(id, name, &mime::sanitize_signature(html))
+    }
+
+    pub fn delete_signature(&self, id: i64) -> Result<()> {
+        self.store.delete_signature(id)
+    }
+
+    pub fn set_signature_defaults(&self, account_id: i64, new_id: Option<i64>, reply_id: Option<i64>) -> Result<()> {
+        self.store.set_signature_defaults(account_id, new_id, reply_id)
+    }
+
     pub fn message_in_folder(&self, id: i64, folder_id: Option<i64>) -> Result<bool> {
         self.store.message_in_folder(id, folder_id)
     }
 
-    pub fn list_threads(&self, folder_id: i64, scope: ThreadScope, offset: u32, limit: u32) -> Result<ThreadPage> {
-        self.store.list_threads(folder_id, scope, offset, limit)
+    pub fn list_threads(&self, folder_id: i64, scope: ThreadScope, filter: &sort::ListFilter, offset: u32, limit: u32) -> Result<ThreadPage> {
+        self.store.list_threads_filtered(folder_id, scope, filter, offset, limit)
     }
 
     pub fn search(
@@ -1112,6 +1537,31 @@ impl Core {
     }
 
     /// Remember the user's "Load images" choice for a message.
+    pub fn account_logos(&self) -> Result<Vec<(i64, String)>> {
+        self.store.account_logos()
+    }
+
+    pub fn set_account_logo(&self, account_id: i64, data_url: Option<&str>) -> Result<()> {
+        self.store.set_account_logo(account_id, data_url)?;
+        let _ = self.events.send(CoreEvent::FoldersChanged { account_id });
+        Ok(())
+    }
+
+    /// Always load remote images in mail from this message's sender; returns the address.
+    pub fn allow_remote_from_sender(&self, id: i64) -> Result<String> {
+        let addr = self.store.message_from_addr(id)?.filter(|a| !a.trim().is_empty()).ok_or_else(|| anyhow!("This message has no sender."))?;
+        self.store.set_remote_sender(&addr, true)?;
+        Ok(addr)
+    }
+
+    pub fn remote_senders(&self) -> Result<Vec<String>> {
+        self.store.remote_senders()
+    }
+
+    pub fn set_remote_sender(&self, addr: &str, on: bool) -> Result<()> {
+        self.store.set_remote_sender(addr, on)
+    }
+
     pub fn set_allow_remote(&self, id: i64, allow: bool) -> Result<()> {
         self.store.set_allow_remote(id, allow)
     }
@@ -1149,6 +1599,19 @@ impl Core {
 
 /// Apply an action locally and queue its server commands (the caller wakes the outbox). Shared
 /// by `Core::apply_action` and the sync's snooze waker.
+/// A file name for a message forwarded as an attachment: its subject, made safe.
+fn eml_name(subject: &str) -> String {
+    let clean: String = subject
+        .chars()
+        .map(|c| if c.is_control() || "/\\:*?\"<>|".contains(c) { ' ' } else { c })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let short: String = clean.chars().take(80).collect();
+    format!("{}.eml", if short.is_empty() { "message".to_string() } else { short })
+}
+
 pub(crate) fn queue_action(
     store: &Store,
     events: &broadcast::Sender<CoreEvent>,

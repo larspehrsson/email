@@ -477,6 +477,41 @@ pub fn sanitize_html(html: &str, cid_map: &HashMap<String, String>) -> String {
         .to_string()
 }
 
+/// A signature as kept: shown in the composer itself (not a sandboxed frame), so only plain
+/// formatting stays (ammonia's defaults: no styles, scripts or handlers; links open safely).
+pub fn sanitize_signature(html: &str) -> String {
+    ammonia::Builder::default()
+        .link_rel(Some("noopener noreferrer"))
+        // Signatures made elsewhere and pasted in as HTML: colours, fonts and table layouts kept
+        // (inline styles and the old attributes); scripts, handlers and the like still go.
+        .add_generic_attributes(["style", "align", "valign", "width", "height", "bgcolor"])
+        .add_tags(["font", "center"])
+        .add_tag_attributes("font", ["color", "face", "size"])
+        .add_tag_attributes("table", ["border", "cellpadding", "cellspacing"])
+        .add_tag_attributes("img", ["border"])
+        // Pictures pasted in come as data: URLs (sent as inline parts, see compose::inline_images):
+        // allowed on an <img>'s src, as an image, and nowhere else.
+        .add_url_schemes(["data"])
+        .attribute_filter(|element, attribute, value| {
+            if attribute == "style" {
+                // CSS that runs or loads code: the whole style goes.
+                let lower = value.to_ascii_lowercase();
+                let bad = ["expression", "javascript:", "behavior", "-moz-binding", "@import", "vbscript:"];
+                return (!bad.iter().any(|b| lower.contains(b))).then(|| value.into());
+            }
+            let data = value.trim_start().get(..5).is_some_and(|p| p.eq_ignore_ascii_case("data:"));
+            if !data {
+                return Some(value.into());
+            }
+            let image = ["data:image/png;", "data:image/jpeg;", "data:image/gif;", "data:image/webp;"]
+                .iter()
+                .any(|p| value.trim_start().get(..p.len()).is_some_and(|v| v.eq_ignore_ascii_case(p)));
+            (element == "img" && attribute == "src" && image).then(|| value.into())
+        })
+        .clean(html)
+        .to_string()
+}
+
 fn replace_cids(html: &str, cid_map: &HashMap<String, String>) -> String {
     let mut out = html.to_string();
     for (cid, data) in cid_map {
@@ -503,6 +538,24 @@ mod tests {
         // left alone: not a reference, an unknown name, a control character
         assert_eq!(clean_subject("AT&T; R&D & more &copy; &#0;"), "AT&T; R&D & more &copy; &#0;");
         assert_eq!(clean_subject("plain"), "plain");
+    }
+
+    #[test]
+    fn signatures_keep_formatting_only() {
+        let out = sanitize_signature(r#"<p><b>Lars</b> <a href="https://x.se" onclick="x()">x.se</a></p><style>body{display:none}</style><script>1</script>"#);
+        assert!(out.contains("<b>Lars</b>") && out.contains(r#"href="https://x.se""#));
+        assert!(!out.contains("onclick") && !out.contains("<style") && !out.contains("script"));
+        // A pasted picture stays; data: anywhere else (or not an image) goes.
+        let img = sanitize_signature(r#"<p><img src="data:image/png;base64,iVBORw0KGgo=" width="120" height="40"><a href="data:text/html;base64,PHNjcmlwdD4=">x</a><img src="data:image/svg+xml;base64,PHN2Zz4="></p>"#);
+        assert!(img.contains(r#"src="data:image/png;base64,iVBORw0KGgo=""#) && img.contains(r#"width="120""#), "{img}");
+        assert!(!img.contains("data:text/html") && !img.contains("svg+xml"), "{img}");
+        // Pasted HTML: colours, fonts, tables kept; scripted CSS not.
+        let pasted = sanitize_signature(
+            r#"<table cellpadding="0" style="border-collapse:collapse"><tr><td valign="top" style="color:#c00;font-family:Georgia"><font color="navy" face="Arial">Lars</font></td><td style="background:url(javascript:alert(1))">x</td></tr></table>"#,
+        );
+        assert!(pasted.contains(r#"style="color:#c00;font-family:Georgia""#) && pasted.contains(r#"<font color="navy" face="Arial">"#), "{pasted}");
+        assert!(pasted.contains(r#"cellpadding="0""#) && pasted.contains(r#"valign="top""#), "{pasted}");
+        assert!(!pasted.contains("javascript"), "{pasted}");
     }
 
     #[test]

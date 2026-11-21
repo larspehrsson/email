@@ -198,11 +198,43 @@ pub struct MessageSummary {
     pub draft_id: Option<i64>,
     /// Snoozed until then (a reminder still to go off), Unix seconds (see `tags::snooze_keyword`).
     pub snoozed_until: Option<i64>,
+    /// Bytes, as the server counts them (the whole message, attachments too).
+    pub size: i64,
+}
+
+/// What the actions need about the messages behind several picked rows.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectionInfo {
+    /// The messages (a conversation's: those in the folder), newest first.
+    pub ids: Vec<i64>,
+    pub any_unread: bool,
+    pub all_flagged: bool,
+    /// Each message's tags, as `ids`.
+    pub tag_sets: Vec<Vec<String>>,
+    /// The latest reminder still to go off among them.
+    pub snoozed_until: Option<i64>,
+    /// Bytes, all together.
+    pub size: i64,
+    /// Each message's subject and size, as `ids` (forwarding them as attachments).
+    pub subjects: Vec<String>,
+    pub sizes: Vec<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessagePage {
+    pub total: u32,
+    pub messages: Vec<MessageSummary>,
+}
+
+/// Messages from one sender (see `Store::sender_messages`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SenderPage {
+    pub account_id: i64,
+    pub name: String,
+    pub addr: String,
     pub total: u32,
     pub messages: Vec<MessageSummary>,
 }
@@ -229,6 +261,9 @@ pub struct ThreadSummary {
     pub folder_id: i64,
     pub subject: String,
     pub participants: Vec<String>,
+    /// The address of the newest one from someone else (ours when all are ours): the
+    /// conversation's picture.
+    pub from_addr: String,
     pub message_count: u32,
     pub unread: bool,
     pub flagged: bool,
@@ -405,6 +440,9 @@ pub struct SendRequest {
     /// Attachments of `forwarding` to send along (their `index`).
     #[serde(default)]
     pub forward_attachments: Vec<usize>,
+    /// Whole messages to send along as attachments (.eml): forwarding several at once.
+    #[serde(default)]
+    pub forward_messages: Vec<i64>,
     /// The composer's own state, handed back by `cancel_send` (undo) to reopen it.
     pub draft: Option<serde_json::Value>,
     /// The draft this comes from: discarded once the message is queued.

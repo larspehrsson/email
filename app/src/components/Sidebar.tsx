@@ -1,12 +1,13 @@
 import { batch, createEffect, createMemo, createSignal, For, Match, onCleanup, Show, Switch, untrack } from 'solid-js';
+import { folderMenu } from './ContextMenu';
 import { hint } from '../lib/shortcuts';
 import { createStore } from 'solid-js/store';
 import { api, type Account, type Folder, type FolderRole, type SyncStatus } from '../api';
-import { folderById, foldersByAccount, moveAccount, selectedFolderId, selectFolder, syncByAccount, accounts } from '../state';
+import { folderById, foldersByAccount, moveAccount, selectedFolderId, selectFolder, syncByAccount, accounts, mainView, setMainView } from '../state';
 import { AccountDot } from './FolderSwitcher';
 import { cancelExport, exportLabel, exportNow } from '../lib/exports';
 import { fmtNum, loadPref, savePref } from '../lib/format';
-import { AlertIcon, CheckIcon, ChevronIcon, FolderIcon, LockIcon, PlusIcon, RoleIcon, SidebarIcon } from './Icons';
+import { AlertIcon, CheckIcon, ChevronIcon, FolderIcon, LockIcon, PeopleIcon, RoleIcon, SidebarIcon } from './Icons';
 import { PasswordDialog } from './PasswordPrompt';
 import { toggleSidebar } from '../lib/layout';
 import { DRAG, platform } from '../lib/platform';
@@ -240,11 +241,12 @@ function SyncPopoverRow(props: { account: Account; status: SyncStatus | undefine
   return (
     <div class="sp-item">
       <div class="sf-row sp-row" classList={{ error: isAttention(phase()), warn: isWarning(phase()), active: active() }}>
-        <StatusGlyph phase={phase()} />
+        <AccountDot account={props.account} size={22} />
         <span class="sf-email" title={props.account.email}>
           {props.account.email}
         </span>
         <span class="sf-status sp-status">
+          <StatusGlyph phase={phase()} />
           <span class="sf-text">{props.status ? syncLabel(props.status) : 'Up to date'}</span>
           <Show when={phase() === 'auth'}>
             <button class="link-btn sf-fix" onClick={() => props.onFix()}>
@@ -410,6 +412,7 @@ function FolderRow(props: { folder: Folder; depth: number; role?: boolean }) {
       classList={{ selected: selected(), role: !!props.role }}
       style={{ 'padding-left': `${12 + props.depth * 14 + 18}px` }}
       onClick={() => selectFolder(props.folder.id)}
+      onContextMenu={(e) => folderMenu(e, props.folder)}
       title={props.folder.path.join(' / ')}
     >
       <span class="folder-icon">
@@ -441,6 +444,10 @@ function TreeItem(props: { node: TreeNode }) {
           const f = n().folder;
           if (f && f.selectable) selectFolder(f.id);
           else if (hasKids()) toggleNode(n());
+        }}
+        onContextMenu={(e) => {
+          const f = n().folder;
+          if (f?.selectable) folderMenu(e, f);
         }}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -642,7 +649,7 @@ function AccountSection(props: { account: Account; index: number }) {
   );
 }
 
-export function Sidebar(props: { onAddAccount: () => void; flyout?: boolean }) {
+export function Sidebar(props: { flyout?: boolean }) {
   return (
     <nav class="sidebar" classList={{ flyout: !!props.flyout }} aria-label="Mailboxes">
       <div class="sidebar-top" data-tauri-drag-region={DRAG}>
@@ -650,8 +657,15 @@ export function Sidebar(props: { onAddAccount: () => void; flyout?: boolean }) {
           Mailboxes
         </span>
         <span class="sidebar-top-btns">
-          <button class="icon-btn" onClick={props.onAddAccount} title="Add account" aria-label="Add account">
-            <PlusIcon />
+          <button
+            class="icon-btn"
+            classList={{ on: mainView() === 'contacts' }}
+            onClick={() => setMainView(mainView() === 'contacts' ? 'mail' : 'contacts')}
+            title={`Address book (${hint('contacts')})`}
+            aria-label="Address book"
+            aria-pressed={mainView() === 'contacts'}
+          >
+            <PeopleIcon />
           </button>
           <button
             class="icon-btn"

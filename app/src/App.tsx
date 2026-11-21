@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createSignal, Match, onCleanup, onMount, Show, Switch } from 'solid-js';
-import type { Account } from './api';
+import type { Account, ListSort } from './api';
 import {
   accounts,
   flushReader,
@@ -13,6 +13,20 @@ import {
   selectedFolderId,
   threaded,
   setThreaded,
+  threadedPref,
+  listSort,
+  listFilter,
+  multiPicked,
+  readerMessageId,
+  selectedMessageId,
+  selectedThread,
+  addingAccount,
+  setAddingAccount,
+  senderPane,
+  setSenderPane,
+  mainView,
+  setMainView,
+  setListSort,
   conversationScope,
   setConversationScope,
 } from './state';
@@ -38,8 +52,14 @@ import { MessageList, type SearchSpec } from './components/MessageList';
 import { Reader } from './components/Reader';
 import { ConversationReader } from './components/Conversation';
 import { Resizer } from './components/Resizer';
+import { SenderPane } from './components/SenderPane';
+import { ContactsView } from './components/ContactsView';
 import { AddAccountModal, Onboarding } from './components/AddAccount';
-import { DRAG } from './lib/platform';
+import { ContextMenuHost } from './components/ContextMenu';
+import { startGoogleSync } from './lib/googleContacts';
+import { MultiPane } from './components/MultiPane';
+import { openSource, SourceHost } from './components/SourceView';
+import { DRAG, platform } from './lib/platform';
 
 const SIDEBAR = { min: 180, max: 420, def: 236 };
 const LIST = { min: 300, max: 760, def: 400 };
@@ -48,12 +68,12 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 export function App() {
   const [sidebarW, setSidebarW] = createSignal(clamp(loadPref('ui.sidebarWidth', SIDEBAR.def), SIDEBAR.min, SIDEBAR.max));
   const [listW, setListW] = createSignal(clamp(loadPref('ui.listWidth', LIST.def), LIST.min, LIST.max));
-  const [showAdd, setShowAdd] = createSignal(false);
   let readerEl: HTMLElement | undefined;
 
   onMount(() => {
     void initApp();
     initExports();
+    startGoogleSync();
   });
 
   // Ctrl/⌘+1: full ↔ rail · Ctrl/⌘+Shift+1: folder flyout · Ctrl/⌘+G: folder switcher ·
@@ -65,6 +85,12 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       if (document.querySelector('.modal-backdrop')) return;
       const ready = (accounts()?.length ?? 0) > 0;
+      // ⌥⌘U / Ctrl+Alt+U: the message's source (by the key, not the character Option makes).
+      if (ready && e.altKey && (platform === 'macos' ? e.metaKey : e.ctrlKey) && e.code === 'KeyU') {
+        e.preventDefault();
+        openSource(readerMessageId() ?? selectedMessageId() ?? selectedThread()?.latestMessageId);
+        return;
+      }
       if (!isTextInput(e.target)) {
         const run: Record<string, (() => void) | undefined> = {
           // `?`: the shortcuts sheet (the sheet itself handles `?` to close)
@@ -74,6 +100,8 @@ export function App() {
           compose: ready ? newMessage : undefined,
           flyout: ready ? flyoutKey : undefined,
           goto: ready ? openFolderSwitcher : undefined,
+          sender: ready ? () => setSenderPane(!senderPane()) : undefined,
+          contacts: ready ? () => setMainView(mainView() === 'contacts' ? 'mail' : 'contacts') : undefined,
         };
         const f = run[commandFor(e) ?? ''];
         if (f) {
@@ -89,7 +117,10 @@ export function App() {
         return;
       }
       if (!ready) return;
-      if (e.code === 'Digit1') {
+      if (e.code === 'Digit2' && !e.shiftKey) {
+        e.preventDefault();
+        setSenderPane(!senderPane());
+      } else if (e.code === 'Digit1') {
         e.preventDefault();
         if (e.shiftKey) flyoutKey();
         else toggleSidebar();
@@ -120,14 +151,29 @@ export function App() {
           focusSearch();
           break;
         case 'toggle-threaded':
-          setThreaded(!threaded());
+          setThreaded(!threadedPref());
+          break;
+        case 'sort-received':
+        case 'sort-from':
+        case 'sort-to':
+        case 'sort-size':
+          setListSort(id.slice(5) as ListSort);
+          break;
+        case 'show-source':
+          openSource(readerMessageId() ?? selectedMessageId() ?? selectedThread()?.latestMessageId);
+          break;
+        case 'sender-panel':
+          setSenderPane(!senderPane());
+          break;
+        case 'address-book':
+          if ((accounts()?.length ?? 0) > 0) setMainView(mainView() === 'contacts' ? 'mail' : 'contacts');
           break;
         case 'toggle-scope':
           setConversationScope(conversationScope() === 'all' ? 'folder' : 'all');
           break;
         case 'add-account':
           // With no accounts the onboarding form is already the whole window.
-          if ((accounts()?.length ?? 0) > 0) setShowAdd(true);
+          if ((accounts()?.length ?? 0) > 0) setAddingAccount(true);
           break;
         case 'shortcuts':
           openShortcuts();
@@ -178,7 +224,7 @@ export function App() {
   const conversationReader = () => threaded() && !searchActive();
 
   const added = (a: Account) => {
-    setShowAdd(false);
+    setAddingAccount(false);
     void onAccountAdded(a);
   };
 
@@ -212,7 +258,7 @@ export function App() {
       <Match when={true}>
         <div
           class="app"
-          classList={{ 'rail-mode': sidebarMode() === 'rail' }}
+          classList={{ 'rail-mode': sidebarMode() === 'rail', 'with-sender': senderPane() }}
           style={{ '--sidebar-w': `${sidebarMode() === 'rail' ? RAIL_W : sidebarW()}px`, '--list-w': `${listW()}px` }}
         >
           <div class="pane pane-sidebar">
@@ -220,7 +266,7 @@ export function App() {
               when={sidebarMode() === 'rail'}
               fallback={
                 <>
-                  <Sidebar onAddAccount={() => setShowAdd(true)} />
+                  <Sidebar />
                   <Resizer
                     label="Resize sidebar"
                     width={sidebarW}
@@ -234,7 +280,7 @@ export function App() {
             </Show>
           </div>
           <Show when={flyout()}>
-            <Flyout width={sidebarW()} onAddAccount={() => setShowAdd(true)} />
+            <Flyout width={sidebarW()} />
           </Show>
           <div class="pane pane-list">
             <div class="list-pane">
@@ -248,8 +294,13 @@ export function App() {
                     fallback={<div class="list-placeholder" data-tauri-drag-region={DRAG} />}
                   >
                     {(f) => (
-                      <Show when={threaded()} fallback={<MessageList folder={f} threaded={false} onOpen={openReader} />}>
-                        <MessageList folder={f} threaded onOpen={openReader} />
+                      // Remounted when the sort changes: the list reads it once.
+                      <Show when={`${listSort()} ${JSON.stringify(listFilter())}`} keyed>
+                        {(_sort) => (
+                          <Show when={threaded()} fallback={<MessageList folder={f} threaded={false} onOpen={openReader} />}>
+                            <MessageList folder={f} threaded onOpen={openReader} />
+                          </Show>
+                        )}
                       </Show>
                     )}
                   </Show>
@@ -276,19 +327,39 @@ export function App() {
             />
           </div>
           <div class="pane pane-reader">
-            <Show when={conversationReader()} fallback={<Reader ref={(el) => (readerEl = el)} />}>
-              <ConversationReader ref={(el) => (readerEl = el)} />
+            <Show
+              when={multiPicked() && !searchActive()}
+              fallback={
+                <Show when={conversationReader()} fallback={<Reader ref={(el) => (readerEl = el)} />}>
+                  <ConversationReader ref={(el) => (readerEl = el)} />
+                </Show>
+              }
+            >
+              <MultiPane />
             </Show>
             <AttachmentToast />
           </div>
+          <Show when={senderPane()}>
+            <div class="pane pane-sender">
+              <SenderPane />
+            </div>
+          </Show>
+          {/* Over the mail (kept as it is underneath), beside the sidebar. */}
+          <Show when={mainView() === 'contacts'}>
+            <div class="contacts-layer">
+              <ContactsView />
+            </div>
+          </Show>
           <ViewMenuPopover />
           <ManageTagsHost />
           <ConfirmHost />
+          <ContextMenuHost />
+          <SourceHost />
           <ShortcutsHost />
           <SettingsHost />
           <FolderSwitcherHost />
-          <Show when={showAdd()}>
-            <AddAccountModal onAdded={added} onClose={() => setShowAdd(false)} />
+          <Show when={addingAccount()}>
+            <AddAccountModal onAdded={added} onClose={() => setAddingAccount(false)} />
           </Show>
         </div>
       </Match>

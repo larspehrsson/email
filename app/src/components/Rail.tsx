@@ -1,4 +1,6 @@
 import { createMemo, For, Show } from 'solid-js';
+import { accountLogo } from '../lib/accountLogos';
+import { folderMenu } from './ContextMenu';
 import { hint } from '../lib/shortcuts';
 import type { Account, Folder } from '../api';
 import { fmtNum } from '../lib/format';
@@ -27,6 +29,7 @@ function RailFolder(props: { f: Folder }) {
       aria-label={tip()}
       aria-current={selectedFolderId() === props.f.id ? 'page' : undefined}
       onClick={() => selectFolder(props.f.id)}
+      onContextMenu={(e) => folderMenu(e, props.f)}
     >
       <RoleIcon role={props.f.role ?? (isInboxPath(props.f) ? 'inbox' : null)} size={17} />
       <Show when={n() > 0}>
@@ -55,8 +58,14 @@ function RailAccount(props: { account: Account }) {
         aria-expanded={!collapsed()}
         onClick={() => toggleAccount(props.account.id)}
       >
-        <span class="rail-letter" style={{ background: accountMark(props.account).color }}>
-          {accountMark(props.account).letter}
+        <span
+          class="rail-letter"
+          classList={{ 'has-logo': !!accountLogo(props.account.id) }}
+          style={{ background: accountLogo(props.account.id) ? '#fff' : accountMark(props.account).color }}
+        >
+          <Show when={accountLogo(props.account.id)} fallback={accountMark(props.account).letter}>
+            {(src) => <img src={src()} alt="" draggable={false} />}
+          </Show>
         </span>
         <Show when={collapsed() && inboxUnread() > 0}>
           <span class="rail-badge">{compact(inboxUnread())}</span>

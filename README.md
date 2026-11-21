@@ -42,9 +42,17 @@ arrives as it's delivered. Conversations are grouped together, even across folde
 
 **Writing mail** happens in its own window: rich text, attachments by drag and drop, replies
 quoted below your text, and a switch between Reply and Reply all. Addresses are suggested from
-the people you write to most. Sending waits 10 seconds so you can undo it.
+the people you write to most. Signatures (Settings › Signatures, with pictures pasted in) go under your text, a default
+per account for new messages and for replies, switchable in the message. Sending waits 10 seconds so you can undo it.
 
 <img src="docs/screenshots/compose.png" alt="A compose window with address suggestions" width="600">
+
+**Sort and group** the list from the View options: by date received (grouped into Today,
+Yesterday, this week's days, last weeks and months), or by sender or recipient, A to Z, with
+each person's messages together under their name, or by size, largest first, to find what
+takes the space. **Filter** it to unread or read mail, starred, or messages with attachments.
+
+![The Newsletters folder sorted by sender](docs/screenshots/sorted.png)
 
 **Search** as you type, over senders, recipients and subjects, in every folder or just the
 current one. It understands `from:`, `to:`, `subject:`, `"exact phrases"` and `-exclusions`.
@@ -60,6 +68,32 @@ so Outlook shows them too.
 **Snooze** reminds you of a message later: pick a time, or a day on the calendar. The message
 stays where it is and comes back to the top of your Inbox, unread, when it's due, on every
 computer you use Email on.
+
+**Help writing (AI)**, without a subscription: add your own Anthropic API key in Settings › AI,
+then ✨ AI in a message (Ctrl/⌘+J) drafts a reply or a new message from a few words, or makes
+what you wrote better, shorter, more formal or friendlier, fixes the spelling, or translates it.
+You see it first and choose whether to use it.
+
+<img src="docs/screenshots/writing-help.png" alt="Writing help drafting a reply" width="600">
+
+**An address book** (Ctrl/⌘+Shift+B): the people you keep, with their addresses, phone
+numbers, company and notes, synced both ways with Google Contacts if you like ([setup](docs/GOOGLE_CONTACTS.md)). Add someone from the sender panel in one click; they come first when
+you type an address.
+
+![The address book](docs/screenshots/contacts.png)
+
+**Everything from a sender** at a glance: Ctrl/⌘+2 opens a panel beside the message with all
+the mail from whoever sent it, in every folder. Select them all (Ctrl/⌘+A) and delete or archive
+at once — the quickest way to clear out a newsletter.
+
+![The sender panel beside a message, three messages picked](docs/screenshots/sender.png)
+
+**Message source** (⌥⌘U, or right-click a message), with questions to Claude about it: why wasn't this marked as spam, is it genuine, who really sent it.
+
+**Sender pictures** beside each message: the company's logo or website icon, or initials.
+
+**Several at once:** Ctrl/⌘-click or Shift-click messages in the list (or Ctrl/⌘+A for all of
+them) to delete, move, mark or tag them together, or forward them as attachments.
 
 **Getting around:** fold the sidebar into a slim rail (Ctrl/⌘+1), or jump to any folder in any
 account by typing its name (Ctrl/⌘+G).
@@ -82,7 +116,9 @@ also teaches your provider's spam filter.
 
 ## Good to know
 
-- **Your mail stays on your computer.** Nothing goes anywhere but your mail servers. It's
+- **Your mail stays on your computer.** Nothing goes anywhere but your mail servers — except,
+  only when you ask for writing help, the message you're replying to and what you've written,
+  to Anthropic with your own key. It's
   stored in `~/.local/share/dev.mailclient.desktop/` on Linux and
   `~/Library/Application Support/dev.mailclient.desktop/` on macOS.
 - **Tags and Snooze on Outlook and Microsoft 365** go through Microsoft Graph, which needs

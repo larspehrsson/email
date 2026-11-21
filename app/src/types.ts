@@ -102,6 +102,8 @@ export interface MessageSummary {
   draftId: number | null;
   /** snoozed until then (a reminder still to go off), Unix seconds */
   snoozedUntil?: number | null;
+  /** bytes (the whole message, as the server counts it) */
+  size?: number;
 }
 
 export interface Addr {
@@ -145,6 +147,112 @@ export interface MessageDetail {
  */
 export type ConversationScope = 'folder' | 'all';
 
+/** A folder list's order: newest first, or by sender / first recipient (A to Z, newest first
+ *  within each). The list is grouped by the same thing. */
+export type ListSort = 'received' | 'from' | 'to' | 'size';
+
+/** What a folder's list shows: all of it, or only what passes every set condition. `keep`:
+ *  shown regardless (the open message or conversation, so reading it doesn't take it away). */
+export interface ListFilter {
+  /** false: unread only; true: read only */
+  read?: boolean | null;
+  flagged?: boolean;
+  attachments?: boolean;
+  keep?: number | null;
+}
+
+/** A person in the address book (id 0: not saved yet). */
+export interface Card {
+  id: number;
+  name: string;
+  emails: string[];
+  phones: string[];
+  company: string;
+  notes: string;
+  /** a Google contact of this account (null: kept only here); for a new card, where to make it */
+  google?: number | null;
+}
+
+/** An account linked to its Google contacts. */
+export interface GoogleLink {
+  accountId: number;
+  googleEmail: string;
+  /** last good sync, Unix seconds */
+  synced: number | null;
+  error: string | null;
+  count: number;
+}
+export interface GoogleStatus {
+  /** the user's OAuth client (null: not set yet) */
+  clientId: string | null;
+  links: GoogleLink[];
+}
+
+/** Writing help (Claude, with the user's own API key). */
+export type AiTask =
+  | { kind: 'reply' }
+  | { kind: 'compose' }
+  | { kind: 'rewrite'; style: 'improve' | 'shorter' | 'longer' | 'formal' | 'friendly' | 'proofread' }
+  | { kind: 'translate'; language: string }
+  /** a question about a message (`original`: its source) */
+  | { kind: 'ask'; question: string };
+export interface AiRequest {
+  /** "Name <addr>": who's writing */
+  me: string;
+  subject: string;
+  to: string[];
+  /** the message replied to or forwarded, as plain text */
+  original: string | null;
+  /** what's written so far, as plain text */
+  draft: string;
+  /** the user's own words: what to say, or how */
+  instruction: string;
+}
+export interface AiOutcome {
+  /** all of the text (the streamed pieces may still be on their way) */
+  text: string;
+  refused: boolean;
+  truncated: boolean;
+  model: string;
+}
+export interface AiStatus {
+  configured: boolean;
+  models: string[];
+  defaultModel: string;
+}
+
+/** Messages from one sender (the sender pane), newest first, each in its folder. */
+export interface SenderPage {
+  accountId: number;
+  name: string;
+  addr: string;
+  total: number;
+  messages: MessageSummary[];
+}
+
+/** A signature: a named block put under what's written (above a reply's quote). */
+export interface Signature {
+  id: number;
+  name: string;
+  html: string;
+}
+/** An account's default signatures (null: none). */
+export interface SignatureDefaults {
+  accountId: number;
+  newId: number | null;
+  replyId: number | null;
+}
+export interface Signatures {
+  signatures: Signature[];
+  defaults: SignatureDefaults[];
+}
+
+/** A run of rows in a sorted list: a sender, a recipient, or (by date, label null) a period. */
+export interface ListGroup {
+  label: string | null;
+  count: number;
+}
+
 /** Fields plain (unprefixed) quick-search terms look in; null/empty = all three. */
 export type SearchField = 'sender' | 'recipients' | 'subject';
 
@@ -157,6 +265,8 @@ export interface ThreadSummary {
   subject: string;
   /** sender display names (or addresses), most recent first, unique, max 4 */
   participants: string[];
+  /** the newest one from someone else (ours when all are): the conversation's picture */
+  fromAddr?: string;
   /** messages in the whole conversation (all folders) */
   messageCount: number;
   unread: boolean;
@@ -256,7 +366,24 @@ export interface TagDef {
 }
 
 /** A message to send, as the composer has it (see compose in lib/compose.ts). */
+/** What the actions need about the messages behind several picked rows (`selection_info`). */
+export interface SelectionInfo {
+  /** the messages (a conversation's: those in the folder), newest first */
+  ids: number[];
+  anyUnread: boolean;
+  allFlagged: boolean;
+  tagSets: string[][];
+  snoozedUntil: number | null;
+  /** bytes, all together */
+  size: number;
+  /** each message's subject and size, as `ids` */
+  subjects: string[];
+  sizes: number[];
+}
+
 export interface SendRequest {
+  /** whole messages to send along as .eml attachments (forwarding several at once) */
+  forwardMessages?: number[];
   accountId: number;
   to: Addr[];
   cc: Addr[];
@@ -377,7 +504,22 @@ export interface OpenMessagePayload {
 }
 
 /** Native macOS menu bar commands. */
-export type MenuActionId = 'search' | 'toggle-threaded' | 'toggle-scope' | 'add-account' | 'shortcuts' | 'settings' | 'show-log' | 'new-message';
+export type MenuActionId =
+  | 'search'
+  | 'toggle-threaded'
+  | 'toggle-scope'
+  | 'add-account'
+  | 'shortcuts'
+  | 'settings'
+  | 'show-log'
+  | 'new-message'
+  | 'sort-received'
+  | 'sort-from'
+  | 'sort-to'
+  | 'sort-size'
+  | 'show-source'
+  | 'sender-panel'
+  | 'address-book';
 export interface MenuActionPayload {
   id: MenuActionId;
 }
@@ -398,6 +540,8 @@ export interface EventMap {
   'confirm-close': { status: ExportStatus; quit: boolean };
   /** mailto: links came from another program: take them (take_mailto_links) */
   mailto: null;
+  /** writing help: a piece of the text being written for request `requestId` */
+  'ai-text': { requestId: number; text: string };
 }
 
 export interface CommandMap {
@@ -409,7 +553,23 @@ export interface CommandMap {
   cancel_sign_in: { args: undefined; ret: void };
   list_folders: { args: { accountId: number }; ret: Folder[] };
   open_folder: { args: { folderId: number }; ret: void };
-  list_messages: { args: { folderId: number; offset: number; limit: number }; ret: MessagePage };
+  list_messages: { args: { folderId: number; offset: number; limit: number; sort: ListSort; filter?: ListFilter }; ret: MessagePage };
+  list_signatures: { args: undefined; ret: Signatures };
+  list_cards: { args: undefined; ret: Card[] };
+  save_card: { args: { card: Card }; ret: number };
+  delete_card: { args: { id: number }; ret: void };
+  ai_status: { args: undefined; ret: AiStatus };
+  ai_set_key: { args: { key: string | null }; ret: void };
+  ai_run: { args: { requestId: number; model: string; task: AiTask; request: AiRequest }; ret: AiOutcome };
+  ai_cancel: { args: { requestId: number }; ret: void };
+  sender_messages: {
+    args: { messageId: number | null; accountId: number | null; addr: string | null; offset: number; limit: number };
+    ret: SenderPage | null;
+  };
+  save_signature: { args: { id: number | null; name: string; html: string }; ret: number };
+  delete_signature: { args: { id: number }; ret: void };
+  set_signature_defaults: { args: { accountId: number; newId: number | null; replyId: number | null }; ret: void };
+  list_groups: { args: { folderId: number; threaded: boolean; sort: ListSort; filter?: ListFilter; bounds: number[] }; ret: ListGroup[] };
   get_message: { args: { id: number; allowRemote: boolean }; ret: MessageDetail | null };
   search_messages: {
     args: {
@@ -423,7 +583,7 @@ export interface CommandMap {
     ret: MessagePage;
   };
   list_threads: {
-    args: { folderId: number; offset: number; limit: number; scope: ConversationScope; includeTrash: boolean };
+    args: { folderId: number; offset: number; limit: number; scope: ConversationScope; includeTrash: boolean; filter?: ListFilter };
     ret: ThreadPage;
   };
   get_thread: {
@@ -437,14 +597,36 @@ export interface CommandMap {
   save_all_attachments: { args: { messageId: number }; ret: string[] };
   apply_action: { args: { action: Action; messageIds: number[]; folderId: number }; ret: ActionResult };
   undo_action: { args: { opId: number }; ret: void };
+  mark_folder_read: { args: { folderId: number }; ret: number };
+  list_item_ids: {
+    args: { folderId: number; threaded: boolean; sort: ListSort; filter?: ListFilter; offset: number; limit: number };
+    ret: number[];
+  };
+  selection_info: { args: { folderId: number; items: number[]; threaded: boolean }; ret: SelectionInfo };
+  sender_folders: { args: { messageIds: number[] }; ret: { folderId: number; count: number }[] };
+  sender_icon: { args: { addr: string }; ret: string | null };
+  account_logos: { args: undefined; ret: { accountId: number; dataUrl: string }[] };
+  google_status: { args: undefined; ret: GoogleStatus };
+  message_source: { args: { id: number }; ret: string };
+  set_google_client: { args: { id: string | null; secret: string | null }; ret: void };
+  google_connect: { args: { accountId: number }; ret: string };
+  google_disconnect: { args: { accountId: number }; ret: void };
+  google_sync: { args: { accountId: number | null }; ret: boolean };
+  set_account_logo: { args: { accountId: number; dataUrl: string | null }; ret: void };
   list_tags: { args: undefined; ret: TagDef[] };
   set_tag: { args: { keyword: string | null; name: string; color: string }; ret: string };
   delete_tag: { args: { keyword: string }; ret: void };
   app_version: { args: undefined; ret: string };
   reveal_path: { args: { path: string }; ret: void };
-  index_of: { args: { folderId: number; id: number; threaded: boolean }; ret: number | null };
-  locate_message: { args: { folderId: number; messageId: number; threaded: boolean }; ret: { id: number; index: number } | null };
-  next_unread: { args: { folderId: number; after: number | null; threaded: boolean; back: boolean }; ret: NextUnread | null };
+  index_of: { args: { folderId: number; id: number; threaded: boolean; sort: ListSort; filter?: ListFilter }; ret: number | null };
+  locate_message: {
+    args: { folderId: number; messageId: number; threaded: boolean; sort: ListSort; filter?: ListFilter };
+    ret: { id: number; index: number } | null;
+  };
+  next_unread: {
+    args: { folderId: number; after: number | null; threaded: boolean; back: boolean; sort: ListSort; filter?: ListFilter };
+    ret: NextUnread | null;
+  };
   show_log: { args: undefined; ret: void };
   send_message: { args: { request: SendRequest }; ret: SendQueued };
   cancel_send: { args: { id: number }; ret: unknown | null };
@@ -460,6 +642,9 @@ export interface CommandMap {
   open_devtools: { args: undefined; ret: void };
   message_in_folder: { args: { id: number; folderId: number | null }; ret: boolean };
   set_allow_remote: { args: { id: number; allow: boolean }; ret: void };
+  allow_remote_sender: { args: { id: number }; ret: string };
+  remote_senders: { args: undefined; ret: string[] };
+  set_remote_sender: { args: { addr: string; on: boolean }; ret: void };
   update_password: { args: { accountId: number; password: string }; ret: void };
   set_keep_attachments: { args: { accountId: number; keep: boolean }; ret: void };
   set_display_name: { args: { accountId: number; name: string }; ret: void };

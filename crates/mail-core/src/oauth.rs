@@ -318,6 +318,87 @@ fn parse_response(raw: &[u8]) -> Result<(u16, String)> {
     Ok((status, String::from_utf8_lossy(&body).into_owned()))
 }
 
+// ------------------------------------------------------------- Google (Contacts)
+
+const GOOGLE_AUTHORIZE: &str = "https://accounts.google.com/o/oauth2/v2/auth";
+const GOOGLE_TOKEN_HOST: &str = "oauth2.googleapis.com";
+/// Contacts, read and write; and who signed in (the ID token's address).
+pub const GOOGLE_CONTACTS_SCOPES: &str = "https://www.googleapis.com/auth/contacts openid email";
+
+/// The user's own OAuth client (a Desktop app client made in Google Cloud Console).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GoogleClient {
+    pub id: String,
+    pub secret: String,
+}
+
+/// Google wants the loopback address itself (localhost "may cause issues").
+pub fn google_redirect(uri: &str) -> String {
+    uri.replace("://localhost:", "://127.0.0.1:")
+}
+
+pub fn google_authorize_url(client: &GoogleClient, redirect: &str, state: &str, challenge: &str, login_hint: Option<&str>) -> String {
+    let mut q = form_urlencoded::Serializer::new(String::new());
+    q.append_pair("client_id", &client.id)
+        .append_pair("redirect_uri", redirect)
+        .append_pair("response_type", "code")
+        .append_pair("scope", GOOGLE_CONTACTS_SCOPES)
+        .append_pair("state", state)
+        .append_pair("code_challenge", challenge)
+        .append_pair("code_challenge_method", "S256")
+        .append_pair("access_type", "offline")
+        // A refresh token every time (connecting again after a disconnect).
+        .append_pair("prompt", "consent");
+    if let Some(hint) = login_hint {
+        q.append_pair("login_hint", hint);
+    }
+    format!("{GOOGLE_AUTHORIZE}?{}", q.finish())
+}
+
+pub async fn google_exchange(client: &GoogleClient, code: &str, verifier: &str, redirect: &str) -> Result<Tokens> {
+    google_token(&[
+        ("client_id", client.id.as_str()),
+        ("client_secret", client.secret.as_str()),
+        ("grant_type", "authorization_code"),
+        ("code", code),
+        ("redirect_uri", redirect),
+        ("code_verifier", verifier),
+    ])
+    .await
+}
+
+pub async fn google_refresh(client: &GoogleClient, refresh_token: &str) -> Result<Tokens> {
+    google_token(&[
+        ("client_id", client.id.as_str()),
+        ("client_secret", client.secret.as_str()),
+        ("grant_type", "refresh_token"),
+        ("refresh_token", refresh_token),
+    ])
+    .await
+}
+
+async fn google_token(form: &[(&str, &str)]) -> Result<Tokens> {
+    let body = form_urlencoded::Serializer::new(String::new()).extend_pairs(form).finish();
+    let (status, text) = post_form(GOOGLE_TOKEN_HOST, "/token", &body).await?;
+    let v: serde_json::Value =
+        serde_json::from_str(&text).with_context(|| format!("unexpected answer from Google (HTTP {status})"))?;
+    if status != 200 {
+        let code = v["error"].as_str().unwrap_or("error");
+        let why = v["error_description"].as_str().unwrap_or("").to_string();
+        // invalid_grant: revoked, expired (a client in "Testing" expires them after 7 days).
+        if code == "invalid_grant" {
+            return Err(anyhow!(crate::gcontacts::PeopleError::SignIn(why)));
+        }
+        bail!("Google refused the sign-in ({code}): {why}");
+    }
+    Ok(Tokens {
+        access_token: v["access_token"].as_str().ok_or_else(|| anyhow!("no access token in Google's answer"))?.to_string(),
+        refresh_token: v["refresh_token"].as_str().map(str::to_string),
+        expires_in: v["expires_in"].as_u64().unwrap_or(3600),
+        id_token: v["id_token"].as_str().map(str::to_string),
+    })
+}
+
 /// The signed-in address from an ID token (its payload, not checked: it came straight from
 /// Microsoft over TLS). `email`, else `preferred_username` (the sign-in name, an address for
 /// mail accounts).

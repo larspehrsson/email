@@ -3,8 +3,8 @@ import { api, errorMessage, type Addr, type Attachment, type MessageDetail } fro
 import { AttachmentControl } from './Attachments';
 export { AttachmentControl };
 import { analyzePlain, collapseHtmlQuotes, QUOTE_FRAME_CSS, type QNode } from '../lib/quotes';
-import { cacheGet, cacheMarkRemoteAllowed, cachePut, onMessageReady, readyAt } from '../lib/body';
-import { avatarColor, initials, linkify, longDate } from '../lib/format';
+import { cacheClear, cacheGet, cacheMarkRemoteAllowed, cachePut, onMessageReady, readyAt } from '../lib/body';
+import { linkify, longDate } from '../lib/format';
 import { patchSelectedSummary, readerMessageId, restorePending, searchActive, selectedFolderId, selectedMessageId, selectedSummary } from '../state';
 import { HeaderActions, type ActionTarget } from './Actions';
 import { pendingSnooze } from './Snooze';
@@ -77,23 +77,8 @@ function HtmlFrame(props: { doc: string }) {
 
 // ------------------------------------------------------------- small pieces
 
-export function Avatar(props: { name: string | null; addr: string; size?: number }) {
-  const size = () => props.size ?? 40;
-  return (
-    <div
-      class="avatar"
-      style={{
-        background: avatarColor(props.addr),
-        width: `${size()}px`,
-        height: `${size()}px`,
-        'font-size': `${Math.round(size() * 0.38)}px`,
-      }}
-      aria-hidden="true"
-    >
-      {initials(props.name, props.addr)}
-    </div>
-  );
-}
+export { Avatar } from './Avatar';
+import { Avatar } from './Avatar';
 
 function addrLabel(a: Addr) {
   return a.name ? a.name : a.addr;
@@ -455,6 +440,21 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
                 <span class="dot-sep">·</span>
                 <button class="link-btn" onClick={() => allowRemoteFor(readerMessageId())}>
                   Load images
+                </button>
+                <span class="dot-sep">·</span>
+                <button
+                  class="link-btn"
+                  title={`Always load images in mail from ${h().from.addr}`}
+                  onClick={() => {
+                    const id = readerMessageId();
+                    if (id == null) return;
+                    void api.allowRemoteSender(id).then(() => {
+                      cacheClear();
+                      allowRemoteFor(id);
+                    }, () => {});
+                  }}
+                >
+                  Always from this sender
                 </button>
               </div>
             </Show>

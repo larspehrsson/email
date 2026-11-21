@@ -1,6 +1,6 @@
 import { batch, createEffect, createMemo, createRoot, createSignal, on, untrack } from 'solid-js';
 import { createStore, produce, reconcile } from 'solid-js/store';
-import { api, events, type Account, type Folder, type MessageSummary, type SyncStatus, type ThreadSummary, type ConversationScope, type SearchField } from './api';
+import { api, events, type Account, type Folder, type MessageSummary, type SyncStatus, type ThreadSummary, type ConversationScope, type ListSort, type SearchField } from './api';
 import { accountMarks, type AccountMark } from './lib/accountMarks';
 import { loadPref, savePref } from './lib/format';
 
@@ -52,13 +52,22 @@ const [selectedFolderId, setSelectedFolderId] = createSignal<number | null>(null
 const [selectedMessageId, setSelectedMessageId] = createSignal<number | null>(null);
 const [selectedSummary, setSelectedSummary] = createSignal<MessageSummary | null>(null);
 
-/** Conversation view: list shows threads, reader shows the whole conversation. Persisted. */
-const [threaded, setThreadedSig] = createSignal<boolean>(loadPref<boolean>('ui.threaded', true) !== false);
+/** "Group by conversation" as chosen (persisted). */
+const [threadedPref, setThreadedSig] = createSignal<boolean>(loadPref<boolean>('ui.threaded', true) !== false);
+/** The folder list's order (and grouping); app-wide, persisted. */
+const [listSort, setListSortSig] = createSignal<ListSort>(
+  ((s) => (s === 'from' || s === 'to' || s === 'size' ? s : 'received'))(loadPref<string>('ui.listSort', 'received')),
+);
+/** Conversation view in effect: list shows threads, reader shows the whole conversation. Only
+ *  sorted by date: a conversation has no one sender to sort or group it by. */
+const threaded = createRoot(() => createMemo(() => threadedPref() && listSort() === 'received'));
 const [selectedThread, setSelectedThread] = createSignal<ThreadSummary | null>(null);
 const selectedThreadId = () => selectedThread()?.id ?? null;
 
 export {
   threaded,
+  threadedPref,
+  listSort,
   selectedThread,
   selectedThreadId,
   accounts,
@@ -97,6 +106,23 @@ export function selectMessage(m: MessageSummary | null): void {
     setSelectedMessageId(m ? m.id : null);
     setSelectedSummary(m ? { ...m } : null);
   });
+}
+
+// ------------------------------------------------------------- main view
+
+/** What fills the window beside the sidebar: mail, or the address book. */
+export type MainView = 'mail' | 'contacts';
+const [mainView, setMainView] = createSignal<MainView>('mail');
+export { mainView, setMainView };
+
+// ------------------------------------------------------------- sender pane
+
+/** The pane beside the reader with everything from the sender on screen. Persisted. */
+const [senderPane, setSenderPaneSig] = createSignal<boolean>(loadPref<boolean>('ui.senderPane', false) === true);
+export { senderPane };
+export function setSenderPane(on: boolean): void {
+  setSenderPaneSig(on);
+  savePref('ui.senderPane', on);
 }
 
 // ------------------------------------------------------------- conversation scope
@@ -256,13 +282,66 @@ export function flushReader(): void {
 }
 
 export function setThreaded(v: boolean): void {
-  if (v === threaded()) return;
+  if (v === threadedPref()) return;
   batch(() => {
+    const was = threaded();
     setThreadedSig(v);
-    selectMessage(null);
-    selectThread(null);
+    if (threaded() !== was) {
+      selectMessage(null);
+      selectThread(null);
+    }
   });
   savePref('ui.threaded', v);
+}
+
+/** Sort (and group) the folder list. Switching in or out of conversations (they only sort by
+ *  date) starts without a selection, like "Group by conversation"; otherwise it stays. */
+export function setListSort(s: ListSort): void {
+  if (s === listSort()) return;
+  batch(() => {
+    const was = threaded();
+    setListSortSig(s);
+    if (threaded() !== was) {
+      selectMessage(null);
+      selectThread(null);
+    }
+  });
+  savePref('ui.listSort', s);
+}
+
+/** Rows picked in the folder list (⌘/Ctrl-click, ⇧-click, Select All): their ids (messages,
+ *  or conversations when grouped). Fewer than two is no selection of several: the open row
+ *  is just the selected one then. Cleared when the list goes (another folder, sort, filter). */
+const [picked, setPickedSig] = createSignal<ReadonlySet<number>>(new Set());
+export { picked };
+export function setPicked(ids: Iterable<number>): void {
+  const s = new Set(ids);
+  if (s.size < 2 && picked().size === 0) return;
+  setPickedSig(s.size >= 2 ? s : new Set<number>());
+}
+export const multiPicked = () => picked().size >= 2;
+
+/** The Add account form is open (sidebar, Settings › Accounts, File menu). */
+const [addingAccount, setAddingAccount] = createSignal(false);
+export { addingAccount, setAddingAccount };
+
+/** The list's quick filter (View options › Show). Not kept between runs: a list that starts
+ *  filtered looks like missing mail. */
+export type QuickFilter = { read: boolean | null; flagged: boolean; attachments: boolean };
+export const NO_FILTER: QuickFilter = { read: null, flagged: false, attachments: false };
+const [listFilter, setListFilterSig] = createSignal<QuickFilter>(NO_FILTER);
+export { listFilter };
+export const filterOn = (f: QuickFilter = listFilter()) => f.read != null || f.flagged || f.attachments;
+export function setListFilter(f: QuickFilter): void {
+  const cur = listFilter();
+  if (f.read === cur.read && f.flagged === cur.flagged && f.attachments === cur.attachments) return;
+  setListFilterSig({ ...f });
+}
+/** "Unread · Starred · With attachments" */
+export function filterLabel(f: QuickFilter = listFilter()): string {
+  return [f.read === false ? 'Unread' : f.read === true ? 'Read' : null, f.flagged ? 'Starred' : null, f.attachments ? 'With attachments' : null]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 // N/P crossed into another folder: once its list is up, it selects the first (or, going back,

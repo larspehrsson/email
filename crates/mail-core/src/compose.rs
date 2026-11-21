@@ -111,10 +111,69 @@ fn getrandom(buf: &mut [u8]) {
     }
 }
 
-/// Build the message: multipart/alternative (plain text from the HTML, then HTML), inside
-/// multipart/mixed when there are attachments.
+/// An image carried in the HTML itself (`<img src="data:image/png;base64,…">`, as a picture
+/// pasted into a signature): sent as a part of its own that the HTML refers to by `cid:`, since
+/// Gmail, Outlook and others don't show `data:` images.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InlineImage {
+    pub content_type: String,
+    pub cid: String,
+    pub data: Vec<u8>,
+}
+
+/// The HTML with its `data:` images taken out into [`InlineImage`]s (one per distinct image),
+/// the `src`s pointing at their `cid:`. `tag` makes the Content-IDs unique (a Message-ID).
+pub fn inline_images(html: &str, tag: &str) -> (String, Vec<InlineImage>) {
+    use base64::Engine;
+    let mut out = String::with_capacity(html.len());
+    let mut images: Vec<InlineImage> = Vec::new();
+    let mut rest = html;
+    while let Some(at) = rest.find("data:image/") {
+        // Only an attribute value: src="data:…" or src='data:…'.
+        let quote = rest[..at].chars().next_back();
+        let is_src = matches!(quote, Some('"') | Some('\'')) && rest[..at - 1].trim_end().to_ascii_lowercase().ends_with("src=");
+        let Some(q) = quote.filter(|_| is_src) else {
+            out.push_str(&rest[..at + 11]);
+            rest = &rest[at + 11..];
+            continue;
+        };
+        let value_end = rest[at..].find(q).map(|e| at + e).unwrap_or(rest.len());
+        let value = &rest[at..value_end];
+        let decoded = value.split_once(";base64,").and_then(|(head, b64)| {
+            let ct = head.strip_prefix("data:")?.to_ascii_lowercase();
+            let clean: String = b64.chars().filter(|c| !c.is_whitespace()).collect();
+            let data = base64::engine::general_purpose::STANDARD.decode(clean).ok()?;
+            Some((ct, data))
+        });
+        out.push_str(&rest[..at]);
+        match decoded {
+            Some((content_type, data)) => {
+                let cid = match images.iter().find(|i| i.data == data) {
+                    Some(i) => i.cid.clone(),
+                    None => {
+                        let cid = format!("img{}.{tag}", images.len() + 1);
+                        images.push(InlineImage { content_type, cid: cid.clone(), data });
+                        cid
+                    }
+                };
+                out.push_str("cid:");
+                out.push_str(&cid);
+            }
+            None => out.push_str(value),
+        }
+        rest = &rest[value_end..];
+    }
+    out.push_str(rest);
+    (out, images)
+}
+
+/// Build the message: multipart/alternative (plain text from the HTML, then HTML — in
+/// multipart/related with its images when it has any), inside multipart/mixed when there are
+/// attachments.
 pub fn build(msg: &Outgoing, message_id: &str, date: i64) -> Result<Vec<u8>> {
-    let text = mail_parser::decoders::html::html_to_text(&msg.html);
+    use mail_builder::mime::MimePart;
+    let (html, images) = inline_images(&msg.html, message_id);
+    let text = mail_parser::decoders::html::html_to_text(&html);
     let mut b = MessageBuilder::new().message_id(message_id).date(date).subject(msg.subject.as_str());
     if let Some(from) = &msg.from {
         b = b.from(address(std::slice::from_ref(from)));
@@ -131,11 +190,26 @@ pub fn build(msg: &Outgoing, message_id: &str, date: i64) -> Result<Vec<u8>> {
     if !msg.references.is_empty() {
         b = b.references(msg.references.iter().map(|s| s.as_str()).collect::<Vec<_>>());
     }
-    b = b.text_body(text).html_body(msg.html.as_str());
-    for a in &msg.attachments {
-        b = b.attachment(a.content_type.as_str(), a.name.as_str(), a.data.as_slice());
-    }
-    Ok(b.write_to_vec()?)
+    let html_part = if images.is_empty() {
+        MimePart::new("text/html", html.as_str())
+    } else {
+        let mut parts = vec![MimePart::new("text/html", html.as_str())];
+        for i in &images {
+            parts.push(MimePart::new(i.content_type.as_str(), i.data.as_slice()).inline().cid(i.cid.as_str()));
+        }
+        MimePart::new("multipart/related", parts)
+    };
+    let alternative = MimePart::new("multipart/alternative", vec![MimePart::new("text/plain", text.as_str()), html_part]);
+    let body = if msg.attachments.is_empty() {
+        alternative
+    } else {
+        let mut parts = vec![alternative];
+        for a in &msg.attachments {
+            parts.push(MimePart::new(a.content_type.as_str(), a.data.as_slice()).attachment(a.name.as_str()));
+        }
+        MimePart::new("multipart/mixed", parts)
+    };
+    Ok(b.body(body).write_to_vec()?)
 }
 
 // ------------------------------------------------------------- replies and forwards
@@ -317,6 +391,63 @@ mod tests {
         assert!(parsed.body_text(0).unwrap().contains("Hello Jane"));
         assert!(parsed.body_html(0).unwrap().contains("<b>Jane</b>"));
         assert_eq!(parsed.attachment(0).unwrap().attachment_name(), Some("notes.txt"));
+    }
+
+    #[test]
+    fn pictures_in_the_html_go_as_inline_parts() {
+        use base64::Engine;
+        let png = vec![0x89, b'P', b'N', b'G', 1, 2, 3];
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+        let html = format!(
+            r#"<p>Hi</p><p><img src="data:image/png;base64,{b64}" width="120"> <img alt="again" src='data:image/png;base64,{b64}'></p><p>data:image/png is just text here</p>"#
+        );
+        let (out, images) = inline_images(&html, "m1@x");
+        assert_eq!(images.len(), 1, "the same picture once");
+        assert_eq!(images[0].content_type, "image/png");
+        assert_eq!(images[0].data, png);
+        assert_eq!(out.matches("cid:img1.m1@x").count(), 2);
+        assert!(out.contains("data:image/png is just text here"), "text left alone");
+
+        let msg = Outgoing {
+            from: Some(a("me@x.com")),
+            to: vec![a("you@y.com")],
+            subject: "Logo".into(),
+            html,
+            attachments: vec![OutAttachment { name: "a.txt".into(), content_type: "text/plain".into(), data: b"hi".to_vec() }],
+            ..Default::default()
+        };
+        let raw = build(&msg, "m1@x", 1_700_000_000).unwrap();
+        let s = String::from_utf8_lossy(&raw);
+        assert!(s.contains("multipart/related") && s.contains("multipart/mixed"), "{s}");
+        assert!(!s.contains("data:image/png;base64"), "no data: URL left");
+        let parsed = mail_parser::MessageParser::default().parse(&raw).unwrap();
+        assert!(parsed.body_html(0).unwrap().contains("cid:img1.m1@x"));
+        let parts: Vec<_> = parsed.attachments().collect();
+        let inline = parts.iter().find(|p| p.content_id() == Some("img1.m1@x")).expect("the picture's part");
+        assert_eq!(inline.contents(), png.as_slice());
+        assert!(parts.iter().any(|p| p.attachment_name() == Some("a.txt")));
+        // No pictures: as before.
+        let plain = build(&Outgoing { html: "<p>x</p>".into(), ..msg.clone() }, "m2@x", 0).unwrap();
+        assert!(!String::from_utf8_lossy(&plain).contains("multipart/related"));
+    }
+
+    #[test]
+    fn a_message_forwarded_as_an_attachment() {
+        let inner = b"From: a@x.com\r\nTo: b@y.com\r\nSubject: Original\r\nMessage-ID: <o@x>\r\n\r\nHello there\r\n".to_vec();
+        let msg = Outgoing {
+            from: Some(a("me@x.com")),
+            to: vec![a("you@y.com")],
+            subject: "Fwd: 1 message".into(),
+            html: "<p>See attached</p>".into(),
+            attachments: vec![OutAttachment { name: "Original.eml".into(), content_type: "message/rfc822".into(), data: inner }],
+            ..Default::default()
+        };
+        let raw = build(&msg, "f@x", 0).unwrap();
+        let parsed = mail_parser::MessageParser::default().parse(&raw).unwrap();
+        let part = parsed.attachment(0).unwrap();
+        let nested = part.message().expect("read as a message");
+        assert_eq!(nested.subject(), Some("Original"));
+        assert!(nested.body_text(0).unwrap().contains("Hello there"));
     }
 
     #[test]

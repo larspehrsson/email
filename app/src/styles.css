@@ -255,6 +255,9 @@ body.resizing iframe {
   grid-template-columns: var(--sidebar-w) var(--list-w) minmax(0, 1fr);
   height: 100%;
 }
+.app.with-sender {
+  grid-template-columns: var(--sidebar-w) var(--list-w) minmax(0, 1fr) var(--sender-w, 300px);
+}
 
 .pane {
   position: relative;
@@ -493,6 +496,40 @@ body.resizing iframe {
   padding: 0 20px 0 24px;
   border-bottom: 1px solid var(--sep);
 }
+/* the list's quick filter, on (View options › Show) */
+.filter-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 20px 6px 24px;
+  font-size: 12px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  border-bottom: 1px solid var(--sep);
+}
+.filter-what {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.filter-clear {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 5px;
+}
+.filter-clear:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
 .list-title {
   min-width: 0;
 }
@@ -651,6 +688,15 @@ body.resizing iframe {
 .row.unread .row-date {
   color: var(--rs-muted, var(--accent));
   font-weight: 500;
+}
+/* sorted by size: the size before the date */
+.row-size {
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--rs-muted, var(--text-2));
+  font-variant-numeric: tabular-nums;
+  margin-right: 8px;
 }
 
 .row-line2 {
@@ -1962,15 +2008,25 @@ body.resizing iframe {
 
 /* popover rows: two fixed lines (email / status) so neither is squeezed */
 .sync-popover .sp-row {
-  height: 46px;
-  grid-template-columns: 14px minmax(0, 1fr);
+  height: 48px;
+  grid-template-columns: 22px minmax(0, 1fr);
+  column-gap: 10px;
   grid-template-rows: 17px 16px;
   align-content: center;
   row-gap: 1px;
 }
-.sync-popover .sp-row .sf-icon {
+.sync-popover .sp-row .acct-dot {
+  margin: 0;
   grid-row: 1 / span 2;
   align-self: center;
+  font-size: 11px;
+}
+.sync-popover .sp-status {
+  gap: 5px;
+}
+.sync-popover .sp-status .sf-icon {
+  width: 12px;
+  height: 12px;
 }
 .sync-popover .sp-row .sf-email {
   grid-column: 2;
@@ -2189,6 +2245,77 @@ body.resizing iframe {
   font-size: 11px;
   font-weight: 600;
   color: var(--text-3);
+}
+.vm-item.disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+.vm-item.disabled:hover {
+  background: none;
+  color: var(--text-3);
+}
+.vm-item.disabled:hover kbd {
+  color: inherit;
+  border-color: var(--sep);
+}
+
+/* A group's header in the message list (a period, a sender…), above its first row. */
+.group-head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 30px;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 0 14px 5px 21px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  contain: strict;
+  cursor: pointer;
+}
+.group-head:hover {
+  color: var(--text-2);
+}
+/* the group's trash: on hover */
+.group-del {
+  flex: none;
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 20px;
+  margin-bottom: -3px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 100ms;
+}
+.group-head:hover .group-del,
+.group-del:focus-visible {
+  opacity: 1;
+}
+.group-del:hover {
+  background: var(--bg-hover);
+  color: var(--danger);
+}
+.group-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.group-count {
+  flex: none;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 .reveal-row {
@@ -4221,6 +4348,40 @@ html.macos .app.rail-mode .search-bar {
   outline: none;
   box-shadow: none;
 }
+/* the signature under the text: its picker, then how it will look */
+.cmp-sig {
+  margin: 4px 0 14px;
+  cursor: default;
+}
+.cmp-sig-select {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-3);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 1px 2px;
+  margin-left: -3px;
+  outline: none;
+}
+.cmp-sig-select:hover,
+.cmp-sig-select:focus-visible {
+  border-color: var(--sep-strong);
+  color: var(--text-2);
+}
+.cmp-sig-body {
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.cmp-sig-body p {
+  margin: 0;
+}
+.cmp-sig-body a {
+  color: var(--accent);
+}
 .cmp-editor .ProseMirror li > p {
   margin: 0;
 }
@@ -4777,4 +4938,867 @@ body.dragging-account * {
 .st-default {
   margin-left: 8px;
   font-size: 12px;
+}
+
+/* Settings › Signatures */
+.st-sigs {
+  display: flex;
+  flex-direction: column;
+}
+.sig-cols {
+  /* its own height (a tall HTML signature): the page scrolls, nothing overlaps */
+  flex: none;
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  gap: 16px;
+  min-height: 230px;
+}
+.sig-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-right: 1px solid var(--sep);
+  padding-right: 12px;
+}
+.sig-item {
+  text-align: left;
+  font-size: 13px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sig-item:hover {
+  background: var(--bg-hover);
+}
+.sig-item.on {
+  background: var(--sel-folder-bg);
+  color: var(--sel-folder-fg);
+  font-weight: 600;
+}
+.sig-add {
+  align-self: flex-start;
+  margin-top: 6px;
+  font-size: 12.5px;
+}
+.sig-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.sig-edit.empty .sig-toolbar,
+.sig-edit.empty .sig-editor,
+.sig-edit.empty .sig-name {
+  display: none;
+}
+.sig-name {
+  width: 100%;
+}
+.sig-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.sig-delete {
+  font-size: 12.5px;
+  color: var(--danger, #d93025);
+}
+.sig-editor {
+  flex: 1;
+  border: 1px solid var(--sep-strong);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: var(--bg-reader);
+  cursor: text;
+}
+.sig-editor .ProseMirror {
+  min-height: 110px;
+}
+.sig-none {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+.sig-defaults-head {
+  margin: 6px 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.sig-defaults {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 170px 170px;
+  gap: 6px 10px;
+  align-items: center;
+  font-size: 13px;
+}
+.sig-acct {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sig-default {
+  width: 100%;
+}
+
+/* The sender pane: everything from the sender on screen, beside the reader */
+.pane-sender {
+  border-left: 1px solid var(--sep);
+  background: var(--bg-list, var(--bg));
+}
+.sender-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+}
+.sp-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 14px 10px 10px 16px;
+  border-bottom: 1px solid var(--sep);
+}
+.sp-who {
+  flex: 1;
+  min-width: 0;
+}
+.sp-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sp-name.sp-dim {
+  color: var(--text-3);
+}
+.sp-addr {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sp-empty {
+  padding: 18px 16px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+.sp-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 38px;
+  padding: 2px 8px 2px 16px;
+  border-bottom: 1px solid var(--sep);
+}
+.sp-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sp-fill {
+  flex: 1;
+}
+.sp-delete:hover {
+  color: var(--danger, #d93025);
+}
+.sp-everything {
+  margin: 6px 16px 0;
+  align-self: flex-start;
+  font-size: 12.5px;
+}
+.sp-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 0 16px;
+}
+.sender-pane .sp-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 12px 7px 16px;
+  cursor: default;
+  border-left: 2px solid transparent;
+}
+.sender-pane .sp-row:hover {
+  background: var(--bg-hover);
+}
+.sender-pane .sp-row.on {
+  background: var(--sel-bg-inactive);
+}
+.sender-pane .sp-row.current {
+  border-left-color: var(--accent);
+}
+.sp-check {
+  margin-top: 2px;
+  flex: none;
+}
+.sp-text {
+  flex: 1;
+  min-width: 0;
+}
+.sp-line1 {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.sp-subject {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sender-pane .sp-row.unread .sp-subject {
+  font-weight: 600;
+}
+.sp-date {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.sp-line2 {
+  margin-top: 1px;
+  font-size: 12px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sp-folder {
+  color: var(--text-2);
+}
+.sp-more {
+  margin: 8px 16px;
+  font-size: 12.5px;
+}
+
+/* Writing help: Settings › AI and the composer's panel */
+.ai-intro,
+.ai-privacy {
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin: 0 0 14px;
+  max-width: 560px;
+}
+.ai-privacy {
+  margin-top: 10px;
+}
+.st-input.ai-key {
+  width: 300px;
+}
+.st-input.ai-model {
+  width: 300px;
+}
+.fmt-ai {
+  width: auto;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.ai-panel {
+  margin: 8px 28px 0;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--sep-strong);
+  border-radius: 10px;
+  background: var(--bg-reader);
+  box-shadow: var(--shadow-card);
+}
+.ai-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.ai-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.ai-note {
+  margin: 4px 0;
+  font-size: 13px;
+  color: var(--text-3);
+}
+.ai-ask {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.ai-input {
+  flex: 1;
+  resize: vertical;
+  min-height: 40px;
+  padding: 7px 9px;
+  border: 1px solid var(--sep-strong);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.ai-go {
+  flex: none;
+}
+.ai-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.ai-chips-label {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.ai-lang {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid var(--sep-strong);
+  border-radius: 12px;
+  padding: 2px 6px;
+}
+.ai-result {
+  margin-top: 10px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border-radius: 7px;
+  background: var(--bg-hover);
+}
+.ai-text {
+  white-space: pre-wrap;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text);
+}
+.ai-wait {
+  font-size: 13px;
+  color: var(--text-3);
+}
+.ai-msg {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: var(--danger, #d93025);
+}
+.ai-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* The address book: over the mail, beside the sidebar */
+.contacts-layer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--sidebar-w);
+  right: 0;
+  z-index: 20;
+  background: var(--bg-reader);
+}
+.contacts {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  height: 100%;
+}
+.ct-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--sep);
+  background: var(--bg-list, var(--bg));
+}
+.ct-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 14px 10px 8px 16px;
+}
+.ct-title {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+.ct-search {
+  margin: 0 12px 8px 16px;
+  width: auto;
+}
+.ct-rows {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 8px 12px;
+}
+.ct-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 7px;
+  text-align: left;
+}
+.ct-row:hover {
+  background: var(--bg-hover);
+}
+.ct-row.on {
+  background: var(--sel-folder-bg);
+}
+.ct-name {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text);
+}
+.ct-row.on .ct-name {
+  color: var(--sel-folder-fg);
+}
+.ct-sub {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.ct-empty {
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+.ct-none {
+  padding: 28px;
+}
+.ct-detail {
+  min-width: 0;
+  overflow-y: auto;
+}
+.ct-form {
+  max-width: 560px;
+  padding: 28px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ct-big {
+  font: inherit;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--sep);
+  padding: 4px 0 8px;
+  margin-bottom: 6px;
+  outline: none;
+}
+.ct-big:focus {
+  border-bottom-color: var(--accent);
+}
+.ct-field {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  font-size: 13px;
+}
+.ct-field > span {
+  padding-top: 7px;
+  color: var(--text-3);
+}
+.ct-field .st-input {
+  width: 100%;
+}
+.ct-multi {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ct-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.ct-add {
+  align-self: flex-start;
+  font-size: 12.5px;
+}
+.ct-notes {
+  height: auto;
+  padding: 7px 10px;
+  resize: vertical;
+}
+.ct-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.ct-fill {
+  flex: 1;
+}
+.ct-msg {
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.ct-delete {
+  color: var(--danger, #d93025);
+  font-size: 13px;
+}
+.sp-card {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+/* right-click menus (ContextMenu.tsx): at the pointer */
+.ctx-menu {
+  min-width: 180px;
+  transform-origin: top left;
+}
+.st-add-account {
+  margin-top: 12px;
+}
+
+/* pictures in a signature: drag a corner to size (TipTap's resizable image) */
+.sig-editor img,
+.cmp-editor img,
+.cmp-sig-body img {
+  max-width: 100%;
+  height: auto;
+  vertical-align: middle;
+}
+.sig-editor [data-resize-container],
+.cmp-editor [data-resize-container] {
+  vertical-align: middle;
+}
+.sig-editor [data-resize-handle], .cmp-editor [data-resize-handle] {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  opacity: 0;
+  transition: opacity 120ms;
+  z-index: 1;
+}
+.sig-editor [data-resize-container]:hover [data-resize-handle], .cmp-editor [data-resize-container]:hover [data-resize-handle],
+.sig-editor .ProseMirror-selectednode [data-resize-handle], .cmp-editor .ProseMirror-selectednode [data-resize-handle],
+.sig-editor [data-resize-state='true'] [data-resize-handle], .cmp-editor [data-resize-state='true'] [data-resize-handle] {
+  opacity: 1;
+}
+.sig-editor [data-resize-handle='top-left'], .cmp-editor [data-resize-handle='top-left'] {
+  margin: -5px 0 0 -5px;
+  cursor: nwse-resize;
+}
+.sig-editor [data-resize-handle='bottom-right'], .cmp-editor [data-resize-handle='bottom-right'] {
+  margin: 0 -5px -5px 0;
+  cursor: nwse-resize;
+}
+.sig-editor [data-resize-handle='top-right'], .cmp-editor [data-resize-handle='top-right'] {
+  margin: -5px -5px 0 0;
+  cursor: nesw-resize;
+}
+.sig-editor [data-resize-handle='bottom-left'], .cmp-editor [data-resize-handle='bottom-left'] {
+  margin: 0 0 -5px -5px;
+  cursor: nesw-resize;
+}
+.sig-editor .ProseMirror-selectednode img, .cmp-editor .ProseMirror-selectednode img {
+  outline: 2px solid var(--accent);
+}
+
+/* several rows picked: the reader's place */
+.multi-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 32px;
+  text-align: center;
+  color: var(--text-2);
+}
+.multi-hint {
+  max-width: 420px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.multi-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: 520px;
+  width: 100%;
+  text-align: left;
+  font-size: 13px;
+  color: var(--text);
+}
+.multi-list li {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--sep);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.multi-list .multi-more {
+  color: var(--text-3);
+  border-bottom: 0;
+}
+.cmp-att-msg .icon {
+  flex: none;
+}
+
+/* Move list: how much of the sender's mail is in a folder (those come first) */
+.mp-count {
+  margin-left: auto;
+  flex: none;
+  font-size: 11px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.mp-row.active .mp-count {
+  color: inherit;
+}
+
+/* sender pictures in the list: a circle left of the text */
+.row-inner.with-avatar {
+  padding-left: 59px;
+}
+.row-inner.with-avatar::after {
+  left: 59px;
+}
+/* top-aligned with the text (the sender's line), the unread dot centred on it */
+.row-avatar {
+  position: absolute;
+  left: 12px;
+  top: calc((var(--row-h) - 56px) / 2 + 1px);
+}
+.row-inner.with-avatar .unread-dot {
+  top: calc((var(--row-h) - 56px) / 2 + 1px + 14px);
+}
+.avatar.pic {
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--sep);
+}
+.avatar.pic img {
+  width: 66%;
+  height: 66%;
+  object-fit: contain;
+}
+
+/* Settings › General: senders whose images always load */
+.st-remote-senders {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.st-remote-senders li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+/* an account's own picture in its marker (Settings › Accounts › Marker) */
+.acct-dot.has-logo,
+.rail-letter.has-logo {
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--sep);
+}
+.acct-dot.has-logo img,
+.rail-letter.has-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.st-mark-pic {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.st-mark-pic .acct-dot {
+  margin: 0;
+}
+
+/* Google Contacts (Settings › Accounts, the address book) */
+.gc {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.gc-linked {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gc-actions {
+  display: inline-flex;
+  gap: 14px;
+  align-items: center;
+}
+.gc-client {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 440px;
+}
+.gc-client .st-muted {
+  margin: 0;
+  line-height: 1.5;
+}
+.gc-client-note {
+  margin: 10px 0 0;
+}
+.ct-google {
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  margin-left: 6px;
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #fff;
+  background: #4285f4;
+  vertical-align: 1px;
+}
+.ct-where-text {
+  color: var(--text-2);
+}
+
+/* A question is asked over whatever asked it (Settings among them). */
+.modal-backdrop.confirm-backdrop {
+  z-index: 110;
+}
+
+/* View › Show Source: the raw message, and questions about it */
+.modal.source-view {
+  width: min(920px, calc(100vw - 48px));
+  height: min(760px, calc(100vh - 48px));
+  max-width: none;
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+  outline: none;
+}
+.src-head {
+  margin-bottom: 0;
+  gap: 12px;
+}
+.src-head h2 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.src-head-btns {
+  flex: none;
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+.src-text {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--sep);
+  border-radius: 8px;
+  background: var(--bg-sunken, var(--bg));
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+.src-ask {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.src-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.src-form {
+  display: flex;
+  gap: 8px;
+}
+.src-form .st-input {
+  flex: 1;
+}
+.src-answer {
+  max-height: 200px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  user-select: text;
+}
+.src-note {
+  margin: 0;
+  font-size: 11.5px;
+}
+
+/* Settings › Signatures › HTML: paste a signature made elsewhere, see it as it's sent */
+.sig-editor.hidden {
+  display: none;
+}
+.sig-html-btn {
+  width: auto;
+  padding: 0 7px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+.sig-html {
+  display: block;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+  min-height: 260px;
+  resize: vertical;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.sig-preview-label {
+  font-size: 11.5px;
+  margin-top: 4px;
+}
+.sig-preview {
+  padding: 10px 12px;
+  border: 1px dashed var(--sep-strong);
+  border-radius: 8px;
+  background: #fff;
+  color: #222;
+  overflow: auto;
+  max-height: 220px;
 }
