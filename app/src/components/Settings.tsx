@@ -703,7 +703,31 @@ function GeneralSection() {
           <span class="st-status error">{msg()}</span>
         </Field>
       </Show>
+      <RemoteSenders />
     </div>
+  );
+}
+
+/** Senders whose remote images always load ("Always from this sender" in the reader). */
+function RemoteSenders() {
+  const [list, { refetch }] = createResource(() => api.remoteSenders().catch(() => [] as string[]));
+  return (
+    <Field label="Images always load from">
+      <Show when={(list() ?? []).length > 0} fallback={<span class="st-muted">No one yet. “Always from this sender” over a message’s blocked images adds them.</span>}>
+        <ul class="st-remote-senders">
+          <For each={list()}>
+            {(addr) => (
+              <li>
+                <span>{addr}</span>
+                <button class="link-btn" aria-label={`Stop loading images from ${addr}`} onClick={() => void api.setRemoteSender(addr, false).then(refetch)}>
+                  Remove
+                </button>
+              </li>
+            )}
+          </For>
+        </ul>
+      </Show>
+    </Field>
   );
 }
 

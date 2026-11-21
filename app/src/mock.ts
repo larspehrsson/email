@@ -601,6 +601,8 @@ export function createMockBackend(): Backend {
   const folderMsgs = new Map<number, MessageSummary[]>();
   const byId = new Map<number, MessageSummary>();
   const remoteAllowed = new Set<number>();
+  /** "Always from this sender": lowercase addresses */
+  const remoteSenders = new Set<string>();
   /** resolves a pending mock browser sign-in as cancelled */
   let signInCancel: (() => void) | null = null;
   /** accounts downloading whole messages (Settings › Accounts › Offline) */
@@ -1097,7 +1099,7 @@ export function createMockBackend(): Backend {
       text,
       attachments: (md?.attachments ?? []).map((a) => ({ ...a })),
       hasRemoteContent,
-      remoteAllowed: remoteAllowed.has(m.id),
+      remoteAllowed: remoteAllowed.has(m.id) || remoteSenders.has(m.fromAddr.toLowerCase()),
     };
   }
 
@@ -1782,6 +1784,22 @@ export function createMockBackend(): Backend {
         setStatus(acc.id, 'connecting', null, 0, 0, null);
         setTimeout(() => void simulateSync(acc, 6_000, 'mail.example.org'), 300);
       }
+    },
+    async allow_remote_sender({ id }) {
+      await sleep(3);
+      const m = byId.get(id);
+      if (!m) throw 'This message has no sender.';
+      remoteSenders.add(m.fromAddr.toLowerCase());
+      return m.fromAddr;
+    },
+    async remote_senders() {
+      await sleep(3);
+      return [...remoteSenders].sort();
+    },
+    async set_remote_sender({ addr, on }) {
+      await sleep(3);
+      if (on) remoteSenders.add(addr.toLowerCase());
+      else remoteSenders.delete(addr.toLowerCase());
     },
     async set_allow_remote({ id, allow }) {
       await sleep(3);

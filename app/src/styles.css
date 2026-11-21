@@ -5558,3 +5558,18 @@ body.dragging-account * {
   height: 66%;
   object-fit: contain;
 }
+
+/* Settings › General: senders whose images always load */
+.st-remote-senders {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.st-remote-senders li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}

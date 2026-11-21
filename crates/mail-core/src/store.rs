@@ -218,6 +218,12 @@ CREATE TABLE IF NOT EXISTS address_book (
     updated INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
+-- Senders whose remote images always load ("Always load images from …"), lowercase addresses.
+CREATE TABLE IF NOT EXISTS remote_senders (
+    addr  TEXT PRIMARY KEY,
+    added INTEGER NOT NULL DEFAULT (unixepoch())
+);
+
 -- Sender pictures by domain (crate::icons): mime + data, or both NULL for "has none"; when.
 CREATE TABLE IF NOT EXISTS sender_icons (
     domain  TEXT PRIMARY KEY,
@@ -2711,12 +2717,43 @@ impl Store {
         Ok(())
     }
 
+    /// "Load images" chosen for this message, or always for its sender.
     pub fn allow_remote(&self, id: i64) -> Result<bool> {
         Ok(self
             .rdb()
-            .query_row("SELECT allow_remote FROM messages WHERE id=?1", [id], |r| r.get(0))
+            .query_row(
+                "SELECT m.allow_remote != 0 OR EXISTS (SELECT 1 FROM remote_senders r WHERE r.addr = lower(m.from_addr))
+                 FROM messages m WHERE m.id=?1",
+                [id],
+                |r| r.get(0),
+            )
             .optional()?
             .unwrap_or(false))
+    }
+
+    /// Always (or no longer) load remote images in mail from `addr`.
+    pub fn set_remote_sender(&self, addr: &str, on: bool) -> Result<()> {
+        let addr = addr.trim().to_lowercase();
+        if addr.is_empty() {
+            return Ok(());
+        }
+        if on {
+            self.db().execute("INSERT OR IGNORE INTO remote_senders (addr) VALUES (?1)", [&addr])?;
+        } else {
+            self.db().execute("DELETE FROM remote_senders WHERE addr=?1", [&addr])?;
+        }
+        Ok(())
+    }
+
+    /// The senders whose images always load, A to Z.
+    pub fn remote_senders(&self) -> Result<Vec<String>> {
+        let db = self.rdb();
+        let mut stmt = db.prepare_cached("SELECT addr FROM remote_senders ORDER BY addr")?;
+        Ok(stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn message_from_addr(&self, id: i64) -> Result<Option<String>> {
+        Ok(self.rdb().query_row("SELECT from_addr FROM messages WHERE id=?1", [id], |r| r.get(0)).optional()?)
     }
 
     pub fn set_allow_remote(&self, id: i64, allow: bool) -> Result<()> {
@@ -4242,6 +4279,33 @@ mod tests {
         let s = store.signatures().unwrap();
         assert_eq!(s.signatures.len(), 1);
         assert_eq!((s.defaults[0].new_id, s.defaults[0].reply_id), (None, Some(home)), "a deleted default goes");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn images_always_from_a_sender() {
+        let dir = std::env::temp_dir().join(format!("mail-core-remote-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = Store::open(&dir).unwrap();
+        let acct = store.insert_account("x@example.com", "x", Provider::Imap, "h", 993).unwrap();
+        store
+            .sync_folder_list(acct.id, &[ListedFolder { raw_name: "INBOX".into(), path: vec!["INBOX".into()], role: Some(FolderRole::Inbox), selectable: true }])
+            .unwrap();
+        let inbox = store.folders(acct.id).unwrap()[0].id;
+        let recs: Vec<HeaderRecord> = (1..=3u32)
+            .map(|u| HeaderRecord { from_addr: if u == 3 { "other@y.com".into() } else { "News@Shop.com".into() }, message_id: Some(format!("r{u}@x")), ..rec(u, 0, &[]) })
+            .collect();
+        store.upsert_headers(acct.id, inbox, &recs, &HashMap::new()).unwrap();
+        let ids: Vec<i64> = store.list_messages(inbox, 0, 10).unwrap().messages.iter().map(|m| m.id).collect();
+        assert!(ids.iter().all(|&id| !store.allow_remote(id).unwrap()));
+        store.set_remote_sender("news@shop.com", true).unwrap();
+        let from_shop = |id: i64| store.message_from_addr(id).unwrap().unwrap() == "News@Shop.com";
+        for &id in &ids {
+            assert_eq!(store.allow_remote(id).unwrap(), from_shop(id), "case aside, only that sender");
+        }
+        assert_eq!(store.remote_senders().unwrap(), ["news@shop.com"]);
+        store.set_remote_sender("NEWS@shop.com", false).unwrap();
+        assert!(store.remote_senders().unwrap().is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

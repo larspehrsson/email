@@ -1053,6 +1053,38 @@ describe('sender pane', () => {
   });
 });
 
+describe('images', () => {
+  test('always from this sender: its other mail loads images too; Settings lists it', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.fill('.search-field input', 'from:lumengoods');
+      await page.waitForSelector('.search-layer .row');
+      await page.waitForTimeout(400);
+      const fromSender = page.locator('.search-layer .row');
+      assert.ok((await fromSender.count()) >= 2, 'two from the sender');
+      await fromSender.nth(0).click();
+      const banner = page.locator('.reader .remote-banner');
+      await banner.waitFor();
+      await banner.getByRole('button', { name: 'Always from this sender' }).click();
+      await page.waitForTimeout(500);
+      assert.equal(await banner.count(), 0, 'loaded');
+      await fromSender.nth(1).click();
+      await page.waitForTimeout(800);
+      assert.equal(await page.locator('.reader .remote-banner').count(), 0, 'the next one too');
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'General' }).click();
+      await page.locator('.st-remote-senders li').first().waitFor();
+      assert.match(await page.locator('.st-remote-senders').textContent(), /lumen/i);
+      await page.locator('.st-remote-senders .link-btn').first().click();
+      await page.waitForTimeout(200);
+      assert.equal(await page.locator('.st-remote-senders li').count(), 0, 'removed');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('move list', () => {
   test("the folders with most of the sender's mail come first", async () => {
     const { page, errors, close } = await open({ threaded: false });

@@ -255,6 +255,11 @@ export const api = {
   revealPath: (path: string): Promise<void> => call('reveal_path', { path }),
   setRead: (id: number, read: boolean): Promise<void> => call('set_read', { id, read }),
   setAllowRemote: (id: number, allow: boolean): Promise<void> => call('set_allow_remote', { id, allow }),
+  /** Always load images in mail from this message's sender; the address. */
+  allowRemoteSender: (id: number): Promise<string> => call('allow_remote_sender', { id }),
+  /** Senders whose images always load. */
+  remoteSenders: (): Promise<string[]> => call('remote_senders', undefined),
+  setRemoteSender: (addr: string, on: boolean): Promise<void> => call('set_remote_sender', { addr, on }),
   updatePassword: (accountId: number, password: string): Promise<void> =>
     call('update_password', { accountId, password }),
   /** Remove an account's stored attachments (fetched again when opened); can take a minute. */

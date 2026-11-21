@@ -3,7 +3,7 @@ import { api, errorMessage, type Addr, type Attachment, type MessageDetail } fro
 import { AttachmentControl } from './Attachments';
 export { AttachmentControl };
 import { analyzePlain, collapseHtmlQuotes, QUOTE_FRAME_CSS, type QNode } from '../lib/quotes';
-import { cacheGet, cacheMarkRemoteAllowed, cachePut, onMessageReady, readyAt } from '../lib/body';
+import { cacheClear, cacheGet, cacheMarkRemoteAllowed, cachePut, onMessageReady, readyAt } from '../lib/body';
 import { linkify, longDate } from '../lib/format';
 import { patchSelectedSummary, readerMessageId, restorePending, searchActive, selectedFolderId, selectedMessageId, selectedSummary } from '../state';
 import { HeaderActions, type ActionTarget } from './Actions';
@@ -440,6 +440,21 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
                 <span class="dot-sep">·</span>
                 <button class="link-btn" onClick={() => allowRemoteFor(readerMessageId())}>
                   Load images
+                </button>
+                <span class="dot-sep">·</span>
+                <button
+                  class="link-btn"
+                  title={`Always load images in mail from ${h().from.addr}`}
+                  onClick={() => {
+                    const id = readerMessageId();
+                    if (id == null) return;
+                    void api.allowRemoteSender(id).then(() => {
+                      cacheClear();
+                      allowRemoteFor(id);
+                    }, () => {});
+                  }}
+                >
+                  Always from this sender
                 </button>
               </div>
             </Show>

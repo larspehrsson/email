@@ -93,6 +93,22 @@ async fn set_read(core: State<'_, Arc<Core>>, id: i64, read: bool) -> Res<()> {
     core.set_read(id, read).map_err(err)
 }
 
+/// Always load images from this message's sender; returns the address.
+#[tauri::command]
+async fn allow_remote_sender(core: State<'_, Arc<Core>>, id: i64) -> Res<String> {
+    core.allow_remote_from_sender(id).map_err(err)
+}
+
+#[tauri::command]
+async fn remote_senders(core: State<'_, Arc<Core>>) -> Res<Vec<String>> {
+    core.remote_senders().map_err(err)
+}
+
+#[tauri::command]
+async fn set_remote_sender(core: State<'_, Arc<Core>>, addr: String, on: bool) -> Res<()> {
+    core.set_remote_sender(&addr, on).map_err(err)
+}
+
 #[tauri::command]
 async fn set_allow_remote(core: State<'_, Arc<Core>>, id: i64, allow: bool) -> Res<()> {
     core.set_allow_remote(id, allow).map_err(err)
@@ -1319,6 +1335,9 @@ pub fn run() {
             selection_info,
             sender_folders,
             sender_icon,
+            allow_remote_sender,
+            remote_senders,
+            set_remote_sender,
             get_thread,
             update_password,
             set_keep_attachments,

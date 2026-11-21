@@ -283,6 +283,10 @@ function ExpandedCard(props: { m: MessageSummary; me: Me; folderTag?: string; ac
           <button class="link-btn" onClick={() => body.loadImages()}>
             Load images
           </button>
+          <span class="dot-sep">·</span>
+          <button class="link-btn" title={`Always load images in mail from ${props.m.fromAddr}`} onClick={() => body.alwaysFromSender()}>
+            Always from this sender
+          </button>
         </div>
       </Show>
       <div class="cm-body">

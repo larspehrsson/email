@@ -1392,6 +1392,21 @@ impl Core {
     }
 
     /// Remember the user's "Load images" choice for a message.
+    /// Always load remote images in mail from this message's sender; returns the address.
+    pub fn allow_remote_from_sender(&self, id: i64) -> Result<String> {
+        let addr = self.store.message_from_addr(id)?.filter(|a| !a.trim().is_empty()).ok_or_else(|| anyhow!("This message has no sender."))?;
+        self.store.set_remote_sender(&addr, true)?;
+        Ok(addr)
+    }
+
+    pub fn remote_senders(&self) -> Result<Vec<String>> {
+        self.store.remote_senders()
+    }
+
+    pub fn set_remote_sender(&self, addr: &str, on: bool) -> Result<()> {
+        self.store.set_remote_sender(addr, on)
+    }
+
     pub fn set_allow_remote(&self, id: i64, allow: bool) -> Result<()> {
         self.store.set_allow_remote(id, allow)
     }
