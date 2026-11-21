@@ -454,7 +454,20 @@ export interface OpenMessagePayload {
 }
 
 /** Native macOS menu bar commands. */
-export type MenuActionId = 'search' | 'toggle-threaded' | 'toggle-scope' | 'add-account' | 'shortcuts' | 'settings' | 'show-log' | 'new-message';
+export type MenuActionId =
+  | 'search'
+  | 'toggle-threaded'
+  | 'toggle-scope'
+  | 'add-account'
+  | 'shortcuts'
+  | 'settings'
+  | 'show-log'
+  | 'new-message'
+  | 'sort-received'
+  | 'sort-from'
+  | 'sort-to'
+  | 'sender-panel'
+  | 'address-book';
 export interface MenuActionPayload {
   id: MenuActionId;
 }

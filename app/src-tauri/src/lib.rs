@@ -859,7 +859,11 @@ fn macos_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
         app,
         "File",
         true,
-        &[&MenuItem::with_id(app, "new-message", "New Message", true, None::<&str>)?],
+        &[
+            &MenuItem::with_id(app, "new-message", "New Message", true, None::<&str>)?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "address-book", "Address Book", true, Some("CmdOrCtrl+Shift+B"))?,
+        ],
     )?;
     let edit = Submenu::with_items(
         app,
@@ -883,6 +887,12 @@ fn macos_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
             &MenuItem::with_id(app, "search", "Search", true, None::<&str>)?,
             &MenuItem::with_id(app, "toggle-threaded", "Group by Conversation", true, Some("CmdOrCtrl+T"))?,
             &MenuItem::with_id(app, "toggle-scope", "Show All Mail in Conversations", true, Some("CmdOrCtrl+Shift+A"))?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "sort-received", "Sort by Received", true, None::<&str>)?,
+            &MenuItem::with_id(app, "sort-from", "Sort by From", true, None::<&str>)?,
+            &MenuItem::with_id(app, "sort-to", "Sort by To", true, None::<&str>)?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "sender-panel", "Sender Panel", true, Some("CmdOrCtrl+2"))?,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::fullscreen(app, None)?,
         ],

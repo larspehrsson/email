@@ -19,6 +19,7 @@ import {
   setSenderPane,
   mainView,
   setMainView,
+  setListSort,
   conversationScope,
   setConversationScope,
 } from './state';
@@ -134,6 +135,17 @@ export function App() {
           break;
         case 'toggle-threaded':
           setThreaded(!threadedPref());
+          break;
+        case 'sort-received':
+        case 'sort-from':
+        case 'sort-to':
+          setListSort(id.slice(5) as 'received' | 'from' | 'to');
+          break;
+        case 'sender-panel':
+          setSenderPane(!senderPane());
+          break;
+        case 'address-book':
+          if ((accounts()?.length ?? 0) > 0) setMainView(mainView() === 'contacts' ? 'mail' : 'contacts');
           break;
         case 'toggle-scope':
           setConversationScope(conversationScope() === 'all' ? 'folder' : 'all');
