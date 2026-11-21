@@ -292,14 +292,24 @@ export function SignaturesSection() {
               </span>
               <For each={['newId', 'replyId'] as const}>
                 {(which) => (
+                  // Each option says whether it's the one chosen: the options are made anew
+                  // whenever the signatures reload (a rename, another account's choice), and a
+                  // select's own value would fall back to the first of them.
                   <select
                     class="st-input sig-default"
                     aria-label={`${a.email}: ${which === 'newId' ? 'new messages' : 'replies and forwards'}`}
-                    value={String(defaults(a.id)?.[which] ?? '')}
                     onChange={(e) => void setDefault(a.id, which, e.currentTarget.value ? Number(e.currentTarget.value) : null)}
                   >
-                    <option value="">None</option>
-                    <For each={sigs().signatures}>{(s) => <option value={String(s.id)}>{s.name}</option>}</For>
+                    <option value="" selected={(defaults(a.id)?.[which] ?? null) === null}>
+                      None
+                    </option>
+                    <For each={sigs().signatures}>
+                      {(s) => (
+                        <option value={String(s.id)} selected={defaults(a.id)?.[which] === s.id}>
+                          {s.name}
+                        </option>
+                      )}
+                    </For>
                   </select>
                 )}
               </For>

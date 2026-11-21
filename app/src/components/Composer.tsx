@@ -759,11 +759,20 @@ export function Composer() {
               class="cmp-sig-select"
               aria-label="Signature"
               title="Signature"
-              value={String(c().signatureId ?? '')}
               onChange={(e) => pickSignature(e.currentTarget.value ? Number(e.currentTarget.value) : null)}
             >
-              <option value="">No signature</option>
-              <For each={sigs().signatures}>{(s) => <option value={String(s.id)}>{s.name}</option>}</For>
+              {/* The chosen one marked on its option: the options are remade when the signatures
+                  change in Settings, and the select's own value would fall back to the first. */}
+              <option value="" selected={c().signatureId == null}>
+                No signature
+              </option>
+              <For each={sigs().signatures}>
+                {(s) => (
+                  <option value={String(s.id)} selected={c().signatureId === s.id}>
+                    {s.name}
+                  </option>
+                )}
+              </For>
             </select>
             <Show when={c().signatureHtml}>
               {/* Sanitized by the core when it was saved. */}

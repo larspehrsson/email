@@ -982,6 +982,42 @@ describe('signatures', () => {
   });
 });
 
+describe('signature defaults', () => {
+  test("choosing one account's default leaves the others' as they were", async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+,' : 'Control+,');
+      await page.locator('.st-nav-item', { hasText: 'Signatures' }).click();
+      for (const name of ['Work', 'Home', 'Short']) {
+        await page.locator('.sig-add').click();
+        await page.waitForTimeout(150);
+        await page.locator('.sig-name').fill(name);
+        await page.waitForTimeout(650);
+      }
+      const selects = page.locator('select.sig-default');
+      assert.ok((await selects.count()) >= 4, 'two accounts, two choices each');
+      const shown = () => selects.evaluateAll((els) => els.map((e) => e.options[e.selectedIndex]?.text));
+      await selects.nth(0).selectOption({ label: 'Home' });
+      await page.waitForTimeout(250);
+      await selects.nth(1).selectOption({ label: 'Short' });
+      await page.waitForTimeout(250);
+      await selects.nth(2).selectOption({ label: 'Work' });
+      await page.waitForTimeout(250);
+      await selects.nth(3).selectOption({ label: 'Home' });
+      await page.waitForTimeout(400);
+      assert.deepEqual((await shown()).slice(0, 4), ['Home', 'Short', 'Work', 'Home']);
+      // Renaming a signature (the list reloads) changes no one's choice either.
+      await page.locator('.sig-item', { hasText: 'Work' }).click();
+      await page.locator('.sig-name').fill('Work 2');
+      await page.waitForTimeout(800);
+      assert.deepEqual((await shown()).slice(0, 4), ['Home', 'Short', 'Work 2', 'Home']);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('signature pictures', () => {
   test('a picture pasted or chosen goes in, scaled, and shows in the composer', async () => {
     const { page, errors, context, close } = await open({ threaded: false });
