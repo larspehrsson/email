@@ -2,6 +2,8 @@ import { createEffect, createSelector, createSignal, For, onCleanup, onMount, Sh
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
+import Image from '@tiptap/extension-image';
+import { picturesIn, scalePicture } from '../lib/pictures';
 import type { Addr } from '../api';
 import { accounts } from '../state';
 import {
@@ -466,7 +468,33 @@ export function Composer() {
           link: { openOnClick: false, autolink: true, defaultProtocol: 'https' },
         }),
         Placeholder.configure({ placeholder: 'Write your message…' }),
+        // Pictures pasted in sit in the text (sized by dragging a corner); sent as inline parts.
+        Image.configure({
+          inline: true,
+          allowBase64: true,
+          resize: { enabled: true, directions: ['top-left', 'top-right', 'bottom-left', 'bottom-right'], alwaysPreserveAspectRatio: true, minWidth: 24, minHeight: 24 },
+        }),
       ],
+      editorProps: {
+        // A picture on the clipboard (a screenshot, an image copied from a page): into the
+        // message where the cursor is, not attached. Files dropped on the window still attach.
+        handlePaste: (_view, event) => {
+          const files = picturesIn(event.clipboardData?.files);
+          if (!files.length) return false;
+          void (async () => {
+            for (const f of files) {
+              try {
+                const p = await scalePicture(f, { max: 1600, budget: 900_000, showMax: 640 });
+                const ed = editor();
+                ed?.chain().focus().insertContentAt(ed.state.selection.to, { type: 'image', attrs: p }).run();
+              } catch {
+                showToast({ kind: 'error', text: 'Couldn’t read the picture.' });
+              }
+            }
+          })();
+          return true;
+        },
+      },
       content: c0.html,
       onUpdate: ({ editor: e }) => updateCompose({ html: e.isEmpty ? '' : e.getHTML() }),
       onTransaction: () => setTick((t) => t + 1),

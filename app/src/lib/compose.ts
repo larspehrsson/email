@@ -69,7 +69,8 @@ function request(c: ComposeState, draftId: number | null): SendRequest {
 export function hasContent(c: ComposeState): boolean {
   if (!c.edited) return false;
   const text = c.html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
-  return text.length > 0 || c.subject.trim().length > 0 || c.to.length + c.cc.length + c.bcc.length > 0;
+  // A picture pasted in is something written too.
+  return text.length > 0 || /<img\b/i.test(c.html) || c.subject.trim().length > 0 || c.to.length + c.cc.length + c.bcc.length > 0;
 }
 
 // ------------------------------------------------------------- main window: starting one

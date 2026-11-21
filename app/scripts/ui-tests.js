@@ -1056,6 +1056,42 @@ describe('signature html', () => {
   });
 });
 
+describe('pictures in a message', () => {
+  test('a picture pasted into the message goes in where the cursor is, not attached', async () => {
+    const { page, errors, context, close } = await open({ threaded: false });
+    try {
+      const popup = context.waitForEvent('page');
+      await page.keyboard.press('c');
+      const w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      const body = w.locator('.cmp-editor .ProseMirror');
+      await body.waitFor();
+      await body.click();
+      await w.keyboard.type('Here it is: ');
+      await body.evaluate(async (el) => {
+        const c = document.createElement('canvas');
+        c.width = 3000;
+        c.height = 1500;
+        const g = c.getContext('2d');
+        g.fillStyle = '#3a7';
+        g.fillRect(0, 0, 3000, 1500);
+        const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+        const dt = new DataTransfer();
+        dt.items.add(new File([blob], 'shot.png', { type: 'image/png' }));
+        el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      });
+      const img = w.locator('.cmp-editor img[src^="data:image/"]');
+      await img.waitFor();
+      assert.equal(await img.evaluate((i) => i.decode().then(() => i.naturalWidth)), 1600, 'scaled down');
+      assert.ok(Number(await img.getAttribute('width')) <= 640);
+      assert.equal(await w.locator('.cmp-att').count(), 0, 'not an attachment');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('signature pictures', () => {
   test('a picture pasted or chosen goes in, scaled, and shows in the composer', async () => {
     const { page, errors, context, close } = await open({ threaded: false });
