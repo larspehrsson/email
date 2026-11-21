@@ -101,6 +101,10 @@ fn show(app: &tauri::AppHandle, summary: String, body: String, folder_id: i64, t
         }
         #[cfg(not(all(unix, not(target_os = "macos"))))]
         let _ = category;
+        // Windows names a toast by its app's AppUserModelID: the installer gives the Start menu
+        // shortcut the bundle identifier, so this says "Email" (otherwise PowerShell's).
+        #[cfg(target_os = "windows")]
+        n.app_id("dev.mailclient.desktop");
         let clickable = WAITING.fetch_add(1, Ordering::SeqCst) < MAX_WAITING;
         if clickable {
             n.action("default", "Open");
