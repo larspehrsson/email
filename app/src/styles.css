@@ -5688,3 +5688,79 @@ body.dragging-account * {
 .modal-backdrop.confirm-backdrop {
   z-index: 110;
 }
+
+/* View › Show Source: the raw message, and questions about it */
+.modal.source-view {
+  width: min(920px, calc(100vw - 48px));
+  height: min(760px, calc(100vh - 48px));
+  max-width: none;
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+  outline: none;
+}
+.src-head {
+  margin-bottom: 0;
+  gap: 12px;
+}
+.src-head h2 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.src-head-btns {
+  flex: none;
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+.src-text {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--sep);
+  border-radius: 8px;
+  background: var(--bg-sunken, var(--bg));
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+.src-ask {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.src-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.src-form {
+  display: flex;
+  gap: 8px;
+}
+.src-form .st-input {
+  flex: 1;
+}
+.src-answer {
+  max-height: 200px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  user-select: text;
+}
+.src-note {
+  margin: 0;
+  font-size: 11.5px;
+}

@@ -88,6 +88,8 @@ at once — the quickest way to clear out a newsletter.
 
 ![The sender panel beside a message, three messages picked](docs/screenshots/sender.png)
 
+**Message source** (⌥⌘U, or right-click a message), with questions to Claude about it: why wasn't this marked as spam, is it genuine, who really sent it.
+
 **Sender pictures** beside each message: the company's logo or website icon, or initials.
 
 **Several at once:** Ctrl/⌘-click or Shift-click messages in the list (or Ctrl/⌘+A for all of

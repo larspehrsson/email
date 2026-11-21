@@ -697,6 +697,13 @@ impl Core {
         Ok((raw, subject))
     }
 
+    /// A message's source as text (the whole message as sent; downloaded if it's kept here
+    /// without its attachments).
+    pub async fn message_source(&self, message_id: i64) -> Result<String> {
+        let (raw, _) = self.whole_message(message_id).await?;
+        Ok(String::from_utf8_lossy(&raw).into_owned())
+    }
+
     /// Number of attachments (stored + omitted) and the message subject, for "save all".
     pub fn attachment_summary(&self, message_id: i64) -> Result<(usize, String)> {
         let raw = self.store.body(message_id)?.ok_or_else(|| anyhow!("This message hasn't been downloaded yet."))?;

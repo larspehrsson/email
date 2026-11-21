@@ -297,6 +297,12 @@ async fn disable_graph(core: State<'_, Arc<Core>>, account_id: i64) -> Res<()> {
     core.disable_graph(account_id).map_err(err)
 }
 
+/// A message's whole source as text.
+#[tauri::command]
+async fn message_source(core: State<'_, Arc<Core>>, id: i64) -> Res<String> {
+    core.message_source(id).await.map_err(err)
+}
+
 /// Google Contacts: the OAuth client and the linked accounts.
 #[tauri::command]
 async fn google_status(core: State<'_, Arc<Core>>) -> Res<mail_core::GoogleStatus> {
@@ -1034,6 +1040,7 @@ fn macos_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
             &MenuItem::with_id(app, "sort-size", "Sort by Size", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "sender-panel", "Sender Panel", true, Some("CmdOrCtrl+2"))?,
+            &MenuItem::with_id(app, "show-source", "Show Source", true, Some("CmdOrCtrl+Alt+U"))?,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::fullscreen(app, None)?,
         ],
@@ -1396,6 +1403,7 @@ pub fn run() {
             allow_remote_sender,
             account_logos,
             google_status,
+            message_source,
             set_google_client,
             google_connect,
             google_disconnect,

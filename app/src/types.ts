@@ -193,7 +193,9 @@ export type AiTask =
   | { kind: 'reply' }
   | { kind: 'compose' }
   | { kind: 'rewrite'; style: 'improve' | 'shorter' | 'longer' | 'formal' | 'friendly' | 'proofread' }
-  | { kind: 'translate'; language: string };
+  | { kind: 'translate'; language: string }
+  /** a question about a message (`original`: its source) */
+  | { kind: 'ask'; question: string };
 export interface AiRequest {
   /** "Name <addr>": who's writing */
   me: string;
@@ -515,6 +517,7 @@ export type MenuActionId =
   | 'sort-from'
   | 'sort-to'
   | 'sort-size'
+  | 'show-source'
   | 'sender-panel'
   | 'address-book';
 export interface MenuActionPayload {
@@ -604,6 +607,7 @@ export interface CommandMap {
   sender_icon: { args: { addr: string }; ret: string | null };
   account_logos: { args: undefined; ret: { accountId: number; dataUrl: string }[] };
   google_status: { args: undefined; ret: GoogleStatus };
+  message_source: { args: { id: number }; ret: string };
   set_google_client: { args: { id: string | null; secret: string | null }; ret: void };
   google_connect: { args: { accountId: number }; ret: string };
   google_disconnect: { args: { accountId: number }; ret: void };

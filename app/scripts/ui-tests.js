@@ -1206,6 +1206,34 @@ describe('google contacts', () => {
   });
 });
 
+describe('message source', () => {
+  test('right-click › Show source; a question about it is answered; ⌥⌘U opens it too', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.evaluate(() => localStorage.setItem('mock.aiKey', 'sk-ant-demo'));
+      const row = page.locator('.folder-layer .row').first();
+      const subject = (await row.locator('.row-subject').textContent()).trim();
+      await row.click({ button: 'right' });
+      await page.locator('.ctx-menu .vm-item', { hasText: 'Show source' }).click();
+      const src = page.locator('.source-view .src-text');
+      await page.waitForFunction(() => document.querySelector('.source-view .src-text')?.textContent?.includes('Subject:'));
+      assert.ok((await src.textContent()).includes(`Subject: ${subject}`));
+      await page.locator('.source-view .chip-toggle', { hasText: 'spam' }).click();
+      await page.waitForFunction(() => document.querySelector('.source-view .src-answer')?.textContent?.includes('X-Spam-Status'));
+      // (Esc while it's answering stops the answer; once done, it closes.)
+      await page.locator('.source-view .src-form button', { hasText: 'Ask' }).waitFor();
+      await page.keyboard.press('Escape');
+      assert.equal(await page.locator('.source-view').count(), 0);
+      await row.click();
+      await page.keyboard.press('ControlOrMeta+Alt+u');
+      await page.locator('.source-view').waitFor();
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('move list', () => {
   test("the folders with most of the sender's mail come first", async () => {
     const { page, errors, close } = await open({ threaded: false });

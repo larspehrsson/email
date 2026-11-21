@@ -117,6 +117,8 @@ export const api = {
     call('list_item_ids', { folderId, threaded, sort, filter, offset, limit }),
   accountLogos: (): Promise<{ accountId: number; dataUrl: string }[]> => call('account_logos', undefined),
   googleStatus: (): Promise<GoogleStatus> => call('google_status', undefined),
+  /** A message's whole source as text. */
+  messageSource: (id: number): Promise<string> => call('message_source', { id }),
   setGoogleClient: (id: string | null, secret: string | null): Promise<void> => call('set_google_client', { id, secret }),
   /** Browser sign-in, then a first sync; the Google address signed in with. */
   googleConnect: (accountId: number): Promise<string> => call('google_connect', { accountId }),

@@ -1793,6 +1793,27 @@ export function createMockBackend(): Backend {
         setTimeout(() => void simulateSync(acc, 6_000, 'mail.example.org'), 300);
       }
     },
+    async message_source({ id }) {
+      await sleep(10);
+      const m = byId.get(id);
+      if (!m) throw 'This message is no longer here.';
+      const date = new Date(m.date * 1000).toUTCString();
+      return [
+        `Return-Path: <${m.fromAddr}>`,
+        `Received: from mail.${m.fromAddr.split('@')[1] ?? 'example.com'} (mail.example.net [203.0.113.7])`,
+        `\tby mx.example.com with ESMTPS id x1si2; ${date}`,
+        `Authentication-Results: mx.example.com; spf=pass smtp.mailfrom=${m.fromAddr}; dkim=pass header.d=${m.fromAddr.split('@')[1] ?? ''}`,
+        'X-Spam-Status: No, score=1.2',
+        `From: ${m.fromName ? `"${m.fromName}" ` : ''}<${m.fromAddr}>`,
+        `Subject: ${m.subject}`,
+        `Date: ${date}`,
+        `Message-ID: <${m.id}@demo.example>`,
+        'MIME-Version: 1.0',
+        'Content-Type: text/plain; charset=utf-8',
+        '',
+        m.snippet ?? '',
+      ].join('\r\n');
+    },
     async google_status() {
       await sleep(3);
       return googleLoad();
@@ -2052,7 +2073,9 @@ export function createMockBackend(): Backend {
               : `Hi,\n\n${said.charAt(0).toUpperCase() + said.slice(1)}?\n\nThanks`
             : task.kind === 'translate'
               ? `[${task.language}] ${request.draft}`
-              : `${request.draft} (${task.style})`;
+              : task.kind === 'ask'
+                ? `Its headers show it passed SPF and DKIM for its domain, and the receiving server scored it low (X-Spam-Status: No). You asked: ${task.question}`
+                : `${request.draft} (${task.style})`;
       aiCancelled.delete(requestId);
       for (const piece of text.match(/.{1,6}/gs) ?? []) {
         await sleep(15);

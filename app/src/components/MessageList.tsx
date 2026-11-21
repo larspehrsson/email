@@ -61,6 +61,8 @@ import {
 import { platform } from '../lib/platform';
 import { CheckIcon, ClockIcon, FlagIcon, ForwardIcon, PaperclipIcon, ReplyIcon, TrashIcon } from './Icons';
 import { confirmDialog } from './Actions';
+import { openContextMenu } from './ContextMenu';
+import { openSource } from './SourceView';
 
 /** A clock among the row's markers while a snooze is waiting to go off (its time on hover). */
 function SnoozeMark(props: { until?: number | null }) {
@@ -1172,6 +1174,12 @@ export function MessageList(props: {
                     selectIndex(item.index, false);
                   }}
                   onDblClick={() => props.onOpen()}
+                  onContextMenu={(e) => {
+                    const it = m();
+                    if (!it) return;
+                    const id = threaded ? (it as ThreadSummary).latestMessageId : it.id;
+                    openContextMenu(e, [{ label: 'Show source…', run: () => openSource(id) }]);
+                  }}
                 >
                   <Show when={m()} fallback={<SkeletonRow />}>
                     {(it) =>

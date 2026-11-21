@@ -17,6 +17,9 @@ import {
   listSort,
   listFilter,
   multiPicked,
+  readerMessageId,
+  selectedMessageId,
+  selectedThread,
   addingAccount,
   setAddingAccount,
   senderPane,
@@ -55,7 +58,8 @@ import { AddAccountModal, Onboarding } from './components/AddAccount';
 import { ContextMenuHost } from './components/ContextMenu';
 import { startGoogleSync } from './lib/googleContacts';
 import { MultiPane } from './components/MultiPane';
-import { DRAG } from './lib/platform';
+import { openSource, SourceHost } from './components/SourceView';
+import { DRAG, platform } from './lib/platform';
 
 const SIDEBAR = { min: 180, max: 420, def: 236 };
 const LIST = { min: 300, max: 760, def: 400 };
@@ -81,6 +85,12 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       if (document.querySelector('.modal-backdrop')) return;
       const ready = (accounts()?.length ?? 0) > 0;
+      // ⌥⌘U / Ctrl+Alt+U: the message's source (by the key, not the character Option makes).
+      if (ready && e.altKey && (platform === 'macos' ? e.metaKey : e.ctrlKey) && e.code === 'KeyU') {
+        e.preventDefault();
+        openSource(readerMessageId() ?? selectedMessageId() ?? selectedThread()?.latestMessageId);
+        return;
+      }
       if (!isTextInput(e.target)) {
         const run: Record<string, (() => void) | undefined> = {
           // `?`: the shortcuts sheet (the sheet itself handles `?` to close)
@@ -148,6 +158,9 @@ export function App() {
         case 'sort-to':
         case 'sort-size':
           setListSort(id.slice(5) as ListSort);
+          break;
+        case 'show-source':
+          openSource(readerMessageId() ?? selectedMessageId() ?? selectedThread()?.latestMessageId);
           break;
         case 'sender-panel':
           setSenderPane(!senderPane());
@@ -341,6 +354,7 @@ export function App() {
           <ManageTagsHost />
           <ConfirmHost />
           <ContextMenuHost />
+          <SourceHost />
           <ShortcutsHost />
           <SettingsHost />
           <FolderSwitcherHost />
