@@ -467,7 +467,9 @@ pub fn sanitize_html(html: &str, cid_map: &HashMap<String, String>) -> String {
 
     ammonia::Builder::default()
         .tags(tags)
-        .clean_content_tags(["script", "noscript", "iframe", "object", "embed", "form"].into())
+        // Removed with what's inside. A <title> (in the HTML's <head>) is the page's name, which
+        // a browser shows in the tab, never on the page.
+        .clean_content_tags(["script", "noscript", "iframe", "object", "embed", "form", "title"].into())
         .generic_attributes(generic)
         .tag_attributes(HashMap::new())
         .url_schemes(schemes)
@@ -482,6 +484,8 @@ pub fn sanitize_html(html: &str, cid_map: &HashMap<String, String>) -> String {
 pub fn sanitize_signature(html: &str) -> String {
     ammonia::Builder::default()
         .link_rel(Some("noopener noreferrer"))
+        // A signature saved from a web page: its <title> isn't part of it.
+        .add_clean_content_tags(["title"])
         // Signatures made elsewhere and pasted in as HTML: colours, fonts and table layouts kept
         // (inline styles and the old attributes); scripts, handlers and the like still go.
         .add_generic_attributes(["style", "align", "valign", "width", "height", "bgcolor"])
@@ -584,6 +588,17 @@ mod tests {
         for bad in ["javascript", "onload", "onerror", "<svg", "<meta", "<iframe", "<base", "<object", "alert"] {
             assert!(!lower.contains(bad), "{bad} survived: {out}");
         }
+    }
+
+    /// A newsletter's `<head><title>` isn't shown above it (only its `<style>` is kept).
+    #[test]
+    fn title_is_not_shown() {
+        let html = "<!DOCTYPE html><html lang=\"en\"><head><title>bp Australia</title><meta charset=\"utf-8\"><style>p{color:red}</style></head><body><p>Hi Lars,</p></body></html>";
+        let out = sanitize_html(html, &HashMap::new());
+        assert!(!out.contains("bp Australia"), "{out}");
+        assert!(out.contains("Hi Lars,") && out.contains("p{color:red}"), "{out}");
+        let sig = sanitize_signature("<html><head><title>Signature</title></head><body><b>Lars</b></body></html>");
+        assert!(!sig.contains("Signature") && sig.contains("<b>Lars</b>"), "{sig}");
     }
 
     /// FLOWED_IDS=1,2,3 BODIES_DB=/path/bodies.db cargo test -p mail-core real_flowed -- --ignored --nocapture
