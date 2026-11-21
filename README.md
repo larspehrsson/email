@@ -46,6 +46,10 @@ the people you write to most. Sending waits 10 seconds so you can undo it.
 
 <img src="docs/screenshots/compose.png" alt="A compose window with address suggestions" width="600">
 
+**Sort and group** the list from the View options: by date received (grouped into Today,
+Yesterday, this week's days, last weeks and months), or by sender or recipient, A to Z, with
+each person's messages together under their name.
+
 **Search** as you type, over senders, recipients and subjects, in every folder or just the
 current one. It understands `from:`, `to:`, `subject:`, `"exact phrases"` and `-exclusions`.
 

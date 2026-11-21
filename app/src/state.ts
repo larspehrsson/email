@@ -1,6 +1,6 @@
 import { batch, createEffect, createMemo, createRoot, createSignal, on, untrack } from 'solid-js';
 import { createStore, produce, reconcile } from 'solid-js/store';
-import { api, events, type Account, type Folder, type MessageSummary, type SyncStatus, type ThreadSummary, type ConversationScope, type SearchField } from './api';
+import { api, events, type Account, type Folder, type MessageSummary, type SyncStatus, type ThreadSummary, type ConversationScope, type ListSort, type SearchField } from './api';
 import { accountMarks, type AccountMark } from './lib/accountMarks';
 import { loadPref, savePref } from './lib/format';
 
@@ -52,13 +52,22 @@ const [selectedFolderId, setSelectedFolderId] = createSignal<number | null>(null
 const [selectedMessageId, setSelectedMessageId] = createSignal<number | null>(null);
 const [selectedSummary, setSelectedSummary] = createSignal<MessageSummary | null>(null);
 
-/** Conversation view: list shows threads, reader shows the whole conversation. Persisted. */
-const [threaded, setThreadedSig] = createSignal<boolean>(loadPref<boolean>('ui.threaded', true) !== false);
+/** "Group by conversation" as chosen (persisted). */
+const [threadedPref, setThreadedSig] = createSignal<boolean>(loadPref<boolean>('ui.threaded', true) !== false);
+/** The folder list's order (and grouping); app-wide, persisted. */
+const [listSort, setListSortSig] = createSignal<ListSort>(
+  ((s) => (s === 'from' || s === 'to' ? s : 'received'))(loadPref<string>('ui.listSort', 'received')),
+);
+/** Conversation view in effect: list shows threads, reader shows the whole conversation. Only
+ *  sorted by date: a conversation has no one sender to sort or group it by. */
+const threaded = createRoot(() => createMemo(() => threadedPref() && listSort() === 'received'));
 const [selectedThread, setSelectedThread] = createSignal<ThreadSummary | null>(null);
 const selectedThreadId = () => selectedThread()?.id ?? null;
 
 export {
   threaded,
+  threadedPref,
+  listSort,
   selectedThread,
   selectedThreadId,
   accounts,
@@ -256,13 +265,31 @@ export function flushReader(): void {
 }
 
 export function setThreaded(v: boolean): void {
-  if (v === threaded()) return;
+  if (v === threadedPref()) return;
   batch(() => {
+    const was = threaded();
     setThreadedSig(v);
-    selectMessage(null);
-    selectThread(null);
+    if (threaded() !== was) {
+      selectMessage(null);
+      selectThread(null);
+    }
   });
   savePref('ui.threaded', v);
+}
+
+/** Sort (and group) the folder list. Switching in or out of conversations (they only sort by
+ *  date) starts without a selection, like "Group by conversation"; otherwise it stays. */
+export function setListSort(s: ListSort): void {
+  if (s === listSort()) return;
+  batch(() => {
+    const was = threaded();
+    setListSortSig(s);
+    if (threaded() !== was) {
+      selectMessage(null);
+      selectThread(null);
+    }
+  });
+  savePref('ui.listSort', s);
 }
 
 // N/P crossed into another folder: once its list is up, it selects the first (or, going back,

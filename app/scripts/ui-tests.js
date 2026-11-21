@@ -710,3 +710,98 @@ describe('accounts', () => {
     }
   });
 });
+
+describe('sorting', () => {
+  /** The list's canvas in DOM order: headers ({ head, count }) and rows ({ from, unread }). */
+  const listed = (page) =>
+    page.locator('.folder-layer .list-canvas').evaluate((c) =>
+      [...c.children].map((el) =>
+        el.classList.contains('group-head')
+          ? { head: el.querySelector('.group-label')?.textContent ?? '', count: el.querySelector('.group-count')?.textContent ?? null }
+          : { from: el.querySelector('.row-from')?.textContent ?? '', unread: el.classList.contains('unread') },
+      ),
+    );
+  async function sortBy(page, label) {
+    await page.click('.view-menu-btn');
+    await page.locator('.view-menu .vm-item', { hasText: label }).click();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+  }
+
+  test('by date, the list is grouped into periods, newest first', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const items = await listed(page);
+      const heads = items.filter((x) => x.head != null).map((x) => x.head);
+      assert.ok(items[0].head != null, 'a header comes first');
+      const order = ['Today', 'Yesterday', 'Sunday', 'Saturday', 'Friday', 'Thursday', 'Wednesday', 'Tuesday', 'Monday', 'Last week', 'Two weeks ago', 'Three weeks ago', 'September', 'August'];
+      const ranks = heads.map((h) => order.indexOf(h)).filter((r) => r >= 0);
+      assert.ok(ranks.length >= 2, `known periods among ${heads}`);
+      assert.deepEqual(ranks, [...ranks].sort((a, b) => a - b), `periods in order: ${heads}`);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('by sender: one header per sender over their messages; conversations are off; N follows the order', async () => {
+    const { page, errors, close } = await open({ threaded: true });
+    try {
+      await sortBy(page, 'From');
+      // Down to where the first sender's messages end and the next one's begin.
+      const firstCount = Number(await page.locator('.folder-layer .group-head .group-count').first().textContent());
+      await page.locator('.folder-layer .list-scroll').evaluate((el, n) => (el.scrollTop = (n - 4) * 72), firstCount);
+      await page.waitForTimeout(300);
+      await page.click('.view-menu-btn');
+      assert.equal(await page.locator('.view-menu .vm-item', { hasText: 'Group by conversation' }).getAttribute('aria-disabled'), 'true');
+      await page.keyboard.press('Escape');
+      const items = await listed(page);
+      let head = null;
+      const heads = [];
+      for (const x of items) {
+        if (x.head != null) {
+          head = x.head;
+          heads.push(head.toLowerCase());
+        } else if (x.from && head != null) assert.equal(x.from.toLowerCase(), head.toLowerCase(), 'each row under its sender');
+      }
+      // A boundary: the rows above the header are someone else's.
+      const k = items.findIndex((x) => x.head != null);
+      assert.ok(k > 0, 'a header with rows above it');
+      assert.notEqual(items[k - 1].from.toLowerCase(), items[k].head.toLowerCase(), 'the sender changes at the header');
+      assert.ok(Number(items[k].count) > 0, 'with a count');
+      assert.deepEqual(heads, [...heads].sort(), 'senders A to Z');
+      // N goes to the first unread one in this order.
+      await page.locator('.folder-layer .list-scroll').evaluate((el) => (el.scrollTop = 0));
+      await page.waitForTimeout(300);
+      const top = (await listed(page)).filter((x) => x.head == null);
+      const firstUnread = top.findIndex((x) => x.unread);
+      assert.ok(firstUnread >= 0, 'an unread one near the top');
+      await page.locator('.folder-layer .list-scroll').focus();
+      await page.keyboard.press('n');
+      await page.waitForTimeout(400);
+      assert.equal(await page.locator('.folder-layer .row.selected').getAttribute('id'), `row-${firstUnread}`);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('archiving in a group takes one off its count; undo puts it back', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await sortBy(page, 'From');
+      const first = page.locator('.folder-layer .group-head').first();
+      const before = Number(await first.locator('.group-count').textContent());
+      await page.locator('.folder-layer .row').first().click();
+      await page.waitForTimeout(300);
+      await page.locator('.reader [aria-label="Archive"]').first().click();
+      await hasText(first.locator('.group-count'), String(before - 1), 'one fewer in the group');
+      await page.locator('.toast button', { hasText: 'Undo' }).click();
+      await page.waitForTimeout(400);
+      await hasText(page.locator('.folder-layer .group-head').first().locator('.group-count'), String(before), 'back again');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});

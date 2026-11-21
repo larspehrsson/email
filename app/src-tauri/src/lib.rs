@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mail_core::model::*;
+use mail_core::sort::{ListGroup, ListSort};
 use mail_core::{Core, NewAccount, Secrets};
 use serde::Serialize;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
@@ -53,8 +54,26 @@ async fn open_folder(core: State<'_, Arc<Core>>, folder_id: i64) -> Res<()> {
 }
 
 #[tauri::command]
-async fn list_messages(core: State<'_, Arc<Core>>, folder_id: i64, offset: u32, limit: u32) -> Res<MessagePage> {
-    timed("list_messages", || core.list_messages(folder_id, offset, limit)).map_err(err)
+async fn list_messages(
+    core: State<'_, Arc<Core>>,
+    folder_id: i64,
+    offset: u32,
+    limit: u32,
+    sort: Option<ListSort>,
+) -> Res<MessagePage> {
+    timed("list_messages", || core.list_messages_by(folder_id, sort.unwrap_or_default(), offset, limit)).map_err(err)
+}
+
+/// The groups the folder's list is shown in (see `Store::list_groups`).
+#[tauri::command]
+async fn list_groups(
+    core: State<'_, Arc<Core>>,
+    folder_id: i64,
+    threaded: bool,
+    sort: Option<ListSort>,
+    bounds: Vec<i64>,
+) -> Res<Vec<ListGroup>> {
+    timed("list_groups", || core.list_groups(folder_id, threaded, sort.unwrap_or_default(), &bounds)).map_err(err)
 }
 
 /// `allow_remote` is enforced by the reader's iframe CSP; the core always returns the same
@@ -379,8 +398,8 @@ async fn undo_action(core: State<'_, Arc<Core>>, op_id: i64) -> Res<()> {
 }
 
 #[tauri::command]
-async fn index_of(core: State<'_, Arc<Core>>, folder_id: i64, id: i64, threaded: bool) -> Res<Option<u32>> {
-    timed("index_of", || core.index_of(folder_id, id, threaded)).map_err(err)
+async fn index_of(core: State<'_, Arc<Core>>, folder_id: i64, id: i64, threaded: bool, sort: Option<ListSort>) -> Res<Option<u32>> {
+    timed("index_of", || core.index_of(folder_id, id, threaded, sort.unwrap_or_default())).map_err(err)
 }
 
 #[derive(Serialize)]
@@ -391,8 +410,14 @@ struct Located {
 }
 
 #[tauri::command]
-async fn locate_message(core: State<'_, Arc<Core>>, folder_id: i64, message_id: i64, threaded: bool) -> Res<Option<Located>> {
-    timed("locate_message", || core.locate_message(folder_id, message_id, threaded))
+async fn locate_message(
+    core: State<'_, Arc<Core>>,
+    folder_id: i64,
+    message_id: i64,
+    threaded: bool,
+    sort: Option<ListSort>,
+) -> Res<Option<Located>> {
+    timed("locate_message", || core.locate_message(folder_id, message_id, threaded, sort.unwrap_or_default()))
         .map(|l| l.map(|(id, index)| Located { id, index }))
         .map_err(err)
 }
@@ -404,8 +429,9 @@ async fn next_unread(
     after: Option<i64>,
     threaded: bool,
     back: bool,
+    sort: Option<ListSort>,
 ) -> Res<Option<NextUnread>> {
-    core.next_unread(folder_id, after, threaded, back).map_err(err)
+    core.next_unread(folder_id, after, threaded, back, sort.unwrap_or_default()).map_err(err)
 }
 
 #[tauri::command]
@@ -1068,6 +1094,7 @@ pub fn run() {
             list_folders,
             open_folder,
             list_messages,
+            list_groups,
             get_message,
             get_sync_status,
             set_read,

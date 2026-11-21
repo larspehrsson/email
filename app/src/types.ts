@@ -145,6 +145,16 @@ export interface MessageDetail {
  */
 export type ConversationScope = 'folder' | 'all';
 
+/** A folder list's order: newest first, or by sender / first recipient (A to Z, newest first
+ *  within each). The list is grouped by the same thing. */
+export type ListSort = 'received' | 'from' | 'to';
+
+/** A run of rows in a sorted list: a sender, a recipient, or (by date, label null) a period. */
+export interface ListGroup {
+  label: string | null;
+  count: number;
+}
+
 /** Fields plain (unprefixed) quick-search terms look in; null/empty = all three. */
 export type SearchField = 'sender' | 'recipients' | 'subject';
 
@@ -409,7 +419,8 @@ export interface CommandMap {
   cancel_sign_in: { args: undefined; ret: void };
   list_folders: { args: { accountId: number }; ret: Folder[] };
   open_folder: { args: { folderId: number }; ret: void };
-  list_messages: { args: { folderId: number; offset: number; limit: number }; ret: MessagePage };
+  list_messages: { args: { folderId: number; offset: number; limit: number; sort: ListSort }; ret: MessagePage };
+  list_groups: { args: { folderId: number; threaded: boolean; sort: ListSort; bounds: number[] }; ret: ListGroup[] };
   get_message: { args: { id: number; allowRemote: boolean }; ret: MessageDetail | null };
   search_messages: {
     args: {
@@ -442,9 +453,15 @@ export interface CommandMap {
   delete_tag: { args: { keyword: string }; ret: void };
   app_version: { args: undefined; ret: string };
   reveal_path: { args: { path: string }; ret: void };
-  index_of: { args: { folderId: number; id: number; threaded: boolean }; ret: number | null };
-  locate_message: { args: { folderId: number; messageId: number; threaded: boolean }; ret: { id: number; index: number } | null };
-  next_unread: { args: { folderId: number; after: number | null; threaded: boolean; back: boolean }; ret: NextUnread | null };
+  index_of: { args: { folderId: number; id: number; threaded: boolean; sort: ListSort }; ret: number | null };
+  locate_message: {
+    args: { folderId: number; messageId: number; threaded: boolean; sort: ListSort };
+    ret: { id: number; index: number } | null;
+  };
+  next_unread: {
+    args: { folderId: number; after: number | null; threaded: boolean; back: boolean; sort: ListSort };
+    ret: NextUnread | null;
+  };
   show_log: { args: undefined; ret: void };
   send_message: { args: { request: SendRequest }; ret: SendQueued };
   cancel_send: { args: { id: number }; ret: unknown | null };

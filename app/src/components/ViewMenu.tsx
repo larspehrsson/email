@@ -1,13 +1,23 @@
-import { createEffect, createSignal, onCleanup, Show } from 'solid-js';
+import { createEffect, createSignal, For, onCleanup, Show } from 'solid-js';
 import { Portal } from 'solid-js/web';
+import type { ListSort } from '../api';
 import {
   conversationScope,
   includeTrash,
+  listSort,
   setConversationScope,
   setIncludeTrash,
+  setListSort,
   setThreaded,
   threaded,
+  threadedPref,
 } from '../state';
+
+const SORTS: { id: ListSort; label: string; title: string }[] = [
+  { id: 'received', label: 'Received', title: 'Newest first, grouped by day, week and month' },
+  { id: 'from', label: 'From', title: 'By sender, A to Z, grouped by sender' },
+  { id: 'to', label: 'To', title: 'By recipient, A to Z, grouped by recipient' },
+];
 import { CheckIcon, SlidersIcon } from './Icons';
 import { hint } from '../lib/shortcuts';
 import { openShortcuts } from './ShortcutsSheet';
@@ -92,11 +102,30 @@ export function ViewMenuPopover() {
           aria-label="View options"
           style={{ top: `${pos().top}px`, right: `${pos().right}px` }}
         >
+          <div class="vm-section">Sort by</div>
+          <For each={SORTS}>
+            {(s) => (
+              <button
+                role="menuitemradio"
+                aria-checked={listSort() === s.id}
+                class="vm-item"
+                title={s.title}
+                onClick={() => setListSort(s.id)}
+              >
+                <Check on={listSort() === s.id} radio />
+                <span class="vm-label">{s.label}</span>
+              </button>
+            )}
+          </For>
+          <div class="vm-sep" />
           <button
             role="menuitemcheckbox"
             aria-checked={threaded()}
+            aria-disabled={listSort() !== 'received'}
             class="vm-item"
-            onClick={() => setThreaded(!threaded())}
+            classList={{ disabled: listSort() !== 'received' }}
+            title={listSort() !== 'received' ? 'Conversations are sorted by date: sort by Received to group them' : undefined}
+            onClick={() => listSort() === 'received' && setThreaded(!threadedPref())}
           >
             <Check on={threaded()} />
             <span class="vm-label">Group by conversation</span>

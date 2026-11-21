@@ -2,10 +2,23 @@ import { type JSX, batch, on, createEffect, createMemo, createSelector, createSi
 import { createVirtualizer } from '@tanstack/solid-virtual';
 import { api, type Folder, type MessageSummary, type SearchField, type ThreadSummary } from '../api';
 import { createPagedList } from '../lib/messageList';
-import { fmtNum, smartDate } from '../lib/format';
+import { dayStart, fmtNum, smartDate } from '../lib/format';
+import {
+  datePeriods,
+  insertRow,
+  labelDateCounts,
+  layoutGroups,
+  periodBounds,
+  removeRows,
+  startsGroup,
+  startsThrough,
+  type Group,
+  type Period,
+} from '../lib/listGroups';
 import { highlightParts, highlightRegex } from '../lib/query';
 import {
   accounts,
+  listSort,
   rememberedSelection,
   rememberSelection,
   setRestorePending,
@@ -25,6 +38,7 @@ import {
   selectMessage,
   selectThread,
   setThreaded,
+  threadedPref,
   selectFolderAtUnread,
   takeUnreadOnArrival,
   takeReveal,
@@ -60,6 +74,22 @@ type Item = MessageSummary | ThreadSummary;
 const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
 
 export const ROW_HEIGHT = 72;
+/** A group's header (a period, a sender…), drawn above its first row. */
+const GROUP_HEAD = 30;
+
+/** The first day of the week here (0 Sunday, 1 Monday), for "Last week" and the like. */
+const FIRST_DAY = (() => {
+  try {
+    const l = new Intl.Locale(navigator.language) as Intl.Locale & {
+      weekInfo?: { firstDay: number };
+      getWeekInfo?: () => { firstDay: number };
+    };
+    const info = l.getWeekInfo?.() ?? l.weekInfo;
+    return info ? info.firstDay % 7 : 1;
+  } catch {
+    return 1;
+  }
+})();
 /** Space above the first row and below the last, so they don't touch the list's edges. */
 const LIST_PAD = 3;
 
@@ -257,9 +287,11 @@ export function MessageList(props: {
   let pendingSelect = false;
 
   /** First visible message before a live update; used to keep the viewport visually still. */
-  let anchor: { id: number; index: number } | null = null;
+  let anchor: { id: number; index: number; off: number } | null = null;
 
   const folderId = props.folder.id;
+  /** Fixed for the component's life: the parent remounts the list when it changes. */
+  const sort = search ? 'received' : untrack(listSort);
   const fetcher = props.search
     ? searchFetcher(props.search)
     : threaded
@@ -267,7 +299,57 @@ export function MessageList(props: {
         // Options read at fetch time; a change invalidates the pages (effect below).
         api.listThreads(folderId, offset, limit, conversationScope(), includeTrash()).then((r) => ({ total: r.total, items: r.threads as Item[] }))
     : (offset: number, limit: number) =>
-        api.listMessages(folderId, offset, limit).then((r) => ({ total: r.total, items: r.messages as Item[] }));
+        api.listMessages(folderId, offset, limit, sort).then((r) => ({ total: r.total, items: r.messages as Item[] }));
+
+  // ---- groups: headers above the first row of each (search results have none)
+
+  const [groups, setGroups] = createSignal<Group[]>([]);
+  let periods: Period[] = [];
+  let groupsGen = 0;
+  /** Top of row `i`'s own content (below its group's header, if it starts one). */
+  const rowTop = (i: number) => LIST_PAD + i * ROW_HEIGHT + GROUP_HEAD * startsThrough(groups(), i);
+  /** The row at height `y` in the list. */
+  function rowAt(y: number): number {
+    let lo = 0;
+    let hi = Math.max(0, count() - 1);
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (rowTop(mid) - (startsGroup(groups(), mid) ? GROUP_HEAD : 0) <= y) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  }
+  /** Put in new groups without moving what's on screen (unless at the top: new mail shows). */
+  function applyGroups(next: Group[]) {
+    const y = scrollEl?.scrollTop ?? 0;
+    const i = y > 0 ? rowAt(y) : -1;
+    const off = i >= 0 ? y - rowTop(i) : 0;
+    setGroups(next);
+    virt.measure();
+    if (i >= 0) scrollEl.scrollTop = rowTop(i) + off;
+  }
+  function refreshGroups() {
+    if (search) return;
+    const g = ++groupsGen;
+    periods = sort === 'received' ? datePeriods(new Date(), FIRST_DAY) : [];
+    api
+      .listGroups(folderId, threaded, sort, periodBounds(periods))
+      .then((res) => {
+        if (g !== groupsGen) return;
+        const named =
+          sort === 'received'
+            ? labelDateCounts(periods, res.map((r) => r.count))
+            : res.map((r) => ({ label: r.label || (sort === 'from' ? '(no sender)' : '(no recipients)'), count: r.count }));
+        applyGroups(layoutGroups(named));
+      })
+      .catch((e) => console.error('list_groups', e));
+  }
+  /** The group a row belongs in, by what it's grouped by (to put an undone row back). */
+  function groupLabel(it: Item): string | undefined {
+    if (sort === 'from') return (it as MessageSummary).fromName || (it as MessageSummary).fromAddr;
+    if (sort === 'received') return periods.find((p) => it.date >= p.from)?.label ?? 'Older';
+    return undefined;
+  }
 
   const model = createPagedList<Item>(search ? null : folderId, fetcher, {
     onReset() {
@@ -282,17 +364,18 @@ export function MessageList(props: {
     },
     onInvalidate() {
       anchor = null;
+      refreshGroups();
       if (scrollEl.scrollTop <= 0) return; // at the top: let new mail appear
-      const index = Math.ceil(Math.max(0, scrollEl.scrollTop - LIST_PAD) / ROW_HEIGHT);
+      const index = rowAt(scrollEl.scrollTop);
       const m = model.row(index);
-      if (m) anchor = { id: m.id, index };
+      if (m) anchor = { id: m.id, index, off: scrollEl.scrollTop - rowTop(index) };
     },
     onPageLoaded() {
       untrack(() => {
         if (anchor) {
           const j = model.indexOfId(anchor.id);
           if (j >= 0) {
-            if (j !== anchor.index) scrollEl.scrollTop += (j - anchor.index) * ROW_HEIGHT;
+            if (j !== anchor.index) scrollEl.scrollTop = rowTop(j) + anchor.off;
             anchor = null;
           }
         }
@@ -337,7 +420,7 @@ export function MessageList(props: {
       return count();
     },
     getScrollElement: () => scrollEl,
-    estimateSize: () => ROW_HEIGHT,
+    estimateSize: (i) => ROW_HEIGHT + (startsGroup(groups(), i) ? GROUP_HEAD : 0),
     paddingStart: LIST_PAD,
     paddingEnd: LIST_PAD,
     // …and keyboard moves / scrollToIndex keep that space visible at either end
@@ -345,6 +428,12 @@ export function MessageList(props: {
     scrollPaddingEnd: LIST_PAD,
     overscan: 10,
   });
+
+  if (!search) {
+    refreshGroups();
+    // Periods move on at midnight.
+    createEffect(on(dayStart, () => refreshGroups(), { defer: true }));
+  }
 
   createEffect(() => {
     const items = virt.getVirtualItems();
@@ -387,7 +476,7 @@ export function MessageList(props: {
   /** Select row `idx`, expected to hold `id` (from the core): scrolls only if it's off screen. */
   async function goTo(idx: number, id: number) {
     const reveal = (i: number) => {
-      const top = LIST_PAD + i * ROW_HEIGHT;
+      const top = rowTop(i);
       if (top < scrollEl.scrollTop || top + ROW_HEIGHT > scrollEl.scrollTop + scrollEl.clientHeight) {
         virt.scrollToIndex(i, { align: 'center' });
       }
@@ -426,7 +515,7 @@ export function MessageList(props: {
       }
       return;
     }
-    const hit = await api.nextUnread(folderId, cur, threaded, back);
+    const hit = await api.nextUnread(folderId, cur, threaded, back, sort);
     if (hit && hit.id !== cur) {
       crossing = null;
       await goTo(hit.index, hit.id);
@@ -515,7 +604,7 @@ export function MessageList(props: {
         break;
       case 'threaded':
         if (search) return;
-        setThreaded(!threaded);
+        setThreaded(!untrack(threadedPref));
         break;
       case 'scope':
         if (search) return;
@@ -553,11 +642,11 @@ export function MessageList(props: {
     // index_of answers both questions at once: still in this folder, and where (any depth).
     let target = item;
     const where: Promise<number | null> = asked
-      ? api.locateMessage(folderId, asked.id, threaded).then((l) => {
+      ? api.locateMessage(folderId, asked.id, threaded, sort).then((l) => {
           if (l) target = l.id;
           return l?.index ?? null;
         })
-      : api.indexOf(folderId, item, threaded);
+      : api.indexOf(folderId, item, threaded, sort);
     void where
       .catch(() => null)
       .then(async (idx) => {
@@ -572,7 +661,7 @@ export function MessageList(props: {
         // Scroll only if the row isn't on screen, then centred. (Before the first page lands the
         // list may not be that long yet, so this is repeated once the row is here.)
         const reveal = (i: number) => {
-          const top = LIST_PAD + i * ROW_HEIGHT;
+          const top = rowTop(i);
           if (top < scrollEl.scrollTop || top + ROW_HEIGHT > scrollEl.scrollTop + scrollEl.clientHeight) {
             virt.scrollToIndex(i, { align: 'center' });
           }
@@ -604,8 +693,11 @@ export function MessageList(props: {
   if (!search) {
     const revealed = takeReveal(folderId);
     const remembered = rememberedSelection(folderId, threaded);
+    const kept = untrack(selectedId);
     if (revealed) openById(revealed.id, revealed);
-    else if (remembered != null && untrack(selectedId) == null) openById(remembered);
+    // Sorted another way with a message open: find it in the new order.
+    else if (kept != null && !threaded) openById(kept, { folderId, id: kept });
+    else if (remembered != null && kept == null) openById(remembered);
     // Asked for while this folder is already showing.
     createEffect(
       on(
@@ -629,7 +721,7 @@ export function MessageList(props: {
         // One update: the row goes, the rows below move up, and the next older one (now in the
         // same place) opens. The last row falls back to the newer one above.
         batch(() => {
-          model.remove(new Set([it.id]));
+          if (model.remove(new Set([it.id])) > 0) setGroups(removeRows(groups(), [cur]));
           const n = count();
           if (n > 0) selectIndex(Math.min(cur, n - 1));
           else threaded ? selectThread(null) : selectMessage(null);
@@ -644,7 +736,10 @@ export function MessageList(props: {
       putBack(r) {
         // The undone row returns to its place, selected, in one update.
         batch(() => {
-          if (model.insert(r.row as Item, r.index)) setSelIndex(r.index);
+          if (model.insert(r.row as Item, r.index)) {
+            setGroups(insertRow(groups(), r.index, groupLabel(r.row as Item)));
+            setSelIndex(r.index);
+          }
           select(r.row as Item);
         });
       },
@@ -813,7 +908,19 @@ export function MessageList(props: {
           <For each={virt.getVirtualItems()}>
             {(item) => {
               const m = () => model.row(item.index);
+              const head = () => startsGroup(groups(), item.index);
               return (
+                <>
+                <Show when={head()}>
+                  {(g) => (
+                    <div class="group-head" role="presentation" style={{ transform: `translateY(${item.start}px)` }}>
+                      <span class="group-label">{g().label}</span>
+                      <Show when={sort !== 'received'}>
+                        <span class="group-count">{fmtNum(g().count)}</span>
+                      </Show>
+                    </div>
+                  )}
+                </Show>
                 <div
                   id={`${rowPrefix}-${item.index}`}
                   role="option"
@@ -825,7 +932,7 @@ export function MessageList(props: {
                   }}
                   aria-selected={!!m() && isSelected(m()!.id)}
                   style={{
-                    transform: `translateY(${item.start}px)`,
+                    transform: `translateY(${item.start + (head() ? GROUP_HEAD : 0)}px)`,
                     ...selectedRowVars(!!m() && isSelected(m()!.id), listFocused(), !windowActive()),
                   }}
                   onMouseDown={(e) => {
@@ -853,6 +960,7 @@ export function MessageList(props: {
                     }
                   </Show>
                 </div>
+                </>
               );
             }}
           </For>

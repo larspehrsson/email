@@ -13,6 +13,8 @@ import {
   selectedFolderId,
   threaded,
   setThreaded,
+  threadedPref,
+  listSort,
   conversationScope,
   setConversationScope,
 } from './state';
@@ -120,7 +122,7 @@ export function App() {
           focusSearch();
           break;
         case 'toggle-threaded':
-          setThreaded(!threaded());
+          setThreaded(!threadedPref());
           break;
         case 'toggle-scope':
           setConversationScope(conversationScope() === 'all' ? 'folder' : 'all');
@@ -248,8 +250,13 @@ export function App() {
                     fallback={<div class="list-placeholder" data-tauri-drag-region={DRAG} />}
                   >
                     {(f) => (
-                      <Show when={threaded()} fallback={<MessageList folder={f} threaded={false} onOpen={openReader} />}>
-                        <MessageList folder={f} threaded onOpen={openReader} />
+                      // Remounted when the sort changes: the list reads it once.
+                      <Show when={listSort()} keyed>
+                        {(_sort) => (
+                          <Show when={threaded()} fallback={<MessageList folder={f} threaded={false} onOpen={openReader} />}>
+                            <MessageList folder={f} threaded onOpen={openReader} />
+                          </Show>
+                        )}
                       </Show>
                     )}
                   </Show>

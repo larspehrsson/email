@@ -17,6 +17,7 @@ use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::model::*;
+use crate::sort::{ListGroup, ListSort};
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS accounts (
@@ -625,6 +626,8 @@ fn open(path: &Path) -> Result<Connection> {
         "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;
          PRAGMA temp_store=MEMORY; PRAGMA cache_size=-65536;",
     )?;
+    // Sort keys for lists ordered by sender / recipient (see `crate::sort`).
+    crate::sort::register(&conn)?;
     Ok(conn)
 }
 
@@ -1397,16 +1400,26 @@ impl Store {
     }
 
     pub fn list_messages(&self, folder_id: i64, offset: u32, limit: u32) -> Result<MessagePage> {
+        self.list_messages_by(folder_id, ListSort::Received, offset, limit)
+    }
+
+    /// A page of the folder's messages in `sort`'s order: newest first, or by sender /
+    /// recipient (`crate::sort`) and newest first within each.
+    pub fn list_messages_by(&self, folder_id: i64, sort: ListSort, offset: u32, limit: u32) -> Result<MessagePage> {
         let db = self.rdb();
         let total: u32 =
             db.query_row("SELECT count(*) FROM entries WHERE folder_id=?1", [folder_id], |r| r.get(0))?;
-        let mut stmt = db.prepare_cached(
+        let order = match sort.key_sql() {
+            None => "e.date DESC, e.message_id DESC".to_string(),
+            Some(k) => format!("{k}, e.date DESC, e.message_id DESC"),
+        };
+        let mut stmt = db.prepare_cached(&format!(
             "SELECT m.id, m.subject, m.from_name, m.from_addr, m.date, m.snippet, m.flags,
                     m.has_attachments, m.has_body, m.keywords,
                     (SELECT o.failed IS NOT NULL FROM outgoing o WHERE o.id = m.pending_send), m.draft_id
              FROM entries e JOIN messages m ON m.id = e.message_id
-             WHERE e.folder_id=?1 ORDER BY e.date DESC, e.message_id DESC LIMIT ?2 OFFSET ?3",
-        )?;
+             WHERE e.folder_id=?1 ORDER BY {order} LIMIT ?2 OFFSET ?3"
+        ))?;
         let rows = stmt.query_map(params![folder_id, limit, offset], |r| {
             let flags: i64 = r.get(6)?;
             Ok(MessageSummary {
@@ -1675,7 +1688,35 @@ impl Store {
     /// thread id) in the folder's list, using exactly the list queries' ordering; None if it
     /// isn't in the folder. Lets the UI open a remembered item and scroll to it at any depth.
     pub fn index_of(&self, folder_id: i64, id: i64, threaded: bool) -> Result<Option<u32>> {
+        self.index_of_by(folder_id, id, threaded, ListSort::Received)
+    }
+
+    /// [`Store::index_of`] in a list sorted by `sort` (conversations are only ever by date).
+    pub fn index_of_by(&self, folder_id: i64, id: i64, threaded: bool, sort: ListSort) -> Result<Option<u32>> {
         let db = self.rdb();
+        if let (false, Some(k)) = (threaded, sort.key_sql()) {
+            // list_messages_by: ORDER BY key, e.date DESC, e.message_id DESC
+            let at: Option<(String, i64)> = db
+                .query_row(
+                    &format!(
+                        "SELECT {k}, e.date FROM entries e JOIN messages m ON m.id = e.message_id
+                         WHERE e.folder_id=?1 AND e.message_id=?2"
+                    ),
+                    params![folder_id, id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            let Some((key, d)) = at else { return Ok(None) };
+            return Ok(Some(db.query_row(
+                &format!(
+                    "SELECT count(*) FROM (SELECT {k} AS k, e.date AS d, e.message_id AS id
+                       FROM entries e JOIN messages m ON m.id = e.message_id WHERE e.folder_id=?1)
+                     WHERE k < ?2 OR (k = ?2 AND (d > ?3 OR (d = ?3 AND id > ?4)))"
+                ),
+                params![folder_id, key, d, id],
+                |r| r.get(0),
+            )?));
+        }
         if threaded {
             let newest: Option<i64> = db.query_row(
                 "SELECT max(date) FROM entries WHERE folder_id=?1 AND thread_id=?2",
@@ -1707,6 +1748,22 @@ impl Store {
     /// The first unread item (message, or conversation with an unread message here) below `after`
     /// in the list's order, wrapping to the top; with its index. None if nothing is unread.
     pub fn next_unread(&self, folder_id: i64, after: Option<i64>, threaded: bool, back: bool) -> Result<Option<(i64, u32)>> {
+        self.next_unread_by(folder_id, after, threaded, back, ListSort::Received)
+    }
+
+    /// [`Store::next_unread`] in a list sorted by `sort` (conversations are only ever by date).
+    pub fn next_unread_by(
+        &self,
+        folder_id: i64,
+        after: Option<i64>,
+        threaded: bool,
+        back: bool,
+        sort: ListSort,
+    ) -> Result<Option<(i64, u32)>> {
+        let sort = if threaded { ListSort::Received } else { sort };
+        if let Some(k) = sort.key_sql() {
+            return self.next_unread_keyed(folder_id, after, back, k, sort);
+        }
         let found: Option<i64> = {
             let db = self.rdb();
             // The unread rows with their list sort key (date DESC, id DESC); `?2`/`?3` = position.
@@ -1758,6 +1815,102 @@ impl Store {
         };
         let Some(id) = found else { return Ok(None) };
         Ok(self.index_of(folder_id, id, threaded)?.map(|i| (id, i)))
+    }
+
+    /// next_unread in a message list sorted by key `k` (SQL), then newest first.
+    fn next_unread_keyed(&self, folder_id: i64, after: Option<i64>, back: bool, k: &str, sort: ListSort) -> Result<Option<(i64, u32)>> {
+        let found: Option<i64> = {
+            let db = self.rdb();
+            let rows = format!(
+                "SELECT e.message_id AS id, {k} AS k, e.date AS d
+                 FROM entries e JOIN messages m ON m.id = e.message_id WHERE e.folder_id = ?1 AND (m.flags & 1) = 0"
+            );
+            let pos: Option<(String, i64)> = match after {
+                Some(id) => db
+                    .query_row(
+                        &format!(
+                            "SELECT {k}, e.date FROM entries e JOIN messages m ON m.id = e.message_id
+                             WHERE e.folder_id=?1 AND e.message_id=?2"
+                        ),
+                        params![folder_id, id],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .optional()?,
+                None => None,
+            };
+            // Order: k ASC, d DESC, id DESC; `back` walks it the other way.
+            let order = if back { "k DESC, d ASC, id ASC" } else { "k ASC, d DESC, id DESC" };
+            let first = |past: bool| -> Result<Option<i64>> {
+                let cond = match (past, back) {
+                    (false, _) => "",
+                    (true, false) => "WHERE k > ?4 OR (k = ?4 AND (d < ?2 OR (d = ?2 AND id < ?3)))",
+                    (true, true) => "WHERE k < ?4 OR (k = ?4 AND (d > ?2 OR (d = ?2 AND id > ?3)))",
+                };
+                let sql = format!("SELECT id FROM ({rows}) {cond} ORDER BY {order} LIMIT 1");
+                let mut stmt = db.prepare_cached(&sql)?;
+                Ok(match (&pos, past) {
+                    (Some((key, d)), true) => stmt.query_row(params![folder_id, d, after, key], |r| r.get(0)).optional()?,
+                    _ => stmt.query_row(params![folder_id], |r| r.get(0)).optional()?,
+                })
+            };
+            match pos {
+                Some(_) => match first(true)? {
+                    Some(id) => Some(id),
+                    None => first(false)?,
+                },
+                None => first(false)?,
+            }
+        };
+        let Some(id) = found else { return Ok(None) };
+        Ok(self.index_of_by(folder_id, id, false, sort)?.map(|i| (id, i)))
+    }
+
+    /// The groups of a folder's list, in its order; their counts add up to the list's rows.
+    /// Sorted by date, `bounds` (Unix seconds, newest first) split it into periods: one count
+    /// per period (`date >= bounds[0]`, then each below the one before), the last for what's
+    /// older than every bound. Conversations go by their newest message here. Sorted by sender or
+    /// recipient (messages only), one group per sender / recipient, labelled as shown.
+    pub fn list_groups(&self, folder_id: i64, threaded: bool, sort: ListSort, bounds: &[i64]) -> Result<Vec<ListGroup>> {
+        let db = self.rdb();
+        match (threaded, sort) {
+            (true, _) | (_, ListSort::Received) => {
+                let sql = if threaded {
+                    "SELECT max(date) FROM entries WHERE folder_id=?1 GROUP BY thread_id"
+                } else {
+                    "SELECT date FROM entries WHERE folder_id=?1"
+                };
+                let mut counts = vec![0u32; bounds.len() + 1];
+                let mut stmt = db.prepare_cached(sql)?;
+                let mut rows = stmt.query([folder_id])?;
+                while let Some(r) = rows.next()? {
+                    let d: i64 = r.get(0)?;
+                    counts[bounds.partition_point(|&b| b > d)] += 1;
+                }
+                Ok(counts.into_iter().map(|count| ListGroup { label: None, count }).collect())
+            }
+            (false, ListSort::From | ListSort::To) => {
+                let k = sort.key_sql().unwrap_or_default();
+                // The label comes from the group's newest message (bare columns go with max()).
+                let mut stmt = db.prepare_cached(&format!(
+                    "SELECT {k} AS k, m.from_name, m.from_addr, m.to_addrs, max(e.date), count(*)
+                     FROM entries e JOIN messages m ON m.id = e.message_id WHERE e.folder_id=?1
+                     GROUP BY k ORDER BY k"
+                ))?;
+                let rows = stmt.query_map([folder_id], |r| {
+                    let key: String = r.get(0)?;
+                    let (name, addr, to): (String, String, String) = (r.get(1)?, r.get(2)?, r.get(3)?);
+                    let shown = if key == crate::sort::NOBODY {
+                        String::new()
+                    } else if sort == ListSort::From {
+                        crate::sort::sender_shown(&name, &addr).to_string()
+                    } else {
+                        crate::sort::recipient_shown(&to)
+                    };
+                    Ok(ListGroup { label: Some(shown), count: r.get(5)? })
+                })?;
+                Ok(rows.collect::<rusqlite::Result<_>>()?)
+            }
+        }
     }
 
     /// Whether message `id` is still in `folder_id`, or (with `None`) still exists at all.
@@ -3570,6 +3723,81 @@ mod tests {
         }
         assert_eq!(store.index_of(inbox, 999_999, false).unwrap(), None);
         assert_eq!(store.index_of(inbox, 999_999, true).unwrap(), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sorted_lists_positions_and_groups_agree() {
+        let dir = std::env::temp_dir().join(format!("mail-core-sorted-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = Store::open(&dir).unwrap();
+        let acct = store.insert_account("x@example.com", "x", Provider::Imap, "h", 993).unwrap();
+        store
+            .sync_folder_list(acct.id, &[ListedFolder { raw_name: "INBOX".into(), path: vec!["INBOX".into()], role: Some(FolderRole::Inbox), selectable: true }])
+            .unwrap();
+        let inbox = store.folders(acct.id).unwrap()[0].id;
+        let names = ["Åsa", "bob", "Alice", "", "BOB", "zed", "\"Alice\""];
+        let tos = ["Doe, Jane <j@x>", "", "bob@y", "jane@x, k@x", "Örjan <o@x>"];
+        let recs: Vec<HeaderRecord> = (1..=60u32)
+            .map(|u| HeaderRecord {
+                gm_msgid: None,
+                gm_labels: None,
+                message_id: Some(format!("s{u}@x")),
+                from_name: names[u as usize % names.len()].into(),
+                from_addr: format!("p{}@x", u % 4),
+                to_addrs: tos[u as usize % tos.len()].into(),
+                date: (u / 5) as i64,
+                flags: if u % 3 == 0 { 0 } else { flags::SEEN },
+                ..rec(u, 0, &[])
+            })
+            .collect();
+        store.upsert_headers(acct.id, inbox, &recs, &HashMap::new()).unwrap();
+        for sort in [ListSort::Received, ListSort::From, ListSort::To] {
+            let list = store.list_messages_by(inbox, sort, 0, 100).unwrap().messages;
+            assert_eq!(list.len(), 60);
+            // Pages line up with the whole.
+            let paged: Vec<i64> = (0..6).flat_map(|p| store.list_messages_by(inbox, sort, p * 10, 10).unwrap().messages).map(|m| m.id).collect();
+            assert_eq!(paged, list.iter().map(|m| m.id).collect::<Vec<_>>(), "{sort:?}");
+            for (i, m) in list.iter().enumerate() {
+                assert_eq!(store.index_of_by(inbox, m.id, false, sort).unwrap(), Some(i as u32), "{sort:?}");
+            }
+            // N walks the unread ones in list order, wrapping; P the other way.
+            let unread: Vec<i64> = list.iter().filter(|m| m.unread).map(|m| m.id).collect();
+            let mut at = None;
+            for want in unread.iter().chain(unread.first()) {
+                let (id, idx) = store.next_unread_by(inbox, at, false, false, sort).unwrap().unwrap();
+                assert_eq!((id, list[idx as usize].id), (*want, *want), "{sort:?}");
+                at = Some(id);
+            }
+            let (back, _) = store.next_unread_by(inbox, Some(unread[0]), false, true, sort).unwrap().unwrap();
+            assert_eq!(back, *unread.last().unwrap(), "{sort:?} back wraps to the bottom");
+        }
+        // By sender: one group per sender as shown, case and quotes aside, nobody last; the
+        // groups cover the list in order.
+        let by_from = store.list_messages_by(inbox, ListSort::From, 0, 100).unwrap().messages;
+        let groups = store.list_groups(inbox, false, ListSort::From, &[]).unwrap();
+        let keys: Vec<String> = groups.iter().map(|g| crate::sort::key(g.label.as_deref().unwrap())).collect();
+        assert!(keys.windows(2).all(|w| w[0] < w[1]), "one group per key, in order: {keys:?}");
+        assert!(keys.contains(&"alice".to_string()) && !keys.contains(&"\"alice\"".to_string()), "quotes aside");
+        assert!(keys.contains(&"bob".to_string()) && keys.iter().filter(|k| *k == "bob").count() == 1, "case aside");
+        let mut i = 0;
+        for g in &groups {
+            let want = crate::sort::key(g.label.as_deref().unwrap());
+            for m in &by_from[i..i + g.count as usize] {
+                assert_eq!(crate::sort::sender_key(&m.from_name, &m.from_addr), want);
+            }
+            i += g.count as usize;
+        }
+        assert_eq!(i, 60);
+        let to_groups = store.list_groups(inbox, false, ListSort::To, &[]).unwrap();
+        assert_eq!(to_groups.iter().map(|g| g.count).sum::<u32>(), 60);
+        assert_eq!(to_groups.last().unwrap().label.as_deref(), Some(""), "no recipients last");
+        // By date: periods split at the bounds, newest first.
+        let by_date = store.list_groups(inbox, false, ListSort::Received, &[10, 5]).unwrap();
+        let count = |f: &dyn Fn(i64) -> bool| recs.iter().filter(|r| f(r.date)).count() as u32;
+        assert_eq!(by_date.iter().map(|g| g.count).collect::<Vec<_>>(), [count(&|d| d >= 10), count(&|d| (5..10).contains(&d)), count(&|d| d < 5)]);
+        let threads = store.list_groups(inbox, true, ListSort::From, &[5]).unwrap();
+        assert_eq!(threads.iter().map(|g| g.count).sum::<u32>(), store.list_threads(inbox, ThreadScope::default(), 0, 100).unwrap().total);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

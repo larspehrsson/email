@@ -18,6 +18,8 @@ import type {
   CommandMap,
   CommandName,
   ConversationScope,
+  ListGroup,
+  ListSort,
   SearchField,
   EventMap,
   EventName,
@@ -98,8 +100,13 @@ export const api = {
     }),
   listFolders: (accountId: number): Promise<Folder[]> => call('list_folders', { accountId }),
   openFolder: (folderId: number): Promise<void> => call('open_folder', { folderId }),
-  listMessages: (folderId: number, offset: number, limit: number): Promise<MessagePage> =>
-    call('list_messages', { folderId, offset, limit }),
+  listMessages: (folderId: number, offset: number, limit: number, sort: ListSort = 'received'): Promise<MessagePage> =>
+    call('list_messages', { folderId, offset, limit, sort }),
+  /** The groups the folder's list shows, in its order (counts add up to its rows). By date,
+   *  `bounds` (Unix seconds, newest first) cut it into periods: one count per period and one
+   *  for what's older than all of them. */
+  listGroups: (folderId: number, threaded: boolean, sort: ListSort, bounds: number[]): Promise<ListGroup[]> =>
+    call('list_groups', { folderId, threaded, sort, bounds }),
   getMessage: (id: number, allowRemote: boolean): Promise<MessageDetail | null> =>
     call('get_message', { id, allowRemote }),
   /** Quick search; `folderId: null` searches the whole account. Newest first. */
@@ -129,15 +136,24 @@ export const api = {
   getSyncStatus: (): Promise<SyncStatus[]> => call('get_sync_status', undefined),
   /** Is message `id` still in `folderId` (null = still exists at all)? */
   /** Row index of a message / conversation in the folder's list (null = not in it). */
-  indexOf: (folderId: number, id: number, threaded: boolean): Promise<number | null> =>
-    call('index_of', { folderId, id, threaded }),
+  indexOf: (folderId: number, id: number, threaded: boolean, sort: ListSort = 'received'): Promise<number | null> =>
+    call('index_of', { folderId, id, threaded, sort }),
   /** Where a message shows in the folder's list: its row's id (the message, or its conversation) and position. */
-  locateMessage: (folderId: number, messageId: number, threaded: boolean): Promise<{ id: number; index: number } | null> =>
-    call('locate_message', { folderId, messageId, threaded }),
+  locateMessage: (
+    folderId: number,
+    messageId: number,
+    threaded: boolean,
+    sort: ListSort = 'received',
+  ): Promise<{ id: number; index: number } | null> => call('locate_message', { folderId, messageId, threaded, sort }),
   /** The next unread item below `after` in the folder's list, wrapping to the top; with `back`
    *  the previous one above it, wrapping to the bottom (null = none). */
-  nextUnread: (folderId: number, after: number | null, threaded: boolean, back = false): Promise<NextUnread | null> =>
-    call('next_unread', { folderId, after, threaded, back }),
+  nextUnread: (
+    folderId: number,
+    after: number | null,
+    threaded: boolean,
+    back = false,
+    sort: ListSort = 'received',
+  ): Promise<NextUnread | null> => call('next_unread', { folderId, after, threaded, back, sort }),
   /** Queue a message; it goes out after the undo window unless cancelSend(id) takes it back. */
   sendMessage: (request: SendRequest): Promise<SendQueued> => call('send_message', { request }),
   /** Save the composer's state as draft `id` (new when null); shown in Drafts. Returns its id. */

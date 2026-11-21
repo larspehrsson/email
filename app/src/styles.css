@@ -2190,6 +2190,49 @@ body.resizing iframe {
   font-weight: 600;
   color: var(--text-3);
 }
+.vm-item.disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+.vm-item.disabled:hover {
+  background: none;
+  color: var(--text-3);
+}
+.vm-item.disabled:hover kbd {
+  color: inherit;
+  border-color: var(--sep);
+}
+
+/* A group's header in the message list (a period, a sender…), above its first row. */
+.group-head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 30px;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 0 14px 5px 21px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  pointer-events: none;
+  contain: strict;
+}
+.group-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.group-count {
+  flex: none;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
 
 .reveal-row {
   display: flex;

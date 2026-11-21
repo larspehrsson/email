@@ -11,6 +11,7 @@ pub mod model;
 pub mod partial;
 pub mod search;
 pub mod smtp;
+pub mod sort;
 pub mod store;
 pub mod sync;
 pub mod tags;
@@ -535,6 +536,16 @@ impl Core {
         self.store.list_messages(folder_id, offset, limit)
     }
 
+    /// A page of the folder's messages in `sort`'s order.
+    pub fn list_messages_by(&self, folder_id: i64, sort: sort::ListSort, offset: u32, limit: u32) -> Result<MessagePage> {
+        self.store.list_messages_by(folder_id, sort, offset, limit)
+    }
+
+    /// The groups of a folder's list (see `Store::list_groups`).
+    pub fn list_groups(&self, folder_id: i64, threaded: bool, sort: sort::ListSort, bounds: &[i64]) -> Result<Vec<sort::ListGroup>> {
+        self.store.list_groups(folder_id, threaded, sort, bounds)
+    }
+
     /// An attachment's (name, mime, bytes): from the stored message, the attachment cache, or
     /// (for attachments omitted from the body download) fetched from the server and cached.
     pub async fn attachment(&self, message_id: i64, index: usize) -> Result<(String, String, Vec<u8>)> {
@@ -621,16 +632,16 @@ impl Core {
         Ok(())
     }
 
-    pub fn index_of(&self, folder_id: i64, id: i64, threaded: bool) -> Result<Option<u32>> {
-        self.store.index_of(folder_id, id, threaded)
+    pub fn index_of(&self, folder_id: i64, id: i64, threaded: bool, sort: sort::ListSort) -> Result<Option<u32>> {
+        self.store.index_of_by(folder_id, id, threaded, sort)
     }
 
     /// Where a message shows in the folder's list: its row (the message, or with `threaded` its
     /// conversation) and that row's position; None if it isn't in the folder.
-    pub fn locate_message(&self, folder_id: i64, message_id: i64, threaded: bool) -> Result<Option<(i64, u32)>> {
+    pub fn locate_message(&self, folder_id: i64, message_id: i64, threaded: bool, sort: sort::ListSort) -> Result<Option<(i64, u32)>> {
         let item = if threaded { self.store.message_thread_id(message_id)? } else { Some(message_id) };
         let Some(item) = item else { return Ok(None) };
-        Ok(self.store.index_of(folder_id, item, threaded)?.map(|i| (item, i)))
+        Ok(self.store.index_of_by(folder_id, item, threaded, sort)?.map(|i| (item, i)))
     }
 
     /// A message's detail, downloading its body first if it isn't local yet (waits up to 30 s).
@@ -1036,8 +1047,8 @@ impl Core {
 
     /// The next unread item below `after` in a folder list (wrapping to the top), or with `back`
     /// the previous one above it (wrapping to the bottom).
-    pub fn next_unread(&self, folder_id: i64, after: Option<i64>, threaded: bool, back: bool) -> Result<Option<NextUnread>> {
-        Ok(self.store.next_unread(folder_id, after, threaded, back)?.map(|(id, index)| NextUnread { id, index }))
+    pub fn next_unread(&self, folder_id: i64, after: Option<i64>, threaded: bool, back: bool, sort: sort::ListSort) -> Result<Option<NextUnread>> {
+        Ok(self.store.next_unread_by(folder_id, after, threaded, back, sort)?.map(|(id, index)| NextUnread { id, index }))
     }
 
     pub fn tags(&self) -> Result<Vec<tags::TagDef>> {
