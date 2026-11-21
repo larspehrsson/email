@@ -16,6 +16,10 @@ pub struct Card {
     pub phones: Vec<String>,
     pub company: String,
     pub notes: String,
+    /// A Google contact of this account (Google Contacts linked in Settings); None: kept only
+    /// here. For a new card, the account to create it in.
+    #[serde(default)]
+    pub google: Option<i64>,
 }
 
 impl Card {

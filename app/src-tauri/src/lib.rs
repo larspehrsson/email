@@ -297,6 +297,43 @@ async fn disable_graph(core: State<'_, Arc<Core>>, account_id: i64) -> Res<()> {
     core.disable_graph(account_id).map_err(err)
 }
 
+/// Google Contacts: the OAuth client and the linked accounts.
+#[tauri::command]
+async fn google_status(core: State<'_, Arc<Core>>) -> Res<mail_core::GoogleStatus> {
+    core.google_status().map_err(err)
+}
+
+/// The user's own Google OAuth client (null: forget it).
+#[tauri::command]
+async fn set_google_client(core: State<'_, Arc<Core>>, id: Option<String>, secret: Option<String>) -> Res<()> {
+    let client = id.map(|id| mail_core::oauth::GoogleClient { id, secret: secret.unwrap_or_default() });
+    core.set_google_client(client).map_err(err)
+}
+
+/// Connect an account to its Google contacts (browser sign-in), then sync them in.
+#[tauri::command]
+async fn google_connect(app: tauri::AppHandle, core: State<'_, Arc<Core>>, account_id: i64) -> Res<String> {
+    let core = core.inner().clone();
+    let email = core.google_connect(account_id, |url| open_sign_in(&app, &url)).await.map_err(err)?;
+    let _ = core.google_sync(account_id).await;
+    Ok(email)
+}
+
+#[tauri::command]
+async fn google_disconnect(core: State<'_, Arc<Core>>, account_id: i64) -> Res<()> {
+    core.google_disconnect(account_id).map_err(err)
+}
+
+/// Sync one account's Google contacts (null: all); whether anything changed here.
+#[tauri::command]
+async fn google_sync(core: State<'_, Arc<Core>>, account_id: Option<i64>) -> Res<bool> {
+    let core = core.inner().clone();
+    match account_id {
+        Some(id) => core.google_sync(id).await.map(|r| r.added + r.changed + r.removed > 0).map_err(err),
+        None => Ok(core.google_sync_all().await),
+    }
+}
+
 /// Stop waiting for a browser sign-in.
 #[tauri::command]
 fn cancel_sign_in(core: State<'_, Arc<Core>>) {
@@ -1358,6 +1395,11 @@ pub fn run() {
             sender_icon,
             allow_remote_sender,
             account_logos,
+            google_status,
+            set_google_client,
+            google_connect,
+            google_disconnect,
+            google_sync,
             set_account_logo,
             remote_senders,
             set_remote_sender,

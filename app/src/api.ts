@@ -22,6 +22,7 @@ import type {
   ListSort,
   ListFilter,
   SelectionInfo,
+  GoogleStatus,
   SearchField,
   Signatures,
   SenderPage,
@@ -115,6 +116,13 @@ export const api = {
   listItemIds: (folderId: number, threaded: boolean, sort: ListSort, filter: ListFilter | undefined, offset: number, limit: number): Promise<number[]> =>
     call('list_item_ids', { folderId, threaded, sort, filter, offset, limit }),
   accountLogos: (): Promise<{ accountId: number; dataUrl: string }[]> => call('account_logos', undefined),
+  googleStatus: (): Promise<GoogleStatus> => call('google_status', undefined),
+  setGoogleClient: (id: string | null, secret: string | null): Promise<void> => call('set_google_client', { id, secret }),
+  /** Browser sign-in, then a first sync; the Google address signed in with. */
+  googleConnect: (accountId: number): Promise<string> => call('google_connect', { accountId }),
+  googleDisconnect: (accountId: number): Promise<void> => call('google_disconnect', { accountId }),
+  /** Sync one account's Google contacts (null: all); whether anything changed here. */
+  googleSync: (accountId: number | null): Promise<boolean> => call('google_sync', { accountId }),
   setAccountLogo: (accountId: number, dataUrl: string | null): Promise<void> => call('set_account_logo', { accountId, dataUrl }),
   /** A sender's picture (data: URL) from their domain; null when there's none. */
   senderIcon: (addr: string): Promise<string | null> => call('sender_icon', { addr }),

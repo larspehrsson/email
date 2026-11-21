@@ -4,6 +4,7 @@ pub mod imap;
 pub mod actions;
 pub mod addressbook;
 pub mod ai;
+pub mod gcontacts;
 pub mod icons;
 pub mod compose;
 pub mod contacts;
@@ -154,11 +155,28 @@ pub struct NewAccount {
 /// The undo-send window: queued mail waits this long before it goes out.
 pub const SEND_DELAY_MS: i64 = 10_000;
 
+/// Keychain names: the user's Google OAuth client, and each account's Google sign-in.
+const GOOGLE_CLIENT_KEY: &str = "#google:client";
+fn google_key(account_id: i64) -> String {
+    format!("#google-contacts:{account_id}")
+}
+
+/// Google Contacts as Settings shows it.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoogleStatus {
+    /// The OAuth client's ID (None: not set yet).
+    pub client_id: Option<String>,
+    pub links: Vec<gcontacts::GoogleLink>,
+}
+
 /// A picture found is looked up again after this long; a domain without one, sooner.
 const ICON_KEEP_SECS: i64 = 30 * 24 * 3600;
 const ICON_MISS_SECS: i64 = 7 * 24 * 3600;
 
 pub struct Core {
+    /// One Google Contacts sync per account at a time.
+    google_locks: Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>,
     /// Sender pictures being looked up (one lookup per domain), and at most a few at a time.
     icon_lookups: Mutex<HashMap<String, Arc<tokio::sync::OnceCell<Option<String>>>>>,
     icon_slots: tokio::sync::Semaphore,
@@ -214,6 +232,7 @@ impl Core {
         // Actions interrupted mid-send (quit, crash) are sent again.
         store.reset_started_ops()?;
         Ok(Core {
+            google_locks: Mutex::new(HashMap::new()),
             icon_lookups: Mutex::new(HashMap::new()),
             icon_slots: tokio::sync::Semaphore::new(4),
             store: Arc::new(store),
@@ -572,6 +591,9 @@ impl Core {
             self.secrets.delete(&oauth::graph_key(&a.email));
         }
         self.needs_password.lock().unwrap().remove(&account_id);
+        // Its Google contacts here go with it (nothing changes in Google).
+        self.store.remove_google_link(account_id)?;
+        self.secrets.delete(&google_key(account_id));
         self.store.delete_account(account_id)?;
         tracing::info!(account_id, "account removed");
         let store = self.store.clone();
@@ -1178,12 +1200,128 @@ impl Core {
         self.store.cards()
     }
 
+    /// Save a card the user changed or made. A Google contact is marked to send at the next
+    /// sync; a new card with `google` set is made in that account's Google contacts.
     pub fn save_card(&self, card: addressbook::Card) -> Result<i64> {
-        self.store.save_card(card)
+        let new_in = (card.id == 0).then_some(card.google).flatten();
+        if let Some(acct) = new_in
+            && self.store.google_link(acct)?.is_none()
+        {
+            bail!("Google Contacts isn't connected for that account.");
+        }
+        let id = self.store.save_card(card)?;
+        if let Some(account_id) = new_in {
+            self.store.save_card_link(&gcontacts::CardLink { card_id: id, account_id, resource: None, etag: None, raw: None, dirty: true })?;
+        } else if let Some(mut l) = self.store.card_link(id)? {
+            l.dirty = true;
+            self.store.save_card_link(&l)?;
+        }
+        Ok(id)
     }
 
+    /// Delete a card; a Google contact is deleted there too at the next sync.
     pub fn delete_card(&self, id: i64) -> Result<()> {
+        if let Some(l) = self.store.card_link(id)?
+            && let Some(res) = &l.resource
+        {
+            self.store.add_card_tombstone(l.account_id, res)?;
+        }
         self.store.delete_card(id)
+    }
+
+    // ---- Google Contacts ---------------------------------------------------------------------
+
+    fn google_client(&self) -> Option<oauth::GoogleClient> {
+        self.secrets.get(GOOGLE_CLIENT_KEY).ok().and_then(|j| serde_json::from_str(&j).ok())
+    }
+
+    /// The OAuth client to sign in with (None: forget it).
+    pub fn set_google_client(&self, client: Option<oauth::GoogleClient>) -> Result<()> {
+        match client {
+            Some(c) => {
+                let c = oauth::GoogleClient { id: c.id.trim().to_string(), secret: c.secret.trim().to_string() };
+                if !c.id.ends_with(".apps.googleusercontent.com") {
+                    bail!("That isn't a Google client ID (it ends in .apps.googleusercontent.com).");
+                }
+                self.secrets.set(GOOGLE_CLIENT_KEY, &serde_json::to_string(&c)?)
+            }
+            None => {
+                self.secrets.delete(GOOGLE_CLIENT_KEY);
+                Ok(())
+            }
+        }
+    }
+
+    /// Whether the client is set, and the accounts linked to their Google contacts.
+    pub fn google_status(&self) -> Result<GoogleStatus> {
+        Ok(GoogleStatus { client_id: self.google_client().map(|c| c.id), links: self.store.google_links()? })
+    }
+
+    /// Connect an account to its Google contacts: a browser sign-in (`open` shows the page),
+    /// then a first sync (reading only). Returns the Google address signed in with.
+    pub async fn google_connect(&self, account_id: i64, open: impl FnOnce(String)) -> Result<String> {
+        let client = self.google_client().ok_or_else(|| anyhow!("Add your Google client ID and secret first."))?;
+        let account = self.account(account_id)?;
+        let redirect = oauth::Redirect::listen().await?;
+        let uri = oauth::google_redirect(&redirect.uri);
+        let pkce = oauth::Pkce::new();
+        open(oauth::google_authorize_url(&client, &uri, redirect.state(), &pkce.challenge, Some(&account.email)));
+        let code = tokio::select! {
+            code = redirect.code() => code?,
+            _ = self.sign_in_cancel.notified() => bail!("Sign-in cancelled."),
+        };
+        let tokens = oauth::google_exchange(&client, &code, &pkce.verifier, &uri).await?;
+        let refresh = tokens.refresh_token.clone().ok_or_else(|| anyhow!("Google didn't allow staying signed in (no refresh token)."))?;
+        let email = tokens.id_token.as_deref().and_then(oauth::email_from_id_token).unwrap_or_else(|| account.email.clone());
+        self.secrets.set(&google_key(account_id), &refresh)?;
+        self.store.set_google_link(account_id, &email)?;
+        Ok(email)
+    }
+
+    /// Stop syncing an account's Google contacts: its cards here go; Google is left as it is.
+    pub fn google_disconnect(&self, account_id: i64) -> Result<()> {
+        self.store.remove_google_link(account_id)?;
+        self.secrets.delete(&google_key(account_id));
+        Ok(())
+    }
+
+    /// Sync one account's Google contacts (one sync per account at a time); what it did.
+    pub async fn google_sync(&self, account_id: i64) -> Result<gcontacts::SyncReport> {
+        let lock = self.google_locks.lock().unwrap().entry(account_id).or_default().clone();
+        let _held = lock.lock().await;
+        let result = async {
+            let client = self.google_client().ok_or_else(|| anyhow!("Add your Google client ID and secret first."))?;
+            let refresh = self.secrets.get(&google_key(account_id)).map_err(|_| anyhow!(gcontacts::PeopleError::SignIn("no saved sign-in".into())))?;
+            let tokens = oauth::google_refresh(&client, &refresh).await?;
+            let api = gcontacts::GoogleApi { access_token: tokens.access_token };
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
+            gcontacts::sync(&self.store, account_id, &api, now).await
+        }
+        .await;
+        match &result {
+            Ok(r) => tracing::info!(account_id, sent = r.sent, added = r.added, changed = r.changed, removed = r.removed, "google contacts synced"),
+            Err(e) => {
+                tracing::warn!(account_id, "google contacts: {e:#}");
+                let why = if e.downcast_ref::<gcontacts::PeopleError>().is_some_and(|p| matches!(p, gcontacts::PeopleError::SignIn(_))) {
+                    "Google needs you to connect again.".to_string()
+                } else {
+                    format!("{e:#}")
+                };
+                let _ = self.store.set_google_sync(account_id, None, None, Some(&why));
+            }
+        }
+        result
+    }
+
+    /// Sync every linked account; whether anything changed here.
+    pub async fn google_sync_all(&self) -> bool {
+        let mut any = false;
+        for l in self.store.google_links().unwrap_or_default() {
+            if let Ok(r) = self.google_sync(l.account_id).await {
+                any |= r.added + r.changed + r.removed > 0;
+            }
+        }
+        any
     }
 
     fn build_contacts(&self) -> Result<Vec<contacts::Contact>> {

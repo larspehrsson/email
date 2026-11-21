@@ -3,7 +3,8 @@ import { api, errorMessage, type Card } from '../api';
 import { cards, emptyCard, loadCards, reloadCards } from '../lib/addressBook';
 import { newMessageTo } from '../lib/compose';
 import { hint } from '../lib/shortcuts';
-import { setMainView, setSearchQuery, setSearchScope } from '../state';
+import { accounts, setMainView, setSearchQuery, setSearchScope } from '../state';
+import { googleStatus, reloadGoogleStatus, syncGoogle, syncGoogleSoon } from '../lib/googleContacts';
 import { confirmDialog } from './Actions';
 import { CloseIcon, PeopleIcon, PlusIcon } from './Icons';
 import { focusSearch } from './SearchBar';
@@ -28,6 +29,8 @@ export function ContactsView() {
   let nameInput: HTMLInputElement | undefined;
 
   onMount(() => {
+    // Opening it brings in what changed in Google meanwhile.
+    void reloadGoogleStatus().then(() => syncGoogle());
     void loadCards().then(() => {
       const o = opening();
       setOpening(null);
@@ -64,8 +67,13 @@ export function ContactsView() {
       setMsg(null);
     });
   }
+  /** Where a new contact goes: the last place chosen, if still linked. */
+  const lastPlace = () => {
+    const g = Number(localStorage.getItem('contacts.saveIn') ?? 0);
+    return googleStatus()?.links.some((l) => l.accountId === g) ? g : null;
+  };
   function startNew(name = '', email = '') {
-    choose({ ...emptyCard(), name, emails: [email] });
+    choose({ ...emptyCard(), name, emails: [email], google: lastPlace() });
     setSaved('');
     queueMicrotask(() => nameInput?.focus());
   }
@@ -85,6 +93,14 @@ export function ContactsView() {
     if (!f) return;
     try {
       const id = await api.saveCard({ ...f, emails: f.emails.filter((e) => e.trim()), phones: f.phones.filter((p) => p.trim()) });
+      if (f.id === 0) {
+        try {
+          localStorage.setItem('contacts.saveIn', String(f.google ?? 0));
+        } catch {
+          /* only a convenience */
+        }
+      }
+      if (f.google != null) syncGoogleSoon(f.google);
       await reloadCards();
       choose(cards().find((c) => c.id === id) ?? null);
       setMsg('Saved.');
@@ -95,9 +111,13 @@ export function ContactsView() {
   async function remove() {
     const f = form();
     if (!f) return;
-    if (f.id && !(await confirmDialog(`Delete ${f.name || f.company || f.emails[0] || 'this contact'} from the address book?`, 'Delete'))) return;
+    const who = f.name || f.company || f.emails[0] || 'this contact';
+    const there = f.google != null ? googleEmail(f.google) : null;
+    const text = there ? `Delete ${who}? They're deleted from Google Contacts (${there}) too.` : `Delete ${who} from the address book?`;
+    if (f.id && !(await confirmDialog(text, 'Delete'))) return;
     try {
       if (f.id) await api.deleteCard(f.id);
+      if (f.id && f.google != null) syncGoogleSoon(f.google);
       await reloadCards();
       choose(shown()[0] ?? null);
     } catch (e) {
@@ -105,6 +125,8 @@ export function ContactsView() {
     }
   }
   const addresses = () => (form()?.emails ?? []).map((e) => e.trim()).filter(Boolean);
+  const googleEmail = (accountId: number) =>
+    googleStatus()?.links.find((l) => l.accountId === accountId)?.googleEmail ?? accounts()?.find((a) => a.id === accountId)?.email ?? 'Google';
   function write() {
     const f = form();
     if (!f || !addresses().length) return;
@@ -160,7 +182,12 @@ export function ContactsView() {
                 classList={{ on: form()?.id === c.id }}
                 onClick={() => void pick(c)}
               >
-                <span class="ct-name">{c.name || c.company || c.emails[0]}</span>
+                <span class="ct-name">
+                  {c.name || c.company || c.emails[0]}
+                  <Show when={c.google != null}>
+                    <span class="ct-google" title={`Google Contacts: ${googleEmail(c.google!)}`}>G</span>
+                  </Show>
+                </span>
                 <span class="ct-sub">{c.emails[0] ?? c.company}</span>
               </button>
             )}
@@ -180,6 +207,23 @@ export function ContactsView() {
                 value={f().name}
                 onInput={(e) => set({ name: e.currentTarget.value })}
               />
+              <div class="ct-field ct-where">
+                <span>Saved in</span>
+                <Show
+                  when={f().id === 0 && (googleStatus()?.links.length ?? 0) > 0}
+                  fallback={<span class="ct-where-text">{f().google != null ? `Google Contacts · ${googleEmail(f().google!)}` : 'This computer'}</span>}
+                >
+                  <select
+                    class="st-input ct-save-in"
+                    aria-label="Save in"
+                    value={String(f().google ?? '')}
+                    onChange={(e) => set({ google: e.currentTarget.value ? Number(e.currentTarget.value) : null })}
+                  >
+                    <option value="">This computer</option>
+                    <For each={googleStatus()?.links ?? []}>{(l) => <option value={String(l.accountId)}>Google Contacts · {l.googleEmail}</option>}</For>
+                  </select>
+                </Show>
+              </div>
               <label class="ct-field">
                 <span>Company</span>
                 <input class="st-input" type="text" value={f().company} onInput={(e) => set({ company: e.currentTarget.value })} />

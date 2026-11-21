@@ -22,6 +22,7 @@ import type {
   Signature,
   SignatureDefaults,
   Card,
+  GoogleStatus,
   ListFilter,
   TagDef,
   Action,
@@ -580,6 +581,13 @@ export function createMockBackend(): Backend {
 
   const accounts: Account[] = [];
   const aiCancelled = new Set<number>();
+  const googleLoad = (): GoogleStatus => {
+    try {
+      return JSON.parse(localStorage.getItem('mock.google') ?? 'null') ?? { clientId: null, links: [] };
+    } catch {
+      return { clientId: null, links: [] };
+    }
+  };
   const cardsLoad = (): Card[] => {
     try {
       return JSON.parse(localStorage.getItem('mock.cards') ?? '[]') as Card[];
@@ -1784,6 +1792,53 @@ export function createMockBackend(): Backend {
         setStatus(acc.id, 'connecting', null, 0, 0, null);
         setTimeout(() => void simulateSync(acc, 6_000, 'mail.example.org'), 300);
       }
+    },
+    async google_status() {
+      await sleep(3);
+      return googleLoad();
+    },
+    async set_google_client({ id }) {
+      await sleep(3);
+      const st = googleLoad();
+      if (id && !id.trim().endsWith('.apps.googleusercontent.com')) throw "That isn't a Google client ID (it ends in .apps.googleusercontent.com).";
+      st.clientId = id ? id.trim() : null;
+      localStorage.setItem('mock.google', JSON.stringify(st));
+    },
+    async google_connect({ accountId }) {
+      await sleep(300); // the browser sign-in
+      const st = googleLoad();
+      if (!st.clientId) throw 'Add your Google client ID and secret first.';
+      const email = accounts.find((a) => a.id === accountId)?.email ?? 'me@gmail.com';
+      // Their contacts come in (made up): Google's, linked to this account.
+      const all = cardsLoad();
+      let next = Math.max(0, ...all.map((c) => c.id)) + 1;
+      const people: [string, string, string][] = [
+        ['Olivia Hart', 'olivia.hart@example.com', 'Fabrikam'],
+        ['Noah Becker', 'noah@becker.example', ''],
+        ['Emma Lindqvist', 'emma.lindqvist@example.se', 'Nordlys'],
+      ];
+      const added = people.map(([name, email, company]) => ({ id: next++, name, emails: [email], phones: [], company, notes: '', google: accountId }));
+      localStorage.setItem('mock.cards', JSON.stringify([...all, ...added]));
+      st.links = [...st.links.filter((l) => l.accountId !== accountId), { accountId, googleEmail: email, synced: Math.floor(Date.now() / 1000), error: null, count: added.length }];
+      localStorage.setItem('mock.google', JSON.stringify(st));
+      return email;
+    },
+    async google_disconnect({ accountId }) {
+      await sleep(3);
+      const st = googleLoad();
+      st.links = st.links.filter((l) => l.accountId !== accountId);
+      localStorage.setItem('mock.google', JSON.stringify(st));
+      localStorage.setItem('mock.cards', JSON.stringify(cardsLoad().filter((c) => c.google !== accountId)));
+    },
+    async google_sync() {
+      await sleep(20);
+      const st = googleLoad();
+      for (const l of st.links) {
+        l.synced = Math.floor(Date.now() / 1000);
+        l.count = cardsLoad().filter((c) => c.google === l.accountId).length;
+      }
+      localStorage.setItem('mock.google', JSON.stringify(st));
+      return false;
     },
     async account_logos() {
       await sleep(3);

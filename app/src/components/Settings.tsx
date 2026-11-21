@@ -1,4 +1,5 @@
 import { createEffect, createResource, createSignal, For, Match, onCleanup, onMount, Show, Switch, type JSX } from 'solid-js';
+import { GoogleClientNote, GoogleContactsField } from './GoogleContacts';
 import { accountLogo, logoFromFile, setAccountLogo } from '../lib/accountLogos';
 import {
   bindKey,
@@ -562,6 +563,13 @@ function AccountCard(props: { d: AccountDetails }) {
         </Show>
       </Field>
       <Show when={account()}>{(a) => <MarkField account={a()} onError={(text) => setMsg({ text, error: true })} />}</Show>
+      <Show when={account()?.provider === 'gmail' ? account() : undefined}>
+        {(a) => (
+          <Field label="Google Contacts">
+            <GoogleContactsField account={a()} />
+          </Field>
+        )}
+      </Show>
       <Show when={account()?.auth === 'microsoft' ? account() : undefined}>
         {(a) => <GraphField account={a()} onMessage={setMsg} />}
       </Show>
@@ -678,6 +686,7 @@ function AccountsSection() {
       <Show when={details.error}>
         <p class="st-acct-msg error">{errorMessage(details.error)}</p>
       </Show>
+      <GoogleClientNote />
       <div class="st-add-account">
         <button
           class="btn secondary"

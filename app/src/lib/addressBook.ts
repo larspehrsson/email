@@ -34,4 +34,4 @@ export function cardFor(addr: string): Card | undefined {
   return cards().find((c) => c.emails.some((e) => e.toLowerCase() === a));
 }
 
-export const emptyCard = (): Card => ({ id: 0, name: '', emails: [''], phones: [], company: '', notes: '' });
+export const emptyCard = (): Card => ({ id: 0, name: '', emails: [''], phones: [], company: '', notes: '', google: null });

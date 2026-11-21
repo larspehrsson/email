@@ -157,7 +157,7 @@ fn page_icons(html: &str, base: &str) -> Vec<String> {
             found.push((score, url));
         }
     }
-    found.sort_by(|a, b| b.0.cmp(&a.0));
+    found.sort_by_key(|f| std::cmp::Reverse(f.0));
     found.into_iter().map(|(_, u)| u).collect()
 }
 

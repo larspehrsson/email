@@ -53,6 +53,7 @@ import { SenderPane } from './components/SenderPane';
 import { ContactsView } from './components/ContactsView';
 import { AddAccountModal, Onboarding } from './components/AddAccount';
 import { ContextMenuHost } from './components/ContextMenu';
+import { startGoogleSync } from './lib/googleContacts';
 import { MultiPane } from './components/MultiPane';
 import { DRAG } from './lib/platform';
 
@@ -68,6 +69,7 @@ export function App() {
   onMount(() => {
     void initApp();
     initExports();
+    startGoogleSync();
   });
 
   // Ctrl/⌘+1: full ↔ rail · Ctrl/⌘+Shift+1: folder flyout · Ctrl/⌘+G: folder switcher ·

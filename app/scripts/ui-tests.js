@@ -1124,6 +1124,53 @@ describe('account picture', () => {
   });
 });
 
+describe('google contacts', () => {
+  test('connect (asking for the OAuth client first), contacts arrive marked, new ones can go there, disconnect', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'Accounts' }).click();
+      const field = page.locator('.st-acct').first().locator('.gc');
+      await field.getByRole('button', { name: 'Connect Google Contacts…' }).click();
+      // No client yet: asked for it.
+      await field.locator('input[aria-label="Google client ID"]').fill('not-a-client');
+      await field.getByRole('button', { name: 'Save' }).click();
+      await field.locator('.st-status.error').waitFor();
+      await field.locator('input[aria-label="Google client ID"]').fill('123-abc.apps.googleusercontent.com');
+      await field.locator('input[aria-label="Google client secret"]').fill('GOCSPX-x');
+      await field.getByRole('button', { name: 'Save' }).click();
+      await field.locator('.gc-linked').waitFor();
+      assert.match(await field.locator('.gc-linked').textContent(), /3 contacts/);
+      assert.match(await page.locator('.gc-client-note').textContent(), /123…/);
+      await page.keyboard.press('Escape');
+      // In the address book: theirs marked; a new one can be saved in Google.
+      await page.keyboard.press('ControlOrMeta+Shift+b').catch(() => {});
+      if ((await page.locator('.contacts').count()) === 0) await page.locator('.sidebar [aria-label="Address book"]').click();
+      await page.locator('.ct-row', { hasText: 'Olivia Hart' }).waitFor();
+      assert.equal(await page.locator('.ct-row', { hasText: 'Olivia Hart' }).locator('.ct-google').count(), 1);
+      await page.locator('.ct-row', { hasText: 'Olivia Hart' }).click();
+      assert.match(await page.locator('.ct-where-text').textContent(), /Google Contacts/);
+      await page.locator('[aria-label="New contact"]').click();
+      const saveIn = page.locator('select.ct-save-in');
+      await saveIn.waitFor();
+      assert.equal(await saveIn.locator('option').count(), 2, 'this computer, or the Google account');
+      await page.keyboard.press('Escape');
+      // Disconnect: its contacts leave the address book.
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'Accounts' }).click();
+      await page.locator('.st-acct').first().locator('.gc').getByRole('button', { name: 'Disconnect' }).click();
+      // (The question comes over Settings.)
+      await page.locator('.confirm-backdrop .btn', { hasText: 'Disconnect' }).click();
+      await page.locator('.st-acct').first().getByRole('button', { name: 'Connect Google Contacts…' }).waitFor();
+      const cards = await page.evaluate(() => JSON.parse(localStorage.getItem('mock.cards') ?? '[]'));
+      assert.ok(!cards.some((c) => c.google != null), 'their cards went');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('move list', () => {
   test("the folders with most of the sender's mail come first", async () => {
     const { page, errors, close } = await open({ threaded: false });

@@ -218,6 +218,34 @@ CREATE TABLE IF NOT EXISTS address_book (
     updated INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
+-- Google Contacts linked to an account (crate::gcontacts): who signed in, where the last sync
+-- left off, when, and what went wrong.
+CREATE TABLE IF NOT EXISTS google_links (
+    account_id   INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    google_email TEXT NOT NULL,
+    sync_token   TEXT,
+    synced       INTEGER,
+    error        TEXT
+);
+-- An address book card that is a Google contact: its resource (NULL: still to be created),
+-- etag, the person as last seen (fields the app doesn't edit are kept from it), and whether it
+-- was changed here since (to send).
+CREATE TABLE IF NOT EXISTS card_links (
+    card_id    INTEGER PRIMARY KEY,
+    account_id INTEGER NOT NULL,
+    resource   TEXT,
+    etag       TEXT,
+    raw        TEXT,
+    dirty      INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS card_links_resource ON card_links(account_id, resource) WHERE resource IS NOT NULL;
+-- Google contacts deleted here, still to delete there.
+CREATE TABLE IF NOT EXISTS card_tombstones (
+    account_id INTEGER NOT NULL,
+    resource   TEXT NOT NULL,
+    PRIMARY KEY (account_id, resource)
+);
+
 -- A picture of the user's own for an account's marker (a data: URL), instead of the letter.
 CREATE TABLE IF NOT EXISTS account_logos (
     account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
@@ -3641,7 +3669,10 @@ impl Store {
 
     pub fn cards(&self) -> Result<Vec<crate::addressbook::Card>> {
         let db = self.rdb();
-        let mut stmt = db.prepare_cached("SELECT id, name, emails, phones, company, notes FROM address_book")?;
+        let mut stmt = db.prepare_cached(
+            "SELECT b.id, b.name, b.emails, b.phones, b.company, b.notes, l.account_id
+             FROM address_book b LEFT JOIN card_links l ON l.card_id = b.id",
+        )?;
         let mut cards: Vec<crate::addressbook::Card> = stmt
             .query_map([], |r| {
                 Ok(crate::addressbook::Card {
@@ -3651,6 +3682,7 @@ impl Store {
                     phones: serde_json::from_str(&r.get::<_, String>(3)?).unwrap_or_default(),
                     company: r.get(4)?,
                     notes: r.get(5)?,
+                    google: r.get(6)?,
                 })
             })?
             .collect::<rusqlite::Result<_>>()?;
@@ -3684,7 +3716,132 @@ impl Store {
     }
 
     pub fn delete_card(&self, id: i64) -> Result<()> {
-        self.db().execute("DELETE FROM address_book WHERE id=?1", [id])?;
+        let db = self.db();
+        db.execute("DELETE FROM address_book WHERE id=?1", [id])?;
+        db.execute("DELETE FROM card_links WHERE card_id=?1", [id])?;
+        Ok(())
+    }
+
+    pub fn card(&self, id: i64) -> Result<Option<crate::addressbook::Card>> {
+        Ok(self.cards()?.into_iter().find(|c| c.id == id))
+    }
+
+    // ---- Google Contacts (crate::gcontacts) --------------------------------------------------
+
+    pub fn google_links(&self) -> Result<Vec<crate::gcontacts::GoogleLink>> {
+        let db = self.rdb();
+        let mut stmt = db.prepare_cached(
+            "SELECT g.account_id, g.google_email, g.sync_token, g.synced, g.error,
+                    (SELECT count(*) FROM card_links l WHERE l.account_id = g.account_id)
+             FROM google_links g ORDER BY g.account_id",
+        )?;
+        Ok(stmt
+            .query_map([], |r| {
+                Ok(crate::gcontacts::GoogleLink {
+                    account_id: r.get(0)?,
+                    google_email: r.get(1)?,
+                    sync_token: r.get(2)?,
+                    synced: r.get(3)?,
+                    error: r.get(4)?,
+                    count: r.get(5)?,
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn google_link(&self, account_id: i64) -> Result<Option<crate::gcontacts::GoogleLink>> {
+        Ok(self.google_links()?.into_iter().find(|l| l.account_id == account_id))
+    }
+
+    /// Linked (again): a new sign-in starts with a full sync.
+    pub fn set_google_link(&self, account_id: i64, google_email: &str) -> Result<()> {
+        self.db().execute(
+            "INSERT INTO google_links (account_id, google_email) VALUES (?1, ?2)
+             ON CONFLICT(account_id) DO UPDATE SET google_email=?2, sync_token=NULL, error=NULL",
+            params![account_id, google_email],
+        )?;
+        Ok(())
+    }
+
+    /// How a sync went: where it left off (`token`: None keeps the old one), when, what failed.
+    pub fn set_google_sync(&self, account_id: i64, token: Option<&str>, synced: Option<i64>, error: Option<&str>) -> Result<()> {
+        self.db().execute(
+            "UPDATE google_links SET sync_token=coalesce(?2, sync_token), synced=coalesce(?3, synced), error=?4 WHERE account_id=?1",
+            params![account_id, token, synced, error],
+        )?;
+        Ok(())
+    }
+
+    /// Unlinked: the link, the cards that came from it, and what was waiting to be sent go.
+    /// Nothing is changed in Google.
+    pub fn remove_google_link(&self, account_id: i64) -> Result<()> {
+        let db = self.db();
+        db.execute("DELETE FROM address_book WHERE id IN (SELECT card_id FROM card_links WHERE account_id=?1)", [account_id])?;
+        db.execute("DELETE FROM card_links WHERE account_id=?1", [account_id])?;
+        db.execute("DELETE FROM card_tombstones WHERE account_id=?1", [account_id])?;
+        db.execute("DELETE FROM google_links WHERE account_id=?1", [account_id])?;
+        Ok(())
+    }
+
+    pub fn card_links(&self, account_id: i64) -> Result<Vec<crate::gcontacts::CardLink>> {
+        let db = self.rdb();
+        let mut stmt = db.prepare_cached("SELECT card_id, account_id, resource, etag, raw, dirty FROM card_links WHERE account_id=?1")?;
+        Ok(stmt
+            .query_map([account_id], |r| {
+                Ok(crate::gcontacts::CardLink {
+                    card_id: r.get(0)?,
+                    account_id: r.get(1)?,
+                    resource: r.get(2)?,
+                    etag: r.get(3)?,
+                    raw: r.get(4)?,
+                    dirty: r.get(5)?,
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn card_link(&self, card_id: i64) -> Result<Option<crate::gcontacts::CardLink>> {
+        let db = self.rdb();
+        Ok(db
+            .query_row("SELECT card_id, account_id, resource, etag, raw, dirty FROM card_links WHERE card_id=?1", [card_id], |r| {
+                Ok(crate::gcontacts::CardLink {
+                    card_id: r.get(0)?,
+                    account_id: r.get(1)?,
+                    resource: r.get(2)?,
+                    etag: r.get(3)?,
+                    raw: r.get(4)?,
+                    dirty: r.get(5)?,
+                })
+            })
+            .optional()?)
+    }
+
+    pub fn save_card_link(&self, l: &crate::gcontacts::CardLink) -> Result<()> {
+        self.db().execute(
+            "INSERT OR REPLACE INTO card_links (card_id, account_id, resource, etag, raw, dirty) VALUES (?1,?2,?3,?4,?5,?6)",
+            params![l.card_id, l.account_id, l.resource, l.etag, l.raw, l.dirty],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_card_link(&self, card_id: i64) -> Result<()> {
+        self.db().execute("DELETE FROM card_links WHERE card_id=?1", [card_id])?;
+        Ok(())
+    }
+
+    pub fn add_card_tombstone(&self, account_id: i64, resource: &str) -> Result<()> {
+        self.db().execute("INSERT OR IGNORE INTO card_tombstones (account_id, resource) VALUES (?1, ?2)", params![account_id, resource])?;
+        Ok(())
+    }
+
+    pub fn card_tombstones(&self, account_id: i64) -> Result<Vec<String>> {
+        let db = self.rdb();
+        let mut stmt = db.prepare_cached("SELECT resource FROM card_tombstones WHERE account_id=?1")?;
+        Ok(stmt.query_map([account_id], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn remove_card_tombstone(&self, account_id: i64, resource: &str) -> Result<()> {
+        self.db().execute("DELETE FROM card_tombstones WHERE account_id=?1 AND resource=?2", params![account_id, resource])?;
         Ok(())
     }
 

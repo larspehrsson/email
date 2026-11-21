@@ -72,7 +72,7 @@ export function ConfirmHost() {
     <Show when={confirmReq()}>
       {(r) => (
         <div
-          class="modal-backdrop"
+          class="modal-backdrop confirm-backdrop"
           onMouseDown={(e) => e.target === e.currentTarget && done(false)}
           onKeyDown={(e) => {
             e.stopPropagation();

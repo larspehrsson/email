@@ -5608,3 +5608,55 @@ body.dragging-account * {
 .st-mark-pic .acct-dot {
   margin: 0;
 }
+
+/* Google Contacts (Settings › Accounts, the address book) */
+.gc {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.gc-linked {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gc-actions {
+  display: inline-flex;
+  gap: 14px;
+  align-items: center;
+}
+.gc-client {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 440px;
+}
+.gc-client .st-muted {
+  margin: 0;
+  line-height: 1.5;
+}
+.gc-client-note {
+  margin: 10px 0 0;
+}
+.ct-google {
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  margin-left: 6px;
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #fff;
+  background: #4285f4;
+  vertical-align: 1px;
+}
+.ct-where-text {
+  color: var(--text-2);
+}
+
+/* A question is asked over whatever asked it (Settings among them). */
+.modal-backdrop.confirm-backdrop {
+  z-index: 110;
+}

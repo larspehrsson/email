@@ -169,6 +169,23 @@ export interface Card {
   phones: string[];
   company: string;
   notes: string;
+  /** a Google contact of this account (null: kept only here); for a new card, where to make it */
+  google?: number | null;
+}
+
+/** An account linked to its Google contacts. */
+export interface GoogleLink {
+  accountId: number;
+  googleEmail: string;
+  /** last good sync, Unix seconds */
+  synced: number | null;
+  error: string | null;
+  count: number;
+}
+export interface GoogleStatus {
+  /** the user's OAuth client (null: not set yet) */
+  clientId: string | null;
+  links: GoogleLink[];
 }
 
 /** Writing help (Claude, with the user's own API key). */
@@ -586,6 +603,11 @@ export interface CommandMap {
   sender_folders: { args: { messageIds: number[] }; ret: { folderId: number; count: number }[] };
   sender_icon: { args: { addr: string }; ret: string | null };
   account_logos: { args: undefined; ret: { accountId: number; dataUrl: string }[] };
+  google_status: { args: undefined; ret: GoogleStatus };
+  set_google_client: { args: { id: string | null; secret: string | null }; ret: void };
+  google_connect: { args: { accountId: number }; ret: string };
+  google_disconnect: { args: { accountId: number }; ret: void };
+  google_sync: { args: { accountId: number | null }; ret: boolean };
   set_account_logo: { args: { accountId: number; dataUrl: string | null }; ret: void };
   list_tags: { args: undefined; ret: TagDef[] };
   set_tag: { args: { keyword: string | null; name: string; color: string }; ret: string };
