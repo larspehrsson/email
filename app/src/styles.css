@@ -4946,6 +4946,8 @@ body.dragging-account * {
   flex-direction: column;
 }
 .sig-cols {
+  /* its own height (a tall HTML signature): the page scrolls, nothing overlaps */
+  flex: none;
   display: grid;
   grid-template-columns: 170px minmax(0, 1fr);
   gap: 16px;
@@ -5779,7 +5781,11 @@ body.dragging-account * {
   letter-spacing: 0.03em;
 }
 .sig-html {
-  min-height: 150px;
+  display: block;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+  min-height: 260px;
   resize: vertical;
   font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
 }

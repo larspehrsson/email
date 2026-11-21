@@ -526,7 +526,7 @@ where
         match f(shared.clone()).await {
             Ok(()) => return,
             Err(e) => {
-                tracing::warn!(account = shared.account.email, task = name, "sync error: {e:#}");
+                tracing::warn!(account = shared.account.email, task = name, "sync error: {}", crate::imap::readable(&e));
                 let limited = imap::is_limit_error(&e);
                 if name == "headers" && !imap::is_auth_error(&e) {
                     let phase = if limited {
@@ -702,7 +702,7 @@ async fn header_task(shared: Arc<Shared>) -> Result<()> {
                 Err(e) => {
                     // A broken folder shouldn't stall the rest; skip it this pass. Connection
                     // errors will surface again on the next folder and trigger a reconnect.
-                    tracing::warn!(folder = folder.raw_name, "folder sync failed: {e:#}");
+                    tracing::warn!(folder = folder.raw_name, "folder sync failed: {}", crate::imap::readable(&e));
                     done.insert(next);
                     if guarded!(conn, "checking the connection", conn.session.noop()).is_err() {
                         return Err(e);
@@ -798,7 +798,7 @@ async fn run_graph_op(shared: &Shared, op: &crate::actions::ServerOp) -> Result<
         // Teaching the filter is a bonus: never a reason to undo the move.
         if let Some(graph) = &shared.graph {
             if let Err(e) = graph.report(message_id, *junk).await {
-                tracing::warn!("reporting <{message_id}> as {}: {e:#}", if *junk { "junk" } else { "not junk" });
+                tracing::warn!("reporting <{message_id}> as {}: {}", if *junk { "junk" } else { "not junk" }, crate::imap::readable(&e));
             }
         }
         return Ok(());
@@ -896,7 +896,7 @@ async fn snooze_task(shared: Arc<Shared>) {
     let mut woke = imap::wake_watch();
     loop {
         if let Err(e) = wake_snoozed(&shared) {
-            tracing::warn!("waking snoozed mail: {e:#}");
+            tracing::warn!("waking snoozed mail: {}", crate::imap::readable(&e));
         }
         tokio::select! {
             _ = tokio::time::sleep(Duration::from_secs(30)) => {}
@@ -1233,7 +1233,7 @@ async fn interactive_task(shared: Arc<Shared>, mut rx: mpsc::UnboundedReceiver<J
         // Queued user actions go first: they're what the user is waiting on.
         if let Some(c) = conn.as_mut() {
             if let Err(e) = run_outbox(&shared, c).await {
-                tracing::debug!("outbox: {e:#}");
+                tracing::debug!("outbox: {}", crate::imap::readable(&e));
                 conn = None;
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 continue;
@@ -1296,7 +1296,7 @@ async fn interactive_task(shared: Arc<Shared>, mut rx: mpsc::UnboundedReceiver<J
                 match shared.connect().await {
                     Ok(c) => conn = Some(c),
                     Err(e) => {
-                        tracing::warn!("interactive connect failed: {e:#}");
+                        tracing::warn!("interactive connect failed: {}", crate::imap::readable(&e));
                         break;
                     }
                 }
@@ -1321,7 +1321,7 @@ async fn interactive_task(shared: Arc<Shared>, mut rx: mpsc::UnboundedReceiver<J
                 }
                 Err(e) => {
                     // Likely a connection the server dropped; reconnect once.
-                    tracing::debug!(attempt, "interactive job failed: {e:#}");
+                    tracing::debug!(attempt, "interactive job failed: {}", crate::imap::readable(&e));
                     conn = None;
                 }
             }
@@ -1346,7 +1346,7 @@ async fn interactive_task(shared: Arc<Shared>, mut rx: mpsc::UnboundedReceiver<J
                 match &result {
                     Ok(_) => break,
                     Err(e) => {
-                        tracing::debug!(attempt, "attachment fetch failed: {e:#}");
+                        tracing::debug!(attempt, "attachment fetch failed: {}", crate::imap::readable(&e));
                         conn = None;
                     }
                 }
@@ -1358,7 +1358,7 @@ async fn interactive_task(shared: Arc<Shared>, mut rx: mpsc::UnboundedReceiver<J
                 match shared.connect().await {
                     Ok(c) => conn = Some(c),
                     Err(e) => {
-                        tracing::debug!("refresh: {e:#}");
+                        tracing::debug!("refresh: {}", crate::imap::readable(&e));
                         shared.dirty.lock().unwrap().insert(folder_id);
                         shared.refresh.notify_one();
                         continue;
@@ -1373,7 +1373,7 @@ async fn interactive_task(shared: Arc<Shared>, mut rx: mpsc::UnboundedReceiver<J
                 sync_pushed_folder(&shared, c, folder_id).await
             };
             if let Err(e) = synced.await {
-                tracing::debug!("refresh failed: {e:#}");
+                tracing::debug!("refresh failed: {}", crate::imap::readable(&e));
                 conn = None;
                 shared.dirty.lock().unwrap().insert(folder_id);
                 shared.refresh.notify_one();
@@ -1463,7 +1463,7 @@ async fn send_one(shared: &Shared, mailer: &mut Option<(crate::smtp::Mailer, Opt
         Err(e) => {
             // Couldn't renew the sign-in (offline?): try again later, like a failed send.
             let backoff = 5_000i64 << o.attempts.min(6);
-            tracing::info!(id = o.id, "send waiting for a sign-in token: {e:#}");
+            tracing::info!(id = o.id, "send waiting for a sign-in token: {}", crate::imap::readable(&e));
             let _ = shared.store.retry_outgoing(o.id, now_ms() + backoff);
             return;
         }
@@ -1475,13 +1475,13 @@ async fn send_one(shared: &Shared, mailer: &mut Option<(crate::smtp::Mailer, Opt
             let _ = shared.store.local_copy_sent(o.id);
             copy_changed();
             if let Err(e) = shared.store.finish_outgoing(o.id) {
-                tracing::warn!("send queue: {e:#}");
+                tracing::warn!("send queue: {}", crate::imap::readable(&e));
             }
             shared.emit(CoreEvent::Sent { account_id, id: o.id });
             for (m, action) in [(o.replied, crate::actions::Action::MarkReplied), (o.forwarded, crate::actions::Action::MarkForwarded)] {
                 if let Some(m) = m {
                     if let Err(e) = mark_after_send(shared, m, action) {
-                        tracing::warn!(message = m, "marking after send: {e:#}");
+                        tracing::warn!(message = m, "marking after send: {}", crate::imap::readable(&e));
                     }
                 }
             }
@@ -1492,7 +1492,7 @@ async fn send_one(shared: &Shared, mailer: &mut Option<(crate::smtp::Mailer, Opt
                         // through the outbox (kept across restarts, retried). Sent is synced once
                         // it's there, and the server's copy takes over our local one.
                         if let Err(e) = file_sent_copy(shared, sent, &o.raw) {
-                            tracing::warn!(id = o.id, "filing the sent copy: {e:#}");
+                            tracing::warn!(id = o.id, "filing the sent copy: {}", crate::imap::readable(&e));
                         }
                     } else {
                         // Gmail and Outlook file it themselves: sync Sent now so their copy takes
@@ -1506,7 +1506,7 @@ async fn send_one(shared: &Shared, mailer: &mut Option<(crate::smtp::Mailer, Opt
         Err(crate::smtp::SendError::Failed(e)) if o.attempts + 1 >= MAX_SEND_ATTEMPTS => fail(format!("{e:#}")),
         Err(crate::smtp::SendError::Failed(e)) => {
             let backoff = 5_000i64 << o.attempts.min(6);
-            tracing::info!(id = o.id, attempt = o.attempts + 1, "send failed, retrying in {}s: {e:#}", backoff / 1000);
+            tracing::info!(id = o.id, attempt = o.attempts + 1, "send failed, retrying in {}s: {}", backoff / 1000, crate::imap::readable(&e));
             let _ = shared.store.retry_outgoing(o.id, now_ms() + backoff);
         }
     }
@@ -1604,7 +1604,7 @@ async fn run_outbox(shared: &Shared, conn: &mut Connection) -> Result<()> {
                         || c.is::<crate::graph::GraphRejected>()
                 });
                 if rejected || op.attempts >= 5 {
-                    tracing::warn!(op = op.id, "action failed, rolling back: {e:#}");
+                    tracing::warn!(op = op.id, "action failed, rolling back: {}", crate::imap::readable(&e));
                     shared.store.finish_op(op.id)?;
                     let mut changed = shared.store.restore(&snapshot)?;
                     changed.extend(snapshot.entries.iter().map(|e| e.folder_id));
@@ -1757,7 +1757,7 @@ async fn body_task(shared: Arc<Shared>) -> Result<()> {
                 tracing::debug!(n = batch.len(), ms = started.elapsed().as_millis() as u64, "bodies downloaded");
             }
             Err(e) => {
-                tracing::warn!(n = batch.len(), first = batch[0], "body batch failed: {e:#}");
+                tracing::warn!(n = batch.len(), first = batch[0], "body batch failed: {}", crate::imap::readable(&e));
                 return Err(e);
             }
         }
