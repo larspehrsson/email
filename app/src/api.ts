@@ -114,6 +114,8 @@ export const api = {
   /** The list's row ids from `offset` in its order (⇧-click ranges, Select All). */
   listItemIds: (folderId: number, threaded: boolean, sort: ListSort, filter: ListFilter | undefined, offset: number, limit: number): Promise<number[]> =>
     call('list_item_ids', { folderId, threaded, sort, filter, offset, limit }),
+  /** Where these messages' senders' mail is kept, most first (the Move list's order). */
+  senderFolders: (messageIds: number[]): Promise<{ folderId: number; count: number }[]> => call('sender_folders', { messageIds }),
   /** The messages behind several picked rows, with their state. */
   selectionInfo: (folderId: number, items: number[], threaded: boolean): Promise<SelectionInfo> =>
     call('selection_info', { folderId, items, threaded }),

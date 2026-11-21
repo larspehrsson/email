@@ -1623,6 +1623,20 @@ export function createMockBackend(): Backend {
       }
       return order.slice(offset, offset + limit);
     },
+    async sender_folders({ messageIds }) {
+      await sleep(3);
+      const first = byId.get(messageIds[0] ?? -1);
+      if (!first) return [];
+      const acct = folders.get(first.folderId)?.accountId;
+      const senders = new Set(messageIds.map((id) => byId.get(id)?.fromAddr.toLowerCase()).filter(Boolean));
+      const out: { folderId: number; count: number }[] = [];
+      for (const [folderId, list] of folderMsgs) {
+        if (folders.get(folderId)?.accountId !== acct) continue;
+        const count = list.filter((m) => senders.has(m.fromAddr.toLowerCase())).length;
+        if (count) out.push({ folderId, count });
+      }
+      return out.sort((a, b) => b.count - a.count);
+    },
     async selection_info({ folderId, items, threaded }) {
       await sleep(3);
       const want = new Set(items);

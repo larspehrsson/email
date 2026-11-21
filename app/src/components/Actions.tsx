@@ -1,7 +1,8 @@
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import { createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { hint } from '../lib/shortcuts';
 import { Portal } from 'solid-js/web';
-import { type Folder, type FolderRole } from '../api';
+import { api, type Folder, type FolderRole } from '../api';
+import { fmtNum } from '../lib/format';
 import { definedTags, TagMenu } from './Tags';
 import { SnoozeMenu } from './Snooze';
 import { showToast } from './Toast';
@@ -111,7 +112,19 @@ function moveTargets(accountId: number, excludeId: number): Folder[] {
 const PICK_W = 280;
 const PICK_H = 340;
 
-export function MovePicker(props: { accountId: number; excludeFolderId: number; anchor: HTMLElement; onPick: (f: Folder) => void; onClose: (refocus: boolean) => void }) {
+/** Folders a sender's mail being there says nothing about (it's in them anyway, or there by
+ *  accident): not put first in the Move list. */
+const NOT_SUGGESTED = new Set(['all', 'sent', 'drafts', 'flagged', 'important', 'trash', 'junk', 'inbox']);
+
+export function MovePicker(props: {
+  accountId: number;
+  excludeFolderId: number;
+  /** the messages being moved: the folders their senders' other mail is in come first */
+  messageIds?: number[];
+  anchor: HTMLElement;
+  onPick: (f: Folder) => void;
+  onClose: (refocus: boolean) => void;
+}) {
   let el: HTMLDivElement | undefined;
   let input!: HTMLInputElement;
   const [q, setQ] = createSignal('');
@@ -120,7 +133,23 @@ export function MovePicker(props: { accountId: number; excludeFolderId: number; 
   const reposition = () => setPos(placeNear(props.anchor, PICK_W, el?.offsetHeight || PICK_H));
   useDismiss(() => el, props.anchor, () => props.onClose(false), reposition);
 
-  const all = createMemo(() => moveTargets(props.accountId, props.excludeFolderId));
+  const [counts] = createResource(
+    () => props.messageIds,
+    (ids) => (ids.length ? api.senderFolders(ids).catch(() => []) : []),
+  );
+  /** Folders with mail from the sender, with how much: first, most first. */
+  const suggested = createMemo(() => {
+    const m = new Map<number, number>();
+    for (const c of counts() ?? []) m.set(c.folderId, c.count);
+    return m;
+  });
+  const fromSender = (f: Folder) => (NOT_SUGGESTED.has(f.role ?? '') || isInbox(f) ? 0 : (suggested().get(f.id) ?? 0));
+  const all = createMemo(() => {
+    const targets = moveTargets(props.accountId, props.excludeFolderId);
+    const n = (f: Folder) => (NOT_SUGGESTED.has(f.role ?? '') || isInbox(f) ? 0 : (suggested().get(f.id) ?? 0));
+    const top = targets.filter((f) => n(f) > 0).sort((a, b) => n(b) - n(a));
+    return [...top, ...targets.filter((f) => n(f) === 0)];
+  });
   const shown = createMemo(() => {
     const needle = q().trim().toLowerCase();
     return needle ? all().filter((f) => folderLabel(f).toLowerCase().includes(needle)) : all();
@@ -191,6 +220,11 @@ export function MovePicker(props: { accountId: number; excludeFolderId: number; 
                   <RoleIcon role={f.role ?? (isInbox(f) ? 'inbox' : null)} size={14} />
                 </span>
                 <span class="mp-name">{folderLabel(f)}</span>
+                <Show when={fromSender(f) > 0}>
+                  <span class="mp-count" title={`${fmtNum(fromSender(f))} from this sender here`}>
+                    {fmtNum(fromSender(f))}
+                  </span>
+                </Show>
               </div>
             )}
           </For>
@@ -362,6 +396,7 @@ function useActions(t: () => ActionTarget | null) {
     if (!a || !x || !f) return null;
     return (
       <MovePicker
+        messageIds={x.ids}
         accountId={f.accountId}
         excludeFolderId={x.folderId}
         anchor={a}

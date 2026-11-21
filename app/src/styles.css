@@ -5524,3 +5524,15 @@ body.dragging-account * {
 .cmp-att-msg .icon {
   flex: none;
 }
+
+/* Move list: how much of the sender's mail is in a folder (those come first) */
+.mp-count {
+  margin-left: auto;
+  flex: none;
+  font-size: 11px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.mp-row.active .mp-count {
+  color: inherit;
+}

@@ -414,6 +414,21 @@ async fn list_item_ids(
     timed("list_item_ids", || core.list_item_ids(folder_id, threaded, sort.unwrap_or_default(), &filter, offset, limit)).map_err(err)
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FolderCount {
+    folder_id: i64,
+    count: u32,
+}
+
+/// Where these messages' senders' mail is kept, most first (the Move list's order).
+#[tauri::command]
+async fn sender_folders(core: State<'_, Arc<Core>>, message_ids: Vec<i64>) -> Res<Vec<FolderCount>> {
+    timed("sender_folders", || core.sender_folders(&message_ids))
+        .map(|v| v.into_iter().map(|(folder_id, count)| FolderCount { folder_id, count }).collect())
+        .map_err(err)
+}
+
 /// The messages behind several picked rows, with their state.
 #[tauri::command]
 async fn selection_info(core: State<'_, Arc<Core>>, folder_id: i64, items: Vec<i64>, threaded: bool) -> Res<SelectionInfo> {
@@ -1296,6 +1311,7 @@ pub fn run() {
             mark_folder_read,
             list_item_ids,
             selection_info,
+            sender_folders,
             get_thread,
             update_password,
             set_keep_attachments,

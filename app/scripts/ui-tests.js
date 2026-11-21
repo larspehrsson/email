@@ -1053,6 +1053,30 @@ describe('sender pane', () => {
   });
 });
 
+describe('move list', () => {
+  test("the folders with most of the sender's mail come first", async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.locator('.folder-layer .row', { hasText: 'Invoicely' }).first().click();
+      await page.locator('.reader [aria-label^="Move to"]').first().click();
+      await page.locator('.move-picker .mp-row').first().waitFor();
+      await page.waitForTimeout(200);
+      const rows = await page.locator('.move-picker .mp-row').evaluateAll((els) =>
+        els.map((e) => ({ name: e.querySelector('.mp-name')?.textContent, n: Number(e.querySelector('.mp-count')?.textContent?.replace(/\D/g, '') || 0) })),
+      );
+      const counted = rows.filter((r) => r.n > 0);
+      assert.ok(counted.length >= 1, `some folders hold the sender's mail: ${JSON.stringify(rows.slice(0, 5))}`);
+      assert.deepEqual(rows.slice(0, counted.length), counted, 'those first');
+      assert.deepEqual(counted.map((r) => r.n), [...counted.map((r) => r.n)].sort((a, b) => b - a), 'most first');
+      assert.ok(!counted.some((r) => /All Mail|Inbox|Sent|Trash|Spam/.test(r.name)), 'not the folders everything is in');
+      await page.keyboard.press('Escape');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('several messages', () => {
   const rows = (page) => page.locator('.folder-layer .row');
   const title = (page) => page.locator('.multi-pane .reader-subject');

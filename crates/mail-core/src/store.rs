@@ -2116,6 +2116,31 @@ impl Store {
         }
     }
 
+    /// Where mail from these messages' senders is kept: (folder, how many of theirs), most
+    /// first. The Move list puts those folders on top.
+    pub fn sender_folder_counts(&self, message_ids: &[i64]) -> Result<Vec<(i64, u32)>> {
+        let db = self.rdb();
+        let mut senders: Vec<(i64, String)> = Vec::new();
+        let mut stmt = db.prepare_cached("SELECT account_id, lower(from_addr) FROM messages WHERE id=?1")?;
+        for &id in message_ids.iter().take(200) {
+            if let Some(s) = stmt.query_row([id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))).optional()?
+                && !s.1.is_empty()
+                && !senders.contains(&s)
+            {
+                senders.push(s);
+            }
+        }
+        let Some(&(account_id, _)) = senders.first() else { return Ok(vec![]) };
+        let addrs: Vec<String> = senders.into_iter().filter(|s| s.0 == account_id).map(|s| s.1).take(50).collect();
+        let marks = vec!["?"; addrs.len()].join(",");
+        let mut stmt = db.prepare(&format!(
+            "SELECT e.folder_id, count(*) AS n FROM messages m JOIN entries e ON e.message_id = m.id
+             WHERE m.account_id = {account_id} AND lower(m.from_addr) IN ({marks})
+             GROUP BY e.folder_id ORDER BY n DESC"
+        ))?;
+        Ok(stmt.query_map(rusqlite::params_from_iter(addrs.iter()), |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn message_subject(&self, id: i64) -> Result<Option<String>> {
         let db = self.rdb();
         Ok(db.query_row("SELECT subject FROM messages WHERE id=?1", [id], |r| r.get(0)).optional()?)
@@ -4286,6 +4311,9 @@ mod tests {
         let picked = store.selection_messages(inbox, &threads[..2], true).unwrap();
         assert!(picked.len() >= 2, "a conversation's messages here");
         assert_eq!(store.selection_messages(inbox, &[threads[0]], false).unwrap().len(), 1, "a message id is just that one");
+        // The senders' folders, most first: all 60 are here, from p0..p3 (15 each).
+        let one = store.list_messages(inbox, 0, 1).unwrap().messages[0].id;
+        assert_eq!(store.sender_folder_counts(&[one]).unwrap(), vec![(inbox, 15)]);
         // By size: largest first, in ranges.
         let by_size = store.list_messages_by(inbox, ListSort::Size, &all, 0, 100).unwrap().messages;
         assert!(by_size.windows(2).all(|w| w[0].size >= w[1].size));

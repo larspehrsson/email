@@ -581,6 +581,7 @@ export interface CommandMap {
     ret: number[];
   };
   selection_info: { args: { folderId: number; items: number[]; threaded: boolean }; ret: SelectionInfo };
+  sender_folders: { args: { messageIds: number[] }; ret: { folderId: number; count: number }[] };
   list_tags: { args: undefined; ret: TagDef[] };
   set_tag: { args: { keyword: string | null; name: string; color: string }; ret: string };
   delete_tag: { args: { keyword: string }; ret: void };

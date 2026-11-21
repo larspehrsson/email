@@ -694,6 +694,11 @@ impl Core {
         Ok(result)
     }
 
+    /// Where these messages' senders' mail is kept: (folder, count), most first.
+    pub fn sender_folders(&self, message_ids: &[i64]) -> Result<Vec<(i64, u32)>> {
+        self.store.sender_folder_counts(message_ids)
+    }
+
     /// The list's row ids from `offset` (see `Store::list_item_ids`).
     pub fn list_item_ids(
         &self,
