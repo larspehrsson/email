@@ -23,6 +23,10 @@ import type {
   SearchField,
   Signatures,
   SenderPage,
+  AiOutcome,
+  AiRequest,
+  AiStatus,
+  AiTask,
   EventMap,
   EventName,
   Folder,
@@ -197,6 +201,13 @@ export const api = {
   setTag: (keyword: string | null, name: string, color: string): Promise<string> => call('set_tag', { keyword, name, color }),
   deleteTag: (keyword: string): Promise<void> => call('delete_tag', { keyword }),
   listSignatures: (): Promise<Signatures> => call('list_signatures', undefined),
+  aiStatus: (): Promise<AiStatus> => call('ai_status', undefined),
+  /** Keep the Anthropic API key in the keychain (null: forget it). */
+  aiSetKey: (key: string | null): Promise<void> => call('ai_set_key', { key }),
+  /** Run a writing task; its text comes as `ai-text` events for `requestId` as it's written. */
+  aiRun: (requestId: number, model: string, task: AiTask, request: AiRequest): Promise<AiOutcome> =>
+    call('ai_run', { requestId, model, task, request }),
+  aiCancel: (requestId: number): Promise<void> => call('ai_cancel', { requestId }),
   /** Everything from a sender, newest first: the sender of `messageId` (for our own message,
    *  whom it's with), or `addr` in `accountId`. Leaves out what's only in Trash or Spam. */
   senderMessages: (
@@ -285,4 +296,5 @@ export const events = {
   onExportProgress: (cb: (p: EventMap['export-progress']) => void) => on('export-progress', cb),
   onExportFinished: (cb: (p: EventMap['export-finished']) => void) => on('export-finished', cb),
   onConfirmClose: (cb: (p: EventMap['confirm-close']) => void) => on('confirm-close', cb),
+  onAiText: (cb: (p: EventMap['ai-text']) => void) => on('ai-text', cb),
 };

@@ -23,15 +23,17 @@ import { AccountTools } from './AccountTools';
 import { fmtNum, fmtSize, loadPref, savePref } from '../lib/format';
 import { AccountDot } from './FolderSwitcher';
 import { SignaturesSection } from './SignatureSettings';
+import { AiSection } from './AiSettings';
 
 // Settings: sections on the left, the chosen one on the right (each with its own heading,
 // scrolling and buttons). Fixed size, so switching sections never moves the dialog.
 
-export type SettingsSection = 'general' | 'accounts' | 'signatures' | 'notifications' | 'keyboard' | 'troubleshooting';
+export type SettingsSection = 'general' | 'accounts' | 'signatures' | 'ai' | 'notifications' | 'keyboard' | 'troubleshooting';
 const SECTIONS: { id: SettingsSection; title: string }[] = [
   { id: 'general', title: 'General' },
   { id: 'accounts', title: 'Accounts' },
   { id: 'signatures', title: 'Signatures' },
+  { id: 'ai', title: 'AI' },
   { id: 'notifications', title: 'Notifications' },
   { id: 'keyboard', title: 'Keyboard' },
   { id: 'troubleshooting', title: 'Troubleshooting' },
@@ -814,6 +816,9 @@ function Panel() {
             </Match>
             <Match when={section() === 'signatures'}>
               <SignaturesSection />
+            </Match>
+            <Match when={section() === 'ai'}>
+              <AiSection />
             </Match>
             <Match when={section() === 'notifications'}>
               <NotificationsSection />

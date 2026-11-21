@@ -2,6 +2,7 @@
 
 pub mod imap;
 pub mod actions;
+pub mod ai;
 pub mod compose;
 pub mod contacts;
 pub mod graph;
@@ -1072,6 +1073,40 @@ impl Core {
     /// The messages from an address in an account (see `Store::messages_from`).
     pub fn messages_from(&self, account_id: i64, addr: &str, offset: u32, limit: u32) -> Result<SenderPage> {
         self.store.messages_from(account_id, "", addr, offset, limit)
+    }
+
+    // ---- writing help (see `ai`) ---------------------------------------------------------
+
+    /// Keep (Some) or forget (None) the Anthropic API key, in the system keychain.
+    pub fn set_ai_key(&self, key: Option<&str>) -> Result<()> {
+        match key.map(str::trim).filter(|k| !k.is_empty()) {
+            Some(k) => self.secrets.set(ai::SECRET_NAME, k),
+            None => {
+                self.secrets.delete(ai::SECRET_NAME);
+                Ok(())
+            }
+        }
+    }
+
+    /// Is there an API key to use?
+    pub fn ai_configured(&self) -> bool {
+        self.secrets.get(ai::SECRET_NAME).is_ok_and(|k| !k.is_empty())
+    }
+
+    /// Run a writing task with `model`, its text streamed to `on_text` as it comes.
+    pub async fn ai_run(
+        &self,
+        model: &str,
+        task: &ai::Task,
+        request: &ai::Request,
+        cancel: tokio::sync::watch::Receiver<bool>,
+        on_text: impl FnMut(&str),
+    ) -> Result<ai::Outcome> {
+        let key = self
+            .secrets
+            .get(ai::SECRET_NAME)
+            .map_err(|_| anyhow!("Add your Anthropic API key in Settings › AI first."))?;
+        ai::run(&key, model, task, request, cancel, on_text).await
     }
 
     pub fn signatures(&self) -> Result<signatures::Signatures> {

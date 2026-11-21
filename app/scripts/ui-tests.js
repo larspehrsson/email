@@ -881,3 +881,44 @@ describe('sender pane', () => {
     }
   });
 });
+
+describe('writing help', () => {
+  test('without a key it says where to add one; with one, a reply is written and used', async () => {
+    const { page, errors, context, close } = await open({ threaded: false });
+    try {
+      await page.locator('.folder-layer .row').first().click();
+      await page.waitForTimeout(300);
+      let popup = context.waitForEvent('page');
+      await page.locator('.reader [aria-label="Reply"]').first().click();
+      let w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      await w.locator('.fmt-ai').click();
+      await w.locator('.ai-note').waitFor();
+      await w.close();
+
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'AI' }).click();
+      await page.locator('input.ai-key').fill('sk-ant-test');
+      await page.locator('.st-pane button', { hasText: 'Save' }).click();
+      await page.locator('.st-pane button', { hasText: 'Try it' }).click();
+      await hasText(page.locator('.st-status'), 'Works! — Claude Opus 5.5', 'the key works');
+      await page.keyboard.press('Escape');
+
+      popup = context.waitForEvent('page');
+      await page.locator('.reader [aria-label="Reply"]').first().click();
+      w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      await w.locator('.cmp-editor .ProseMirror').waitFor();
+      await w.keyboard.press('ControlOrMeta+j');
+      await w.locator('.ai-input').fill('yes, Thursday works');
+      await w.keyboard.press('Enter');
+      await w.locator('.ai-panel button', { hasText: 'Use this' }).click();
+      const body = await w.locator('.cmp-editor .ProseMirror').innerText();
+      assert.ok(body.includes('Yes, Thursday works.'), body);
+      assert.equal(await w.locator('.ai-panel').count(), 0, 'the panel closes');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});

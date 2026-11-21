@@ -469,6 +469,69 @@ async fn sender_messages(
     .map_err(err)
 }
 
+// ---- writing help (Claude, with the user's own API key; see mail_core::ai)
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AiStatus {
+    configured: bool,
+    models: Vec<&'static str>,
+    default_model: &'static str,
+}
+
+#[tauri::command]
+async fn ai_status(core: State<'_, Arc<Core>>) -> Res<AiStatus> {
+    Ok(AiStatus { configured: core.ai_configured(), models: mail_core::ai::MODELS.to_vec(), default_model: mail_core::ai::DEFAULT_MODEL })
+}
+
+/// Keep the API key in the keychain (empty or null: forget it).
+#[tauri::command]
+async fn ai_set_key(core: State<'_, Arc<Core>>, key: Option<String>) -> Res<()> {
+    core.set_ai_key(key.as_deref()).map_err(err)
+}
+
+/// Writing tasks under way, by the id their window gave them: how to stop each.
+#[derive(Default)]
+struct AiRuns(std::sync::Mutex<std::collections::HashMap<u64, tokio::sync::watch::Sender<bool>>>);
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AiText<'a> {
+    request_id: u64,
+    text: &'a str,
+}
+
+/// Run a writing task: its text comes as `ai-text` events ({requestId, text}) as it's written;
+/// the answer is how it ended.
+#[tauri::command]
+async fn ai_run(
+    app: tauri::AppHandle,
+    core: State<'_, Arc<Core>>,
+    runs: State<'_, AiRuns>,
+    request_id: u64,
+    model: String,
+    task: mail_core::ai::Task,
+    request: mail_core::ai::Request,
+) -> Res<mail_core::ai::Outcome> {
+    let (tx, rx) = tokio::sync::watch::channel(false);
+    runs.0.lock().unwrap().insert(request_id, tx);
+    let result = core
+        .ai_run(&model, &task, &request, rx, |text| {
+            let _ = app.emit("ai-text", AiText { request_id, text });
+        })
+        .await;
+    runs.0.lock().unwrap().remove(&request_id);
+    result.map_err(err)
+}
+
+#[tauri::command]
+async fn ai_cancel(runs: State<'_, AiRuns>, request_id: u64) -> Res<()> {
+    if let Some(tx) = runs.0.lock().unwrap().remove(&request_id) {
+        let _ = tx.send(true);
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn list_signatures(core: State<'_, Arc<Core>>) -> Res<mail_core::signatures::Signatures> {
     core.signatures().map_err(err)
@@ -901,6 +964,7 @@ struct MailtoLinks(std::sync::Mutex<Vec<String>>);
 fn mailto_links(app: &tauri::App) {
     use tauri_plugin_deep_link::DeepLinkExt;
     app.manage(MailtoLinks::default());
+    app.manage(AiRuns::default());
     let handle = app.handle().clone();
     app.deep_link().on_open_url(move |event| {
         let urls: Vec<String> = event.urls().iter().map(|u| u.to_string()).collect();
@@ -1142,6 +1206,10 @@ pub fn run() {
             list_groups,
             list_signatures,
             sender_messages,
+            ai_status,
+            ai_set_key,
+            ai_run,
+            ai_cancel,
             save_signature,
             delete_signature,
             set_signature_defaults,

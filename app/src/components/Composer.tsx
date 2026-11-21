@@ -31,6 +31,7 @@ import { buildSrcdoc } from './Reader';
 import { fmtSize } from '../lib/format';
 import { showToast } from './Toast';
 import { defaultSignature, loadSignatures, signatureById, sigs } from '../lib/signatures';
+import { AiPanel } from './AiPanel';
 
 /** The quoted original under the text: read-only, at the composer's margins. */
 const QUOTE_FRAME_CSS = 'html{overflow-y:hidden}body{padding:0 0 12px}';
@@ -292,6 +293,8 @@ function Toolbar(props: {
   linking: boolean;
   setLinking: (v: boolean) => void;
   onAttach: () => void;
+  ai: boolean;
+  onAi: () => void;
 }) {
   const linking = () => props.linking;
   const setLinking = props.setLinking;
@@ -393,6 +396,18 @@ function Toolbar(props: {
           ❝
         </B>
         <span class="fmt-fill" />
+        <button
+          class="fmt-btn fmt-ai"
+          tabIndex={-1}
+          classList={{ on: props.ai }}
+          title={`Writing help (${MOD}J)`}
+          aria-label="Writing help"
+          aria-pressed={props.ai}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => props.onAi()}
+        >
+          ✨ AI
+        </button>
         <button class="fmt-btn fmt-attach" tabIndex={-1} title="Attach files" aria-label="Attach files" onClick={() => props.onAttach()}>
           <PaperclipIcon size={15} />
         </button>
@@ -412,6 +427,7 @@ export function Composer() {
   const [tick, setTick] = createSignal(0);
   const [linking, setLinking] = createSignal(false);
   const [showQuote, setShowQuote] = createSignal(false);
+  const [aiOpen, setAiOpen] = createSignal(false);
   const [dropping, setDropping] = createSignal(false);
   onMount(() => onFileDrop(setDropping, addFiles));
   const c = () => compose() as ComposeState;
@@ -505,12 +521,17 @@ export function Composer() {
     } else if (mod && !e.shiftKey && e.key.toLowerCase() === 'k' && editorEl.contains(document.activeElement)) {
       e.preventDefault();
       setLinking(true);
+    } else if (mod && !e.shiftKey && e.key.toLowerCase() === 'j') {
+      e.preventDefault();
+      setAiOpen(!aiOpen());
     } else if (mod && !e.shiftKey && e.key.toLowerCase() === 'w') {
       e.preventDefault();
       void close();
     } else if (
       e.key === 'Escape' &&
       !(e.target as Element).closest?.('.link-edit') &&
+      // writing help handles its own Esc (stop, then close the panel)
+      !(e.target as Element).closest?.('.ai-panel') &&
       // an address field's Esc that closed its suggestions
       !(e.defaultPrevented && (e.target as Element).closest?.('.addr-field')) &&
       !document.querySelector('.modal-backdrop')
@@ -689,7 +710,42 @@ export function Composer() {
           />
         </div>
       </div>
-      <Toolbar editor={editor} tick={tick} linking={linking()} setLinking={setLinking} onAttach={() => void pickFiles().then(addFiles)} />
+      <Toolbar
+        editor={editor}
+        tick={tick}
+        linking={linking()}
+        setLinking={setLinking}
+        onAttach={() => void pickFiles().then(addFiles)}
+        ai={aiOpen()}
+        onAi={() => setAiOpen(!aiOpen())}
+      />
+      <Show when={aiOpen()}>
+        <AiPanel
+          mode={c().mode}
+          context={() => {
+            const cur = c();
+            const a = from();
+            return {
+              me: a ? (a.displayName ? `${a.displayName} <${a.email}>` : a.email) : '',
+              subject: cur.subject,
+              to: [...cur.to, ...cur.cc].map((x) => (x.name ? `${x.name} <${x.addr}>` : x.addr)),
+              html: cur.html,
+              quoteHtml: cur.quoteHtml,
+            };
+          }}
+          onUse={(html) => {
+            const ed = editor();
+            if (!ed) return;
+            ed.commands.setContent(html, { emitUpdate: true });
+            updateCompose({ html: ed.isEmpty ? '' : ed.getHTML() });
+            ed.commands.focus('end');
+          }}
+          onClose={() => {
+            setAiOpen(false);
+            editor()?.commands.focus();
+          }}
+        />
+      </Show>
       <Show when={dropping()}>
         <div class="cmp-drop" aria-hidden="true">
           <span>Drop files to attach</span>

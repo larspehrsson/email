@@ -200,3 +200,19 @@ test('groups: where they start, and keeping them right through removes and undo'
   assert.deepEqual(back, g, 'put back into the group it is named after');
   assert.deepEqual(insertRow(g, 2), [{ label: 'Today', count: 2, start: 0 }, { label: 'Older', count: 4, start: 2 }]);
 });
+
+// ------------------------------------------------------------- writing help text
+
+import { clipOriginal, textToHtml } from '../src/lib/aiText.ts';
+
+test('the model’s plain text becomes paragraphs, line breaks and lists', () => {
+  assert.equal(textToHtml('Hi Anna,\n\nThursday works.\nSee you <then>.\n\n- one\n- two'), '<p>Hi Anna,</p><p>Thursday works.<br>See you &lt;then&gt;.</p><ul><li><p>one</p></li><li><p>two</p></li></ul>');
+  assert.equal(textToHtml('  \n'), '<p></p>');
+});
+
+test('a very long original keeps its newest part', () => {
+  const long = 'x'.repeat(70_000);
+  const c = clipOriginal(long);
+  assert.ok(c.length < 61_000 && c.endsWith('left out]'));
+  assert.equal(clipOriginal('short'), 'short');
+});

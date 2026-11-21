@@ -149,6 +149,37 @@ export type ConversationScope = 'folder' | 'all';
  *  within each). The list is grouped by the same thing. */
 export type ListSort = 'received' | 'from' | 'to';
 
+/** Writing help (Claude, with the user's own API key). */
+export type AiTask =
+  | { kind: 'reply' }
+  | { kind: 'compose' }
+  | { kind: 'rewrite'; style: 'improve' | 'shorter' | 'longer' | 'formal' | 'friendly' | 'proofread' }
+  | { kind: 'translate'; language: string };
+export interface AiRequest {
+  /** "Name <addr>": who's writing */
+  me: string;
+  subject: string;
+  to: string[];
+  /** the message replied to or forwarded, as plain text */
+  original: string | null;
+  /** what's written so far, as plain text */
+  draft: string;
+  /** the user's own words: what to say, or how */
+  instruction: string;
+}
+export interface AiOutcome {
+  /** all of the text (the streamed pieces may still be on their way) */
+  text: string;
+  refused: boolean;
+  truncated: boolean;
+  model: string;
+}
+export interface AiStatus {
+  configured: boolean;
+  models: string[];
+  defaultModel: string;
+}
+
 /** Messages from one sender (the sender pane), newest first, each in its folder. */
 export interface SenderPage {
   accountId: number;
@@ -434,6 +465,8 @@ export interface EventMap {
   'confirm-close': { status: ExportStatus; quit: boolean };
   /** mailto: links came from another program: take them (take_mailto_links) */
   mailto: null;
+  /** writing help: a piece of the text being written for request `requestId` */
+  'ai-text': { requestId: number; text: string };
 }
 
 export interface CommandMap {
@@ -447,6 +480,10 @@ export interface CommandMap {
   open_folder: { args: { folderId: number }; ret: void };
   list_messages: { args: { folderId: number; offset: number; limit: number; sort: ListSort }; ret: MessagePage };
   list_signatures: { args: undefined; ret: Signatures };
+  ai_status: { args: undefined; ret: AiStatus };
+  ai_set_key: { args: { key: string | null }; ret: void };
+  ai_run: { args: { requestId: number; model: string; task: AiTask; request: AiRequest }; ret: AiOutcome };
+  ai_cancel: { args: { requestId: number }; ret: void };
   sender_messages: {
     args: { messageId: number | null; accountId: number | null; addr: string | null; offset: number; limit: number };
     ret: SenderPage | null;

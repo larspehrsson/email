@@ -576,6 +576,7 @@ export function createMockBackend(): Backend {
   };
 
   const accounts: Account[] = [];
+  const aiCancelled = new Set<number>();
   // In localStorage, like drafts: compose popups (other pages) see what Settings saved.
   type SigStore = { signatures: Signature[]; defaults: SignatureDefaults[]; seq: number };
   const sigLoad = (): SigStore => {
@@ -1794,6 +1795,44 @@ export function createMockBackend(): Backend {
         total: all.length,
         messages: all.slice(offset, offset + limit).map((x) => ({ ...x })),
       };
+    },
+    async ai_status() {
+      await sleep(3);
+      return {
+        configured: !!localStorage.getItem('mock.aiKey'),
+        models: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'],
+        defaultModel: 'claude-opus-5-5',
+      };
+    },
+    async ai_set_key({ key }) {
+      await sleep(3);
+      if (key?.trim()) localStorage.setItem('mock.aiKey', key.trim());
+      else localStorage.removeItem('mock.aiKey');
+    },
+    async ai_run({ requestId, model, task, request }) {
+      // A canned answer, streamed in pieces like the real one (no key or network needed).
+      if (!localStorage.getItem('mock.aiKey')) throw 'Add your Anthropic API key in Settings › AI first.';
+      const said = request.instruction.trim();
+      const text =
+        task.kind === 'reply'
+          ? `Hi,\n\nThanks for your message. ${said ? said.charAt(0).toUpperCase() + said.slice(1) + '.' : 'I’ll get back to you on this shortly.'}\n\nBest regards`
+          : task.kind === 'compose'
+            ? said.includes('Works!')
+              ? 'Works!'
+              : `Hi,\n\n${said.charAt(0).toUpperCase() + said.slice(1)}?\n\nThanks`
+            : task.kind === 'translate'
+              ? `[${task.language}] ${request.draft}`
+              : `${request.draft} (${task.style})`;
+      aiCancelled.delete(requestId);
+      for (const piece of text.match(/.{1,6}/gs) ?? []) {
+        await sleep(15);
+        if (aiCancelled.has(requestId)) throw 'Stopped.';
+        emit('ai-text', { requestId, text: piece });
+      }
+      return { refused: false, truncated: false, model, text };
+    },
+    async ai_cancel({ requestId }) {
+      aiCancelled.add(requestId);
     },
     async list_signatures() {
       await sleep(3);

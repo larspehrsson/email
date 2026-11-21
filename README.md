@@ -66,6 +66,11 @@ so Outlook shows them too.
 stays where it is and comes back to the top of your Inbox, unread, when it's due, on every
 computer you use Email on.
 
+**Help writing (AI)**, without a subscription: add your own Anthropic API key in Settings › AI,
+then ✨ AI in a message (Ctrl/⌘+J) drafts a reply or a new message from a few words, or makes
+what you wrote better, shorter, more formal or friendlier, fixes the spelling, or translates it.
+You see it first and choose whether to use it.
+
 **Everything from a sender** at a glance: Ctrl/⌘+2 opens a panel beside the message with all
 the mail from whoever sent it, in every folder. Tick them all and delete or archive at once —
 the quickest way to clear out a newsletter.
@@ -91,7 +96,9 @@ also teaches your provider's spam filter.
 
 ## Good to know
 
-- **Your mail stays on your computer.** Nothing goes anywhere but your mail servers. It's
+- **Your mail stays on your computer.** Nothing goes anywhere but your mail servers — except,
+  only when you ask for writing help, the message you're replying to and what you've written,
+  to Anthropic with your own key. It's
   stored in `~/.local/share/dev.mailclient.desktop/` on Linux and
   `~/Library/Application Support/dev.mailclient.desktop/` on macOS.
 - **Tags and Snooze on Outlook and Microsoft 365** go through Microsoft Graph, which needs
