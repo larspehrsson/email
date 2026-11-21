@@ -477,6 +477,7 @@ async fn sent_mail_goes_out_and_into_sent_once() {
             replying_to: None,
             forwarding: None,
             forward_attachments: vec![],
+            forward_messages: vec![],
             draft: None,
             draft_id: None,
             listed: true,
