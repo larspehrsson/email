@@ -817,16 +817,13 @@ function Panel() {
   let card!: HTMLDivElement;
   onMount(() => {
     card.focus();
-    const onBlur = () => close();
-    window.addEventListener('blur', onBlur);
+    // (Not closed when the window loses focus: a file dialog — a picture for a marker or a
+    // signature — takes it, and Settings must be there when it's chosen.)
     // Capture on the window: while a shortcut is being recorded the key is the shortcut (and
     // reaches nothing else, even with focus fallen out of the dialog); Esc closes. Other keys
     // go where they're typed (the password field…).
     window.addEventListener('keydown', onKey, true);
-    onCleanup(() => {
-      window.removeEventListener('blur', onBlur);
-      window.removeEventListener('keydown', onKey, true);
-    });
+    onCleanup(() => window.removeEventListener('keydown', onKey, true));
   });
 
   function onKey(e: KeyboardEvent) {

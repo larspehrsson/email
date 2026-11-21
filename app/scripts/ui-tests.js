@@ -1099,6 +1099,9 @@ describe('account picture', () => {
         g.fillRect(0, 0, 300, 300);
         return c.toDataURL('image/png').split(',')[1];
       });
+      // The file dialog takes the window's focus: Settings stays.
+      await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+      assert.equal(await page.locator('.settings').count(), 1, 'still open');
       await page.locator('.st-mark-pic input[type="file"]').first().setInputFiles({ name: 'me.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
       await page.locator('.st-mark-pic .acct-dot img').first().waitFor();
       const natural = await page.locator('.st-mark-pic .acct-dot img').first().evaluate((i) => i.naturalWidth);
