@@ -5554,10 +5554,14 @@ body.dragging-account * {
 .row-inner.with-avatar::after {
   left: 59px;
 }
+/* top-aligned with the text (the sender's line), the unread dot centred on it */
 .row-avatar {
   position: absolute;
   left: 12px;
-  top: calc((var(--row-h) - 36px) / 2);
+  top: calc((var(--row-h) - 56px) / 2 + 1px);
+}
+.row-inner.with-avatar .unread-dot {
+  top: calc((var(--row-h) - 56px) / 2 + 1px + 14px);
 }
 .avatar.pic {
   overflow: hidden;
