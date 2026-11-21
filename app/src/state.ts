@@ -108,6 +108,13 @@ export function selectMessage(m: MessageSummary | null): void {
   });
 }
 
+// ------------------------------------------------------------- main view
+
+/** What fills the window beside the sidebar: mail, or the address book. */
+export type MainView = 'mail' | 'contacts';
+const [mainView, setMainView] = createSignal<MainView>('mail');
+export { mainView, setMainView };
+
 // ------------------------------------------------------------- sender pane
 
 /** The pane beside the reader with everything from the sender on screen. Persisted. */

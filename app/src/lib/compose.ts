@@ -111,6 +111,26 @@ export function newMessage(): void {
   });
 }
 
+/** A new message to these people (the address book's "Write"). */
+export function newMessageTo(to: Addr[]): void {
+  const accountId = defaultAccount();
+  if (accountId == null) return;
+  void openDraftWindow({
+    mode: 'new',
+    accountId,
+    to,
+    cc: [],
+    bcc: [],
+    showCc: false,
+    subject: '',
+    html: '',
+    replyingTo: null,
+    forwarding: null,
+    quoteHtml: null,
+    fwdAttachments: [],
+  });
+}
+
 /** New messages for the mailto: links other programs sent (e.g. a browser's "Email link"). */
 export async function takeMailtoLinks(): Promise<void> {
   const accountId = defaultAccount();

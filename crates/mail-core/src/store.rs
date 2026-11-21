@@ -194,6 +194,17 @@ CREATE TABLE IF NOT EXISTS signature_defaults (
     reply_id   INTEGER REFERENCES signatures(id) ON DELETE SET NULL
 );
 
+-- The address book (see crate::addressbook); emails and phones as JSON arrays.
+CREATE TABLE IF NOT EXISTS address_book (
+    id      INTEGER PRIMARY KEY,
+    name    TEXT NOT NULL,
+    emails  TEXT NOT NULL,
+    phones  TEXT NOT NULL,
+    company TEXT NOT NULL,
+    notes   TEXT NOT NULL,
+    updated INTEGER NOT NULL DEFAULT (unixepoch())
+);
+
 CREATE TABLE IF NOT EXISTS entries (
     folder_id  INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
     message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -257,7 +268,7 @@ const BASE_VERSION: i64 = 4;
 /// A change that only adds tables (or indexes) needs no step: `SCHEMA` (all `IF NOT EXISTS`) runs
 /// at every open and adds them, and the version stays, so an older build still opens the
 /// database (it ignores tables it doesn't know). Signatures (`signatures`,
-/// `signature_defaults`) came that way.
+/// `signature_defaults`) and the address book (`address_book`) came that way.
 const MIGRATIONS: &[fn(&Connection) -> Result<()>] = &[
     // 5: an account can keep its attachments for offline use
     |db| Ok(db.execute_batch("ALTER TABLE accounts ADD COLUMN keep_attachments INTEGER NOT NULL DEFAULT 0;")?),
@@ -3329,6 +3340,57 @@ impl Store {
         Ok(keyword)
     }
 
+    // ---- address book -----------------------------------------------------------------------
+
+    pub fn cards(&self) -> Result<Vec<crate::addressbook::Card>> {
+        let db = self.rdb();
+        let mut stmt = db.prepare_cached("SELECT id, name, emails, phones, company, notes FROM address_book")?;
+        let mut cards: Vec<crate::addressbook::Card> = stmt
+            .query_map([], |r| {
+                Ok(crate::addressbook::Card {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    emails: serde_json::from_str(&r.get::<_, String>(2)?).unwrap_or_default(),
+                    phones: serde_json::from_str(&r.get::<_, String>(3)?).unwrap_or_default(),
+                    company: r.get(4)?,
+                    notes: r.get(5)?,
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        cards.sort_by(|a, b| a.title().to_lowercase().cmp(&b.title().to_lowercase()).then(a.id.cmp(&b.id)));
+        Ok(cards)
+    }
+
+    /// Save a card (new when its id is 0); returns its id.
+    pub fn save_card(&self, card: crate::addressbook::Card) -> Result<i64> {
+        let c = card.cleaned();
+        if c.title().is_empty() {
+            anyhow::bail!("Give the contact a name, a company or an address.");
+        }
+        let (emails, phones) = (serde_json::to_string(&c.emails)?, serde_json::to_string(&c.phones)?);
+        let db = self.db();
+        if c.id == 0 {
+            db.execute(
+                "INSERT INTO address_book (name, emails, phones, company, notes) VALUES (?1,?2,?3,?4,?5)",
+                params![c.name, emails, phones, c.company, c.notes],
+            )?;
+            return Ok(db.last_insert_rowid());
+        }
+        let n = db.execute(
+            "UPDATE address_book SET name=?2, emails=?3, phones=?4, company=?5, notes=?6, updated=unixepoch() WHERE id=?1",
+            params![c.id, c.name, emails, phones, c.company, c.notes],
+        )?;
+        if n == 0 {
+            anyhow::bail!("That contact no longer exists.");
+        }
+        Ok(c.id)
+    }
+
+    pub fn delete_card(&self, id: i64) -> Result<()> {
+        self.db().execute("DELETE FROM address_book WHERE id=?1", [id])?;
+        Ok(())
+    }
+
     // ---- signatures -------------------------------------------------------------------------
 
     pub fn signatures(&self) -> Result<crate::signatures::Signatures> {
@@ -3916,6 +3978,28 @@ mod tests {
         let page = store.sender_messages(mine.id, 0, 10).unwrap().unwrap();
         assert_eq!((page.addr.as_str(), page.total), ("bob@y.com", 1));
         assert!(store.sender_messages(999_999, 0, 10).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn address_book_cards() {
+        use crate::addressbook::Card;
+        let dir = std::env::temp_dir().join(format!("mail-core-cards-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = Store::open(&dir).unwrap();
+        let card = |name: &str, emails: &[&str]| Card { name: name.into(), emails: emails.iter().map(|s| s.to_string()).collect(), ..Default::default() };
+        let bob = store.save_card(card("bob", &["bob@x.com", " BOB@x.com"])).unwrap();
+        let asa = store.save_card(card("Åsa", &["asa@x.se"])).unwrap();
+        assert!(store.save_card(card(" ", &[])).is_err(), "needs something to show");
+        let all = store.cards().unwrap();
+        assert_eq!(all.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["bob", "Åsa"], "by name, any case");
+        assert_eq!(all[0].emails, ["bob@x.com"], "the same address once");
+        store.save_card(Card { id: asa, company: "Acme".into(), phones: vec!["+46 70".into()], ..card("Åsa B", &["asa@x.se"]) }).unwrap();
+        let a = store.cards().unwrap().into_iter().find(|c| c.id == asa).unwrap();
+        assert_eq!((a.name.as_str(), a.company.as_str(), a.phones.len()), ("Åsa B", "Acme", 1));
+        store.delete_card(bob).unwrap();
+        assert_eq!(store.cards().unwrap().len(), 1);
+        assert!(store.save_card(Card { id: bob, ..card("x", &[]) }).is_err(), "gone");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

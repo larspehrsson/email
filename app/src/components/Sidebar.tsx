@@ -2,11 +2,11 @@ import { batch, createEffect, createMemo, createSignal, For, Match, onCleanup, S
 import { hint } from '../lib/shortcuts';
 import { createStore } from 'solid-js/store';
 import { api, type Account, type Folder, type FolderRole, type SyncStatus } from '../api';
-import { folderById, foldersByAccount, moveAccount, selectedFolderId, selectFolder, syncByAccount, accounts } from '../state';
+import { folderById, foldersByAccount, moveAccount, selectedFolderId, selectFolder, syncByAccount, accounts, mainView, setMainView } from '../state';
 import { AccountDot } from './FolderSwitcher';
 import { cancelExport, exportLabel, exportNow } from '../lib/exports';
 import { fmtNum, loadPref, savePref } from '../lib/format';
-import { AlertIcon, CheckIcon, ChevronIcon, FolderIcon, LockIcon, PlusIcon, RoleIcon, SidebarIcon } from './Icons';
+import { AlertIcon, CheckIcon, ChevronIcon, FolderIcon, LockIcon, PeopleIcon, PlusIcon, RoleIcon, SidebarIcon } from './Icons';
 import { PasswordDialog } from './PasswordPrompt';
 import { toggleSidebar } from '../lib/layout';
 import { DRAG, platform } from '../lib/platform';
@@ -650,6 +650,16 @@ export function Sidebar(props: { onAddAccount: () => void; flyout?: boolean }) {
           Mailboxes
         </span>
         <span class="sidebar-top-btns">
+          <button
+            class="icon-btn"
+            classList={{ on: mainView() === 'contacts' }}
+            onClick={() => setMainView(mainView() === 'contacts' ? 'mail' : 'contacts')}
+            title={`Address book (${hint('contacts')})`}
+            aria-label="Address book"
+            aria-pressed={mainView() === 'contacts'}
+          >
+            <PeopleIcon />
+          </button>
           <button class="icon-btn" onClick={props.onAddAccount} title="Add account" aria-label="Add account">
             <PlusIcon />
           </button>

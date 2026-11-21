@@ -125,6 +125,9 @@ interface SyncStatus {
 | `open_folder` | `{ folderId }` | `void` — tells sync engine to prioritise this folder |
 | `list_messages` | `{ folderId, offset, limit, sort }` | `{ total: number, messages: MessageSummary[] }` in `sort`'s order (`'received'`: newest first; `'from'` / `'to'`: by sender / first recipient as shown, case-folded, A to Z, nobody last, newest first within each) |
 | `sender_messages` | `{ messageId \| null, accountId \| null, addr \| null, offset, limit }` | `{ accountId, name, addr, total, messages: MessageSummary[] } \| null` — everything from the sender of `messageId` (for our own message, the newest other sender in its conversation), or from `addr` in `accountId`: any case, every folder but Trash/Spam, newest first, `folderId` the message's most specific folder; `null` when the message is gone |
+| `list_cards` | — | `Card[]` — the address book (`{ id, name, emails, phones, company, notes }`), by name |
+| `save_card` | `{ card }` | `number` — save a contact (new when `id` is 0); emails and phones trimmed, repeated addresses dropped; error when there's no name, company or address |
+| `delete_card` | `{ id }` | `void` |
 | `ai_status` | — | `{ configured, models: string[], defaultModel }` — writing help: is there an API key |
 | `ai_set_key` | `{ key: string \| null }` | `void` — keep the Anthropic API key in the keychain (null/empty: forget it) |
 | `ai_run` | `{ requestId, model, task: AiTask, request: AiRequest }` | `{ text, refused, truncated, model }` — a writing task (reply / compose / rewrite {style} / translate {language}); its text also comes as it's written, as `ai-text` events `{ requestId, text }` |

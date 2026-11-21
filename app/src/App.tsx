@@ -17,6 +17,8 @@ import {
   listSort,
   senderPane,
   setSenderPane,
+  mainView,
+  setMainView,
   conversationScope,
   setConversationScope,
 } from './state';
@@ -43,6 +45,7 @@ import { Reader } from './components/Reader';
 import { ConversationReader } from './components/Conversation';
 import { Resizer } from './components/Resizer';
 import { SenderPane } from './components/SenderPane';
+import { ContactsView } from './components/ContactsView';
 import { AddAccountModal, Onboarding } from './components/AddAccount';
 import { DRAG } from './lib/platform';
 
@@ -80,6 +83,7 @@ export function App() {
           flyout: ready ? flyoutKey : undefined,
           goto: ready ? openFolderSwitcher : undefined,
           sender: ready ? () => setSenderPane(!senderPane()) : undefined,
+          contacts: ready ? () => setMainView(mainView() === 'contacts' ? 'mail' : 'contacts') : undefined,
         };
         const f = run[commandFor(e) ?? ''];
         if (f) {
@@ -298,6 +302,12 @@ export function App() {
           <Show when={senderPane()}>
             <div class="pane pane-sender">
               <SenderPane />
+            </div>
+          </Show>
+          {/* Over the mail (kept as it is underneath), beside the sidebar. */}
+          <Show when={mainView() === 'contacts'}>
+            <div class="contacts-layer">
+              <ContactsView />
             </div>
           </Show>
           <ViewMenuPopover />

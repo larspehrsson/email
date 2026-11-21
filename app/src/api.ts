@@ -23,6 +23,7 @@ import type {
   SearchField,
   Signatures,
   SenderPage,
+  Card,
   AiOutcome,
   AiRequest,
   AiStatus,
@@ -201,6 +202,11 @@ export const api = {
   setTag: (keyword: string | null, name: string, color: string): Promise<string> => call('set_tag', { keyword, name, color }),
   deleteTag: (keyword: string): Promise<void> => call('delete_tag', { keyword }),
   listSignatures: (): Promise<Signatures> => call('list_signatures', undefined),
+  /** The address book, by name. */
+  listCards: (): Promise<Card[]> => call('list_cards', undefined),
+  /** Save a contact (new when its id is 0); returns its id. */
+  saveCard: (card: Card): Promise<number> => call('save_card', { card }),
+  deleteCard: (id: number): Promise<void> => call('delete_card', { id }),
   aiStatus: (): Promise<AiStatus> => call('ai_status', undefined),
   /** Keep the Anthropic API key in the keychain (null: forget it). */
   aiSetKey: (key: string | null): Promise<void> => call('ai_set_key', { key }),

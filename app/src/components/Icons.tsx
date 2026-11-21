@@ -137,6 +137,13 @@ export const MailIcon = (p: P) => (
     <path d="m2.5 4.5 5.5 4 5.5-4" />
   </Svg>
 );
+export const PeopleIcon = (p: P) => (
+  <Svg {...p}>
+    <circle cx="6" cy="5.5" r="2.5" />
+    <path d="M1.75 13.25c.4-2.3 2.1-3.75 4.25-3.75s3.85 1.45 4.25 3.75" />
+    <path d="M10.5 3.2a2.4 2.4 0 0 1 0 4.6M12 9.8c1.2.5 2 1.7 2.25 3.45" />
+  </Svg>
+);
 export const HelpIcon = (p: P) => (
   <Svg {...p}>
     <circle cx="8" cy="8" r="6" />

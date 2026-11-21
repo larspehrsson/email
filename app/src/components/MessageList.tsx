@@ -19,6 +19,7 @@ import { highlightParts, highlightRegex } from '../lib/query';
 import {
   accounts,
   listSort,
+  mainView,
   rememberedSelection,
   rememberSelection,
   setRestorePending,
@@ -569,6 +570,7 @@ export function MessageList(props: {
     // Enter/Space on a focused button, link or menu item activates it (popup triggers, toolbar…).
     if ((e.key === 'Enter' || e.key === ' ') && e.target instanceof Element && e.target.closest('button, a[href], summary, [role="button"], [role^="menuitem"], [role="option"]')) return;
     if (document.querySelector('.modal-backdrop')) return;
+    if (mainView() !== 'mail') return; // the address book is over the list
     // Only one list drives the keyboard: results while searching, the folder otherwise.
     if (!!search !== searchActive()) return;
     const cur = selIndex();

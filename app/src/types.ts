@@ -149,6 +149,16 @@ export type ConversationScope = 'folder' | 'all';
  *  within each). The list is grouped by the same thing. */
 export type ListSort = 'received' | 'from' | 'to';
 
+/** A person in the address book (id 0: not saved yet). */
+export interface Card {
+  id: number;
+  name: string;
+  emails: string[];
+  phones: string[];
+  company: string;
+  notes: string;
+}
+
 /** Writing help (Claude, with the user's own API key). */
 export type AiTask =
   | { kind: 'reply' }
@@ -480,6 +490,9 @@ export interface CommandMap {
   open_folder: { args: { folderId: number }; ret: void };
   list_messages: { args: { folderId: number; offset: number; limit: number; sort: ListSort }; ret: MessagePage };
   list_signatures: { args: undefined; ret: Signatures };
+  list_cards: { args: undefined; ret: Card[] };
+  save_card: { args: { card: Card }; ret: number };
+  delete_card: { args: { id: number }; ret: void };
   ai_status: { args: undefined; ret: AiStatus };
   ai_set_key: { args: { key: string | null }; ret: void };
   ai_run: { args: { requestId: number; model: string; task: AiTask; request: AiRequest }; ret: AiOutcome };

@@ -5,6 +5,8 @@ import { fmtNum, smartDate } from '../lib/format';
 import { hint } from '../lib/shortcuts';
 import { ArchiveIcon, CloseIcon, ReadIcon, TrashIcon } from './Icons';
 import { hideToast, showToast } from './Toast';
+import { cardFor, loadCards } from '../lib/addressBook';
+import { openContacts } from './ContactsView';
 
 // The sender pane (eM Client's contact sidebar, for mail): everything from the sender of the
 // message on screen, in every folder but Trash and Spam, newest first. Tick some (or all) to
@@ -157,6 +159,7 @@ export function SenderPane() {
   }
 
   const name = () => page()?.name || page()?.addr || '';
+  void loadCards().catch(() => {});
 
   return (
     <aside class="sender-pane" aria-label="Messages from this sender">
@@ -169,6 +172,20 @@ export function SenderPane() {
             <div class="sp-addr" title={page()!.addr}>
               {page()!.addr}
             </div>
+            <Show
+              when={cardFor(page()!.addr)}
+              fallback={
+                <button class="link-btn sp-card" onClick={() => openContacts({ name: page()!.name, email: page()!.addr })}>
+                  + Add to contacts
+                </button>
+              }
+            >
+              {(c) => (
+                <button class="link-btn sp-card" title="Open in the address book" onClick={() => openContacts({ id: c().id })}>
+                  In contacts
+                </button>
+              )}
+            </Show>
           </Show>
         </div>
         <button class="icon-btn" title={`Close (${hint('sender')})`} aria-label="Close sender panel" onClick={() => setSenderPane(false)}>

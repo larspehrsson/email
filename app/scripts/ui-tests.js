@@ -895,6 +895,7 @@ describe('writing help', () => {
       await w.locator('.fmt-ai').click();
       await w.locator('.ai-note').waitFor();
       await w.close();
+      await page.bringToFront();
 
       await page.keyboard.press('ControlOrMeta+,');
       await page.locator('.st-nav-item', { hasText: 'AI' }).click();
@@ -916,6 +917,37 @@ describe('writing help', () => {
       const body = await w.locator('.cmp-editor .ProseMirror').innerText();
       assert.ok(body.includes('Yes, Thursday works.'), body);
       assert.equal(await w.locator('.ai-panel').count(), 0, 'the panel closes');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('address book', () => {
+  test('a sender added from the panel is kept, suggested first, and can be written to', async () => {
+    const { page, errors, context, close } = await open({ threaded: false });
+    try {
+      await page.locator('.folder-layer .row').first().click();
+      const from = (await page.locator('.folder-layer .row.selected .row-from').textContent()).trim();
+      await page.keyboard.press('ControlOrMeta+2');
+      await page.locator('.sp-card', { hasText: 'Add to contacts' }).click();
+      await page.locator('.contacts').waitFor();
+      assert.equal(await page.locator('.ct-big').inputValue(), from, 'prefilled with the sender');
+      await page.locator('.ct-big').fill(`${from} (work)`);
+      await page.locator('.ct-field', { hasText: 'Company' }).locator('input').fill('Acme');
+      await page.locator('.ct-actions button', { hasText: 'Save' }).click();
+      await hasText(page.locator('.ct-row .ct-name').first(), `${from} (work)`, 'listed');
+      await page.keyboard.press('Escape');
+      await page.locator('.contacts').waitFor({ state: 'detached' });
+      await hasText(page.locator('.sp-card'), 'In contacts', 'the panel knows them now');
+
+      const popup = context.waitForEvent('page');
+      await page.keyboard.press('c');
+      const w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      await w.locator('input[aria-label="To"]').fill('acm');
+      await hasText(w.locator('.addr-sugg-row .sugg-name').first(), `${from} (work)`, 'found by company, first, under its own name');
       assert.deepEqual(errors, []);
     } finally {
       await close();

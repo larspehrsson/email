@@ -21,6 +21,7 @@ import type {
   ListSort,
   Signature,
   SignatureDefaults,
+  Card,
   TagDef,
   Action,
   ActionResult,
@@ -577,6 +578,13 @@ export function createMockBackend(): Backend {
 
   const accounts: Account[] = [];
   const aiCancelled = new Set<number>();
+  const cardsLoad = (): Card[] => {
+    try {
+      return JSON.parse(localStorage.getItem('mock.cards') ?? '[]') as Card[];
+    } catch {
+      return [];
+    }
+  };
   // In localStorage, like drafts: compose popups (other pages) see what Settings saved.
   type SigStore = { signatures: Signature[]; defaults: SignatureDefaults[]; seq: number };
   const sigLoad = (): SigStore => {
@@ -1796,6 +1804,30 @@ export function createMockBackend(): Backend {
         messages: all.slice(offset, offset + limit).map((x) => ({ ...x })),
       };
     },
+    async list_cards() {
+      await sleep(3);
+      return cardsLoad().sort((a, b) => (a.name || a.company || a.emails[0] || '').localeCompare(b.name || b.company || b.emails[0] || ''));
+    },
+    async save_card({ card }) {
+      await sleep(3);
+      const c = {
+        ...card,
+        name: card.name.trim(),
+        company: card.company.trim(),
+        emails: card.emails.map((e) => e.trim()).filter(Boolean),
+        phones: card.phones.map((p) => p.trim()).filter(Boolean),
+      };
+      if (!c.name && !c.company && !c.emails.length) throw 'Give the contact a name, a company or an address.';
+      const all = cardsLoad();
+      if (c.id === 0) c.id = Math.max(0, ...all.map((x) => x.id)) + 1;
+      else if (!all.some((x) => x.id === c.id)) throw 'That contact no longer exists.';
+      localStorage.setItem('mock.cards', JSON.stringify([...all.filter((x) => x.id !== c.id), c]));
+      return c.id;
+    },
+    async delete_card({ id }) {
+      await sleep(3);
+      localStorage.setItem('mock.cards', JSON.stringify(cardsLoad().filter((x) => x.id !== id)));
+    },
     async ai_status() {
       await sleep(3);
       return {
@@ -2169,11 +2201,18 @@ export function createMockBackend(): Backend {
         seen.set(k, e);
       }
       const words = (s: string) => s.toLowerCase().split(/[\s.@_-]+/);
-      return [...seen.values()]
+      // The address book first, under its names (as the core does).
+      const fromCards = cardsLoad().flatMap((c) =>
+        [c.name, c.company].some((f) => words(f).some((w) => w.startsWith(q)))
+          ? c.emails.map((addr) => ({ name: c.name || null, addr }))
+          : c.emails.filter((e) => words(e).some((w) => w.startsWith(q))).map((addr) => ({ name: c.name || null, addr })),
+      );
+      const rest = [...seen.values()]
+        .filter((e) => !fromCards.some((c) => c.addr.toLowerCase() === e.addr))
         .filter((e) => !/no-?reply|notifications/.test(e.addr) && (e.addr.startsWith(q) || words(e.name ?? '').some((w) => w.startsWith(q)) || words(e.addr.split('@')[0]!).some((w) => w.startsWith(q))))
         .sort((a, b) => b.n - a.n)
-        .slice(0, limit ?? 8)
         .map(({ name, addr }) => ({ name, addr }));
+      return [...fromCards, ...rest].slice(0, limit ?? 8);
     },
     async file_info({ paths }) {
       await sleep(3);

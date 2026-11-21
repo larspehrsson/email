@@ -533,6 +533,22 @@ async fn ai_cancel(runs: State<'_, AiRuns>, request_id: u64) -> Res<()> {
 }
 
 #[tauri::command]
+async fn list_cards(core: State<'_, Arc<Core>>) -> Res<Vec<mail_core::addressbook::Card>> {
+    core.cards().map_err(err)
+}
+
+/// Save a contact (new when its id is 0); returns its id.
+#[tauri::command]
+async fn save_card(core: State<'_, Arc<Core>>, card: mail_core::addressbook::Card) -> Res<i64> {
+    core.save_card(card).map_err(err)
+}
+
+#[tauri::command]
+async fn delete_card(core: State<'_, Arc<Core>>, id: i64) -> Res<()> {
+    core.delete_card(id).map_err(err)
+}
+
+#[tauri::command]
 async fn list_signatures(core: State<'_, Arc<Core>>) -> Res<mail_core::signatures::Signatures> {
     core.signatures().map_err(err)
 }
@@ -1206,6 +1222,9 @@ pub fn run() {
             list_groups,
             list_signatures,
             sender_messages,
+            list_cards,
+            save_card,
+            delete_card,
             ai_status,
             ai_set_key,
             ai_run,

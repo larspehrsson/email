@@ -91,6 +91,7 @@ export const COMMANDS: CommandSection[] = [
     items: [
       c('threaded', 'Group by conversation', ['Mod+T']),
       c('sender', 'Messages from this sender (side panel)', ['Mod+2']),
+      c('contacts', 'Address book', ['Mod+Shift+B']),
       c('scope', 'Conversations: this folder / all mail', ['Mod+Shift+A']),
       c('shortcuts', 'Keyboard shortcuts', ['?']),
       c('settings', 'Settings', ['Mod+,']),

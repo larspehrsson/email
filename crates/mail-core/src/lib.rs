@@ -2,6 +2,7 @@
 
 pub mod imap;
 pub mod actions;
+pub mod addressbook;
 pub mod ai;
 pub mod compose;
 pub mod contacts;
@@ -982,9 +983,31 @@ impl Core {
             c.list.get_or_insert(list);
             c.built.get_or_insert_with(std::time::Instant::now);
         }
+        // The address book first (its names), then the people from the mail not in it.
+        let mut out = addressbook::suggest(&self.store.cards()?, query, limit);
         let c = self.contacts.lock().unwrap();
         let now = chrono::Utc::now().timestamp();
-        Ok(contacts::suggest(c.list.as_deref().unwrap_or_default(), query, limit, now))
+        for a in contacts::suggest(c.list.as_deref().unwrap_or_default(), query, limit, now) {
+            if out.len() >= limit {
+                break;
+            }
+            if !out.iter().any(|x| x.addr.eq_ignore_ascii_case(&a.addr)) {
+                out.push(a);
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn cards(&self) -> Result<Vec<addressbook::Card>> {
+        self.store.cards()
+    }
+
+    pub fn save_card(&self, card: addressbook::Card) -> Result<i64> {
+        self.store.save_card(card)
+    }
+
+    pub fn delete_card(&self, id: i64) -> Result<()> {
+        self.store.delete_card(id)
     }
 
     fn build_contacts(&self) -> Result<Vec<contacts::Contact>> {

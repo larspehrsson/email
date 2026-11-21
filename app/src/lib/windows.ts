@@ -60,6 +60,8 @@ export interface WindowEvents {
   'compose-sent': { id: number; sendAt: number };
   /** signatures were changed (Settings): windows showing them fetch them again */
   'signatures-changed': Record<string, never>;
+  /** the address book changed: windows showing it fetch it again */
+  'cards-changed': Record<string, never>;
 }
 
 const channel = !isTauri && typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('email-windows') : null;

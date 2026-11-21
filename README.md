@@ -71,6 +71,10 @@ then ✨ AI in a message (Ctrl/⌘+J) drafts a reply or a new message from a few
 what you wrote better, shorter, more formal or friendlier, fixes the spelling, or translates it.
 You see it first and choose whether to use it.
 
+**An address book** (Ctrl/⌘+Shift+B): the people you keep, with their addresses, phone
+numbers, company and notes. Add someone from the sender panel in one click; they come first when
+you type an address.
+
 **Everything from a sender** at a glance: Ctrl/⌘+2 opens a panel beside the message with all
 the mail from whoever sent it, in every folder. Tick them all and delete or archive at once —
 the quickest way to clear out a newsletter.
