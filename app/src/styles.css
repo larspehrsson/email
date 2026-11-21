@@ -5902,3 +5902,39 @@ body.dragging-account * {
   white-space: pre-wrap;
   user-select: text;
 }
+
+/* Where the link under the pointer goes (components/LinkPeek.tsx). */
+.link-peek {
+  position: fixed;
+  z-index: 95;
+  pointer-events: none;
+  padding: 4px 9px;
+  border: 1px solid var(--sep-strong);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--text);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+  font: 12px/1.45 var(--font);
+  overflow: hidden;
+}
+.link-peek .lp-url {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.link-peek .lp-host {
+  font-weight: 600;
+}
+.link-peek .lp-dim {
+  color: var(--text-3);
+}
+.link-peek.warn {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 1px var(--danger), 0 2px 10px rgba(0, 0, 0, 0.12);
+}
+.link-peek .lp-warn {
+  margin-top: 2px;
+  color: var(--danger);
+  font-weight: 500;
+  white-space: normal;
+}

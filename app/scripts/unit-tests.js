@@ -222,3 +222,34 @@ test('an email’s text for the prompt leaves out its CSS and scripts', () => {
   const html = '<html><head><title>T</title><style>.a{color:red}</style></head><body><p>Hi&amp;bye</p><STYLE type="text/css">p{x:y}</STYLE><ul><li>one</li></ul><script>x()</script>Done</body></html>';
   assert.equal(htmlToText(html, parse), 'Hi&bye\n- one\nDone');
 });
+
+import { describeLink, textHost } from '../src/lib/linkCheck.ts';
+
+test('a link shows where it goes: the site apart from the rest', () => {
+  const l = describeLink('https://www.facebook.com/login/?next=x', 'Log in');
+  assert.equal(l.host, 'www.facebook.com');
+  assert.equal(l.before, 'https://');
+  assert.equal(l.after, '/login/?next=x');
+  assert.equal(l.warning, null);
+  assert.equal(describeLink('mailto:ann@example.com?subject=Hi', 'Ann').host, 'ann@example.com');
+});
+
+test('text that is an address but leads elsewhere is called out', () => {
+  assert.match(describeLink('https://fb-security.example/verify', 'https://www.facebook.com/security').warning, /facebook\.com.*fb-security\.example/);
+  assert.match(describeLink('http://evil.example/', 'facebook.com').warning, /facebook\.com/);
+  // The same site, with or without www, or a part of it: fine.
+  assert.equal(describeLink('https://www.facebook.com/x', 'facebook.com').warning, null);
+  assert.equal(describeLink('https://m.facebook.com/x', 'www.facebook.com/x').warning, null);
+  // Words, not an address: nothing to compare.
+  assert.equal(describeLink('https://click.example/abc', 'Click here').warning, null);
+  assert.equal(textHost('Facebook'), null);
+  assert.equal(textHost('version 2.0 notes'), null);
+});
+
+test('look-alike letters and bare addresses are called out', () => {
+  // A Cyrillic "а" in facebook: the browser sees xn--…
+  const l = describeLink('https://fаcebook.com/', 'Facebook');
+  assert.match(l.host, /^xn--/);
+  assert.match(l.warning, /international letters/);
+  assert.match(describeLink('http://192.168.1.20/login', 'Log in').warning, /bare internet address/);
+});

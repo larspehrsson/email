@@ -13,6 +13,7 @@ import { runAction } from '../lib/actions';
 import { ForwardIcon, ImageIcon, MailIcon, PaperclipIcon, ReplyIcon } from './Icons';
 import { DRAG } from '../lib/platform';
 import { forwardFrameKeys } from '../lib/frameKeys';
+import { peekHandlers, watchFrameLinks } from './LinkPeek';
 import { keepImageShapes, ZOOM_CSS, zoomableImages } from '../lib/images';
 import { editDraft } from '../lib/compose';
 import { allKeys, label, MOD } from '../lib/shortcuts';
@@ -68,6 +69,7 @@ function HtmlFrame(props: { doc: string }) {
     f.srcdoc = props.doc;
     f.addEventListener('load', () => {
       forwardFrameKeys(f);
+      watchFrameLinks(f);
       if (f.contentDocument) zoomableImages(f.contentDocument);
     });
     host.replaceChildren(f);
@@ -128,11 +130,13 @@ export function AddrList(props: { label: string; list: Addr[] }) {
 
 function LinkifiedText(props: { text: string }) {
   const parts = createMemo(() => linkify(props.text));
+  // The address shows while the pointer is over a link, at the bottom of the message's pane.
+  const peek = peekHandlers('.reader, .conv-scroll, .plain');
   return (
     <For each={parts()}>
       {(p) =>
         p.t === 'link' ? (
-          <a href={p.href} target="_blank" rel="noopener noreferrer">
+          <a href={p.href} target="_blank" rel="noopener noreferrer" {...peek}>
             {p.v}
           </a>
         ) : (

@@ -127,6 +127,10 @@ also teaches your provider's spam filter.
   domain; View options turns them off). It's stored in `~/.local/share/dev.mailclient.desktop/`
   on Linux, `~/Library/Application Support/dev.mailclient.desktop/` on macOS and
   `%APPDATA%\dev.mailclient.desktop\` on Windows.
+- **Check a link before you click it:** point at it and the address it really opens shows at
+  the bottom of the message, with the site in bold. If the link's text is an address for one
+  site but the link goes to another, or the site's name uses look-alike international letters,
+  it says so in red.
 - **Tags and Snooze on Outlook and Microsoft 365** go through Microsoft Graph, which needs
   your permission once: Settings › Accounts › Tags & snooze › Turn on…. A work or school
   account may need your administrator to allow it first.

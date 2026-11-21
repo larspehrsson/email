@@ -57,6 +57,7 @@ import { ContactsView } from './components/ContactsView';
 import { AddAccountModal, Onboarding } from './components/AddAccount';
 import { ContextMenuHost } from './components/ContextMenu';
 import { AiAppsHost } from './components/AiApps';
+import { LinkPeek } from './components/LinkPeek';
 import { startGoogleSync } from './lib/googleContacts';
 import { MultiPane } from './components/MultiPane';
 import { openSource, SourceHost } from './components/SourceView';
@@ -355,6 +356,7 @@ export function App() {
           <ManageTagsHost />
           <ConfirmHost />
           <AiAppsHost />
+          <LinkPeek />
           <ContextMenuHost />
           <SourceHost />
           <ShortcutsHost />

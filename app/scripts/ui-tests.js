@@ -236,6 +236,41 @@ describe('compose', () => {
 });
 
 describe('reader', () => {
+  test('pointing at a link shows where it goes, and text that pretends to be another site is called out', async () => {
+    const { page, errors, close } = await open({ threaded: false, query: '&picture' });
+    try {
+      await page.locator('.folder-layer .row', { hasText: 'picture as the body' }).first().click();
+      const frame = page.frameLocator('.reader iframe').first();
+      await frame.locator('img').waitFor();
+      await frame.locator('body').evaluate((b) => {
+        b.insertAdjacentHTML(
+          'afterbegin',
+          '<p><a id="fake" href="https://fb-login.example/verify?u=1">https://www.facebook.com/security</a></p>' +
+            '<p><a id="fine" href="https://www.facebook.com/help/">Help Centre</a></p>',
+        );
+      });
+      const peek = page.locator('.link-peek');
+      await frame.locator('#fine').hover();
+      await peek.waitFor();
+      assert.equal(await peek.locator('.lp-host').textContent(), 'www.facebook.com');
+      assert.equal(await peek.locator('.lp-warn').count(), 0, 'a link in words has nothing to compare');
+
+      await frame.locator('#fake').hover();
+      await hasText(peek.locator('.lp-host'), 'fb-login.example', 'the real site, in bold');
+      assert.match(await peek.locator('.lp-url').textContent(), /^https:\/\/fb-login\.example\/verify\?u=1$/);
+      assert.match(await peek.locator('.lp-warn').textContent(), /says facebook\.com, but the link goes to fb-login\.example/);
+      // It stays inside the reader.
+      const [box, pane] = await Promise.all([peek.boundingBox(), page.locator('.reader iframe').first().boundingBox()]);
+      assert.ok(box.x >= pane.x && box.x + box.width <= pane.x + pane.width + 1, `inside the message (${JSON.stringify(box)} in ${JSON.stringify(pane)})`);
+
+      await page.locator('.reader-subject').hover();
+      await peek.waitFor({ state: 'detached' });
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('a picture wider than the reader shrinks and keeps its shape', async () => {
     const { page, errors, close } = await open({ threaded: false, query: '&picture' });
     try {
