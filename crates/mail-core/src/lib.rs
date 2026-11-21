@@ -10,6 +10,7 @@ pub mod oauth;
 pub mod model;
 pub mod partial;
 pub mod search;
+pub mod signatures;
 pub mod smtp;
 pub mod sort;
 pub mod store;
@@ -1061,6 +1062,22 @@ impl Core {
 
     pub fn delete_tag(&self, keyword: &str) -> Result<()> {
         self.store.delete_tag(keyword)
+    }
+
+    pub fn signatures(&self) -> Result<signatures::Signatures> {
+        self.store.signatures()
+    }
+
+    pub fn save_signature(&self, id: Option<i64>, name: &str, html: &str) -> Result<i64> {
+        self.store.save_signature(id, name, &mime::sanitize_signature(html))
+    }
+
+    pub fn delete_signature(&self, id: i64) -> Result<()> {
+        self.store.delete_signature(id)
+    }
+
+    pub fn set_signature_defaults(&self, account_id: i64, new_id: Option<i64>, reply_id: Option<i64>) -> Result<()> {
+        self.store.set_signature_defaults(account_id, new_id, reply_id)
     }
 
     pub fn message_in_folder(&self, id: i64, folder_id: Option<i64>) -> Result<bool> {

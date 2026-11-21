@@ -58,6 +58,8 @@ export function onCloseRequested(ask: () => Promise<boolean>): void {
 export interface WindowEvents {
   /** a compose window queued a message: the main window shows "Sending… Undo" */
   'compose-sent': { id: number; sendAt: number };
+  /** signatures were changed (Settings): windows showing them fetch them again */
+  'signatures-changed': Record<string, never>;
 }
 
 const channel = !isTauri && typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('email-windows') : null;

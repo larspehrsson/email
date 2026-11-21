@@ -450,6 +450,32 @@ async fn delete_tag(core: State<'_, Arc<Core>>, keyword: String) -> Res<()> {
     core.delete_tag(&keyword).map_err(err)
 }
 
+#[tauri::command]
+async fn list_signatures(core: State<'_, Arc<Core>>) -> Res<mail_core::signatures::Signatures> {
+    core.signatures().map_err(err)
+}
+
+/// Create (id omitted) or change a signature; returns its id.
+#[tauri::command]
+async fn save_signature(core: State<'_, Arc<Core>>, id: Option<i64>, name: String, html: String) -> Res<i64> {
+    core.save_signature(id, &name, &html).map_err(err)
+}
+
+#[tauri::command]
+async fn delete_signature(core: State<'_, Arc<Core>>, id: i64) -> Res<()> {
+    core.delete_signature(id).map_err(err)
+}
+
+#[tauri::command]
+async fn set_signature_defaults(
+    core: State<'_, Arc<Core>>,
+    account_id: i64,
+    new_id: Option<i64>,
+    reply_id: Option<i64>,
+) -> Res<()> {
+    core.set_signature_defaults(account_id, new_id, reply_id).map_err(err)
+}
+
 /// "0.1.44 (8ff8ea1)": the same for a commit on every machine (see build.rs).
 fn version_label() -> String {
     match env!("APP_COMMIT") {
@@ -1095,6 +1121,10 @@ pub fn run() {
             open_folder,
             list_messages,
             list_groups,
+            list_signatures,
+            save_signature,
+            delete_signature,
+            set_signature_defaults,
             get_message,
             get_sync_status,
             set_read,

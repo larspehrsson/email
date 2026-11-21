@@ -4,6 +4,7 @@ import { api, errorMessage, events, type Addr, type Attachment, type FileInfo, t
 import { hideToast, showToast } from '../components/Toast';
 import { broadcast, closeThisWindow, composeDraftId, isComposeWindow, onBroadcast, openComposeWindow } from './windows';
 import { parseMailto } from './mailto';
+import { defaultSignature, loadSignatures, withSignature } from './signatures';
 
 // Writing mail happens in compose windows, one per draft (see lib/windows.ts). The main window
 // starts them (new message, reply, forward) and shows "Sending… Undo" once one sends; the core
@@ -34,6 +35,9 @@ export interface ComposeState {
   files?: FileInfo[];
   /** the user has changed something (only then is it a draft worth keeping or listing) */
   edited?: boolean;
+  /** the signature under the text (null: none), and its HTML as it was put in */
+  signatureId?: number | null;
+  signatureHtml?: string | null;
 }
 
 let keySeq = 0;
@@ -46,8 +50,8 @@ function request(c: ComposeState, draftId: number | null): SendRequest {
     cc: c.cc,
     bcc: c.bcc,
     subject: c.subject,
-    // Top-posting: the new text, then the original.
-    html: c.html + (c.quoteHtml ?? ''),
+    // Top-posting: the new text and the signature, then the original.
+    html: withSignature(c.html, c.signatureHtml) + (c.quoteHtml ?? ''),
     attachments: (c.files ?? []).map((f) => f.path),
     replyingTo: c.replyingTo,
     forwarding: c.forwarding,
@@ -73,9 +77,14 @@ function defaultAccount(): number | null {
   return f?.accountId ?? accounts()?.[0]?.id ?? null;
 }
 
-/** Save `state` as a new draft and open it in its own window. */
+/** Save `state` as a new draft and open it in its own window. A new message, reply or forward
+ *  gets the account's default signature for it (one reopened keeps what it had). */
 async function openDraftWindow(state: Omit<ComposeState, 'key'>): Promise<void> {
   try {
+    if (state.signatureId === undefined) {
+      const sig = defaultSignature(await loadSignatures().catch(() => ({ signatures: [], defaults: [] })), state.accountId, state.mode !== 'new');
+      state = { ...state, signatureId: sig?.id ?? null, signatureHtml: sig?.html ?? null };
+    }
     const id = await api.saveDraft(null, request({ ...state, key: 0 }, null));
     await openComposeWindow(id);
   } catch (e) {

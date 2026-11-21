@@ -149,6 +149,23 @@ export type ConversationScope = 'folder' | 'all';
  *  within each). The list is grouped by the same thing. */
 export type ListSort = 'received' | 'from' | 'to';
 
+/** A signature: a named block put under what's written (above a reply's quote). */
+export interface Signature {
+  id: number;
+  name: string;
+  html: string;
+}
+/** An account's default signatures (null: none). */
+export interface SignatureDefaults {
+  accountId: number;
+  newId: number | null;
+  replyId: number | null;
+}
+export interface Signatures {
+  signatures: Signature[];
+  defaults: SignatureDefaults[];
+}
+
 /** A run of rows in a sorted list: a sender, a recipient, or (by date, label null) a period. */
 export interface ListGroup {
   label: string | null;
@@ -420,6 +437,10 @@ export interface CommandMap {
   list_folders: { args: { accountId: number }; ret: Folder[] };
   open_folder: { args: { folderId: number }; ret: void };
   list_messages: { args: { folderId: number; offset: number; limit: number; sort: ListSort }; ret: MessagePage };
+  list_signatures: { args: undefined; ret: Signatures };
+  save_signature: { args: { id: number | null; name: string; html: string }; ret: number };
+  delete_signature: { args: { id: number }; ret: void };
+  set_signature_defaults: { args: { accountId: number; newId: number | null; replyId: number | null }; ret: void };
   list_groups: { args: { folderId: number; threaded: boolean; sort: ListSort; bounds: number[] }; ret: ListGroup[] };
   get_message: { args: { id: number; allowRemote: boolean }; ret: MessageDetail | null };
   search_messages: {

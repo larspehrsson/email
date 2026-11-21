@@ -4264,6 +4264,40 @@ html.macos .app.rail-mode .search-bar {
   outline: none;
   box-shadow: none;
 }
+/* the signature under the text: its picker, then how it will look */
+.cmp-sig {
+  margin: 4px 0 14px;
+  cursor: default;
+}
+.cmp-sig-select {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-3);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 1px 2px;
+  margin-left: -3px;
+  outline: none;
+}
+.cmp-sig-select:hover,
+.cmp-sig-select:focus-visible {
+  border-color: var(--sep-strong);
+  color: var(--text-2);
+}
+.cmp-sig-body {
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.cmp-sig-body p {
+  margin: 0;
+}
+.cmp-sig-body a {
+  color: var(--accent);
+}
 .cmp-editor .ProseMirror li > p {
   margin: 0;
 }
@@ -4820,4 +4854,105 @@ body.dragging-account * {
 .st-default {
   margin-left: 8px;
   font-size: 12px;
+}
+
+/* Settings › Signatures */
+.st-sigs {
+  display: flex;
+  flex-direction: column;
+}
+.sig-cols {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  gap: 16px;
+  min-height: 230px;
+}
+.sig-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-right: 1px solid var(--sep);
+  padding-right: 12px;
+}
+.sig-item {
+  text-align: left;
+  font-size: 13px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sig-item:hover {
+  background: var(--bg-hover);
+}
+.sig-item.on {
+  background: var(--sel-folder-bg);
+  color: var(--sel-folder-fg);
+  font-weight: 600;
+}
+.sig-add {
+  align-self: flex-start;
+  margin-top: 6px;
+  font-size: 12.5px;
+}
+.sig-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.sig-edit.empty .sig-toolbar,
+.sig-edit.empty .sig-editor,
+.sig-edit.empty .sig-name {
+  display: none;
+}
+.sig-name {
+  width: 100%;
+}
+.sig-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.sig-delete {
+  font-size: 12.5px;
+  color: var(--danger, #d93025);
+}
+.sig-editor {
+  flex: 1;
+  border: 1px solid var(--sep-strong);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: var(--bg-reader);
+  cursor: text;
+}
+.sig-editor .ProseMirror {
+  min-height: 110px;
+}
+.sig-none {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+.sig-defaults-head {
+  margin: 6px 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.sig-defaults {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 170px 170px;
+  gap: 6px 10px;
+  align-items: center;
+  font-size: 13px;
+}
+.sig-acct {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sig-default {
+  width: 100%;
 }

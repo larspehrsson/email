@@ -22,14 +22,16 @@ import { MARK_COLORS } from '../lib/accountMarks';
 import { AccountTools } from './AccountTools';
 import { fmtNum, fmtSize, loadPref, savePref } from '../lib/format';
 import { AccountDot } from './FolderSwitcher';
+import { SignaturesSection } from './SignatureSettings';
 
 // Settings: sections on the left, the chosen one on the right (each with its own heading,
 // scrolling and buttons). Fixed size, so switching sections never moves the dialog.
 
-export type SettingsSection = 'general' | 'accounts' | 'notifications' | 'keyboard' | 'troubleshooting';
+export type SettingsSection = 'general' | 'accounts' | 'signatures' | 'notifications' | 'keyboard' | 'troubleshooting';
 const SECTIONS: { id: SettingsSection; title: string }[] = [
   { id: 'general', title: 'General' },
   { id: 'accounts', title: 'Accounts' },
+  { id: 'signatures', title: 'Signatures' },
   { id: 'notifications', title: 'Notifications' },
   { id: 'keyboard', title: 'Keyboard' },
   { id: 'troubleshooting', title: 'Troubleshooting' },
@@ -809,6 +811,9 @@ function Panel() {
             </Match>
             <Match when={section() === 'accounts'}>
               <AccountsSection />
+            </Match>
+            <Match when={section() === 'signatures'}>
+              <SignaturesSection />
             </Match>
             <Match when={section() === 'notifications'}>
               <NotificationsSection />

@@ -124,6 +124,10 @@ interface SyncStatus {
 | `list_folders` | `{ accountId }` | `Folder[]` |
 | `open_folder` | `{ folderId }` | `void` — tells sync engine to prioritise this folder |
 | `list_messages` | `{ folderId, offset, limit, sort }` | `{ total: number, messages: MessageSummary[] }` in `sort`'s order (`'received'`: newest first; `'from'` / `'to'`: by sender / first recipient as shown, case-folded, A to Z, nobody last, newest first within each) |
+| `list_signatures` | — | `{ signatures: { id, name, html }[], defaults: { accountId, newId, replyId }[] }` |
+| `save_signature` | `{ id: number \| null, name, html }` | `number` — create (`id` null) or change; HTML sanitized to plain formatting; error if the name is empty |
+| `delete_signature` | `{ id }` | `void` — accounts using it by default then have none |
+| `set_signature_defaults` | `{ accountId, newId, replyId }` | `void` — the account's default signature for new messages and for replies / forwards (null: none) |
 | `list_groups` | `{ folderId, threaded, sort, bounds }` | `{ label: string \| null, count }[]` — the list's groups in its order, counts adding up to its rows. By date (and always for conversations, by their newest message here), one count per period that `bounds` (Unix seconds, newest first) cut: `date >= bounds[0]`, then each below the one before, the last older than every bound; `label` null. By sender / recipient, one per person, `label` as shown (`""`: nobody) |
 | `get_message` | `{ id, allowRemote }` | `MessageDetail \| null` — null means not downloaded yet; core queues it at top priority and emits `message-ready` |
 | `list_threads` | `{ folderId, offset, limit, scope, includeTrash }` | `{ total: number, threads: ThreadSummary[] }` newest first — threaded counterpart of `list_messages`. A conversation is listed if any of its messages is in `folderId`; summary fields (count, participants, unread, flagged, attachments, snippet, latestMessageId) cover only the messages `scope`/`includeTrash` select. |

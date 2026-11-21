@@ -805,3 +805,43 @@ describe('sorting', () => {
     }
   });
 });
+
+describe('signatures', () => {
+  test('made in Settings, a new message gets the account default; it can be switched or taken off', async () => {
+    const { page, errors, context, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+,' : 'Control+,');
+      await page.locator('.st-nav-item', { hasText: 'Signatures' }).click();
+      await page.locator('.sig-add').click();
+      await page.waitForFunction(() => document.querySelector('.sig-name')?.value === 'Signature');
+      await page.locator('.sig-name').fill('Work');
+      await page.locator('.sig-editor .ProseMirror').click();
+      await page.keyboard.type('Lars Pehrsson, Example AB');
+      await page.waitForTimeout(700);
+      await page.locator('.sig-add').click();
+      await page.waitForFunction(() => document.querySelector('.sig-name')?.value === 'Signature 2');
+      await page.locator('.sig-name').fill('Short');
+      await page.locator('.sig-editor .ProseMirror').click();
+      await page.keyboard.type('/L');
+      await page.waitForTimeout(700);
+      assert.deepEqual(await page.locator('.sig-item').allTextContents(), ['Work', 'Short']);
+      await page.locator('select.sig-default').first().selectOption({ label: 'Work' });
+      await page.waitForTimeout(200);
+      await page.keyboard.press('Escape');
+      const popup = context.waitForEvent('page');
+      await page.keyboard.press('c');
+      const w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      await w.locator('.cmp-sig-body').waitFor();
+      assert.equal((await w.locator('.cmp-sig-body').textContent()).trim(), 'Lars Pehrsson, Example AB');
+      await w.locator('select.cmp-sig-select').selectOption({ label: 'Short' });
+      await hasText(w.locator('.cmp-sig-body'), '/L', 'switched');
+      await w.locator('select.cmp-sig-select').selectOption({ label: 'No signature' });
+      await w.waitForTimeout(100);
+      assert.equal(await w.locator('.cmp-sig-body').count(), 0, 'taken off');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});

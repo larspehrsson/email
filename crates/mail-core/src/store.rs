@@ -154,6 +154,19 @@ CREATE TABLE IF NOT EXISTS tags (
     position INTEGER NOT NULL
 );
 
+-- Signatures and each account's default ones (see crate::signatures).
+CREATE TABLE IF NOT EXISTS signatures (
+    id       INTEGER PRIMARY KEY,
+    name     TEXT NOT NULL,
+    html     TEXT NOT NULL,
+    position INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS signature_defaults (
+    account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    new_id     INTEGER REFERENCES signatures(id) ON DELETE SET NULL,
+    reply_id   INTEGER REFERENCES signatures(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS entries (
     folder_id  INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
     message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -258,6 +271,17 @@ const MIGRATIONS: &[fn(&Connection) -> Result<()>] = &[
     },
     // 12: Microsoft accounts can keep tags and snooze through Graph
     |db| Ok(db.execute_batch("ALTER TABLE accounts ADD COLUMN graph INTEGER;")?),
+    // 13: signatures, and each account's default ones
+    |db| {
+        Ok(db.execute_batch(
+            "CREATE TABLE IF NOT EXISTS signatures (
+                 id INTEGER PRIMARY KEY, name TEXT NOT NULL, html TEXT NOT NULL, position INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS signature_defaults (
+                 account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+                 new_id INTEGER REFERENCES signatures(id) ON DELETE SET NULL,
+                 reply_id INTEGER REFERENCES signatures(id) ON DELETE SET NULL);",
+        )?)
+    },
 ];
 const SCHEMA_VERSION: i64 = BASE_VERSION + MIGRATIONS.len() as i64;
 
@@ -3235,6 +3259,67 @@ impl Store {
         Ok(keyword)
     }
 
+    // ---- signatures -------------------------------------------------------------------------
+
+    pub fn signatures(&self) -> Result<crate::signatures::Signatures> {
+        use crate::signatures::{Signature, SignatureDefaults, Signatures};
+        let db = self.rdb();
+        let signatures = db
+            .prepare_cached("SELECT id, name, html FROM signatures ORDER BY position, id")?
+            .query_map([], |r| Ok(Signature { id: r.get(0)?, name: r.get(1)?, html: r.get(2)? }))?
+            .collect::<rusqlite::Result<_>>()?;
+        let defaults = db
+            .prepare_cached("SELECT account_id, new_id, reply_id FROM signature_defaults ORDER BY account_id")?
+            .query_map([], |r| Ok(SignatureDefaults { account_id: r.get(0)?, new_id: r.get(1)?, reply_id: r.get(2)? }))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(Signatures { signatures, defaults })
+    }
+
+    /// Create (`id` None) or change a signature; returns its id. A new one is listed last.
+    pub fn save_signature(&self, id: Option<i64>, name: &str, html: &str) -> Result<i64> {
+        let name = name.trim();
+        if name.is_empty() {
+            anyhow::bail!("A signature needs a name.");
+        }
+        let db = self.db();
+        match id {
+            Some(id) => {
+                let n = db.execute("UPDATE signatures SET name=?2, html=?3 WHERE id=?1", params![id, name, html])?;
+                if n == 0 {
+                    anyhow::bail!("That signature no longer exists.");
+                }
+                Ok(id)
+            }
+            None => {
+                db.execute(
+                    "INSERT INTO signatures (name, html, position)
+                     VALUES (?1, ?2, (SELECT coalesce(max(position), -1) + 1 FROM signatures))",
+                    params![name, html],
+                )?;
+                Ok(db.last_insert_rowid())
+            }
+        }
+    }
+
+    /// Delete a signature; accounts using it by default then have none.
+    pub fn delete_signature(&self, id: i64) -> Result<()> {
+        let db = self.db();
+        db.execute("UPDATE signature_defaults SET new_id=NULL WHERE new_id=?1", [id])?;
+        db.execute("UPDATE signature_defaults SET reply_id=NULL WHERE reply_id=?1", [id])?;
+        db.execute("DELETE FROM signatures WHERE id=?1", [id])?;
+        Ok(())
+    }
+
+    /// An account's default signatures, for new messages and for replies and forwards.
+    pub fn set_signature_defaults(&self, account_id: i64, new_id: Option<i64>, reply_id: Option<i64>) -> Result<()> {
+        self.db().execute(
+            "INSERT INTO signature_defaults (account_id, new_id, reply_id) VALUES (?1, ?2, ?3)
+             ON CONFLICT(account_id) DO UPDATE SET new_id=excluded.new_id, reply_id=excluded.reply_id",
+            params![account_id, new_id, reply_id],
+        )?;
+        Ok(())
+    }
+
     /// Forget a tag's definition (messages keep the keyword; it's then shown as an undefined tag).
     pub fn delete_tag(&self, keyword: &str) -> Result<()> {
         self.db().execute("DELETE FROM tags WHERE keyword=?1", [crate::tags::normalize(keyword)])?;
@@ -3727,6 +3812,27 @@ mod tests {
     }
 
     #[test]
+    fn signatures_and_defaults() {
+        let dir = std::env::temp_dir().join(format!("mail-core-sigs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = Store::open(&dir).unwrap();
+        let a = store.insert_account("x@example.com", "x", Provider::Imap, "h", 993).unwrap();
+        let work = store.save_signature(None, " Work ", "<p><b>Lars</b></p>").unwrap();
+        let home = store.save_signature(None, "Home", "<p>L</p>").unwrap();
+        assert!(store.save_signature(None, "  ", "x").is_err(), "needs a name");
+        store.save_signature(Some(home), "Home", "<p>Lars</p>").unwrap();
+        store.set_signature_defaults(a.id, Some(work), Some(home)).unwrap();
+        let s = store.signatures().unwrap();
+        assert_eq!(s.signatures.iter().map(|x| (x.name.as_str(), x.html.as_str())).collect::<Vec<_>>(), [("Work", "<p><b>Lars</b></p>"), ("Home", "<p>Lars</p>")]);
+        assert_eq!((s.defaults[0].new_id, s.defaults[0].reply_id), (Some(work), Some(home)));
+        store.delete_signature(work).unwrap();
+        let s = store.signatures().unwrap();
+        assert_eq!(s.signatures.len(), 1);
+        assert_eq!((s.defaults[0].new_id, s.defaults[0].reply_id), (None, Some(home)), "a deleted default goes");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn sorted_lists_positions_and_groups_agree() {
         let dir = std::env::temp_dir().join(format!("mail-core-sorted-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -3936,6 +4042,7 @@ mod tests {
                  ALTER TABLE accounts DROP COLUMN mark_letter; ALTER TABLE accounts DROP COLUMN mark_color;
                  ALTER TABLE accounts DROP COLUMN graph;
                  ALTER TABLE messages DROP COLUMN attachments_stored;
+                 DROP TABLE signature_defaults; DROP TABLE signatures;
                  PRAGMA user_version={BASE_VERSION};"
             ))
             .unwrap();
@@ -3943,6 +4050,7 @@ mod tests {
         let store = Store::open(&dir).unwrap();
         assert_eq!(store.accounts().unwrap().len(), 1);
         assert!(!store.keeps_attachments(store.accounts().unwrap()[0].id).unwrap());
+        assert!(store.signatures().unwrap().signatures.is_empty());
         drop(store);
         assert_eq!(version(&dir), SCHEMA_VERSION);
         // From a newer build: refused, untouched.

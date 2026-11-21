@@ -30,6 +30,7 @@ import { AutoHeightFrame } from './Conversation';
 import { buildSrcdoc } from './Reader';
 import { fmtSize } from '../lib/format';
 import { showToast } from './Toast';
+import { defaultSignature, loadSignatures, signatureById, sigs } from '../lib/signatures';
 
 /** The quoted original under the text: read-only, at the composer's margins. */
 const QUOTE_FRAME_CSS = 'html{overflow-y:hidden}body{padding:0 0 12px}';
@@ -528,6 +529,22 @@ export function Composer() {
   const accountList = () => accounts() ?? [];
   const from = () => accountList().find((a) => a.id === c().accountId);
 
+  // Signatures: the one picked shows under the text (it isn't part of the editor, so switching
+  // never touches what's written). Another account: its default, unless one was picked by hand.
+  onMount(() => void loadSignatures().catch(() => {}));
+  const pickSignature = (id: number | null) => {
+    const s = signatureById(id);
+    updateCompose({ signatureId: s?.id ?? null, signatureHtml: s?.html ?? null });
+  };
+  const changeAccount = (accountId: number) => {
+    const cur = c();
+    const reply = cur.mode !== 'new';
+    const was = defaultSignature(sigs(), cur.accountId, reply);
+    if ((cur.signatureId ?? null) !== (was?.id ?? null)) return updateCompose({ accountId });
+    const next = defaultSignature(sigs(), accountId, reply);
+    updateCompose({ accountId, signatureId: next?.id ?? null, signatureHtml: next?.html ?? null });
+  };
+
   // Reply ⇄ Reply all: the recipients each would fill in, to switch between them.
   const [replyCtx, setReplyCtx] = createSignal<{ reply: ReplyRecipients; replyAll: ReplyRecipients } | null>(null);
   onMount(() => {
@@ -632,7 +649,7 @@ export function Composer() {
               class="cmp-select"
               aria-label="From"
               value={String(c().accountId)}
-              onChange={(e) => updateCompose({ accountId: Number(e.currentTarget.value) })}
+              onChange={(e) => changeAccount(Number(e.currentTarget.value))}
             >
               <For each={accountList()}>{(a) => <option value={String(a.id)}>{a.email}</option>}</For>
             </select>
@@ -680,6 +697,24 @@ export function Composer() {
       </Show>
       <div class="cmp-scroll" onMouseDown={(e) => e.target === e.currentTarget && (e.preventDefault(), editor()?.commands.focus('end'))}>
         <div class="cmp-editor" classList={{ 'has-quote': !!c().quoteHtml || c().fwdAttachments.length > 0 }} ref={editorEl} />
+        <Show when={sigs().signatures.length > 0 || c().signatureHtml}>
+          <div class="cmp-sig" onMouseDown={(e) => e.stopPropagation()}>
+            <select
+              class="cmp-sig-select"
+              aria-label="Signature"
+              title="Signature"
+              value={String(c().signatureId ?? '')}
+              onChange={(e) => pickSignature(e.currentTarget.value ? Number(e.currentTarget.value) : null)}
+            >
+              <option value="">No signature</option>
+              <For each={sigs().signatures}>{(s) => <option value={String(s.id)}>{s.name}</option>}</For>
+            </select>
+            <Show when={c().signatureHtml}>
+              {/* Sanitized by the core when it was saved. */}
+              <div class="cmp-sig-body" innerHTML={c().signatureHtml!} />
+            </Show>
+          </div>
+        </Show>
         <Show when={c().fwdAttachments.length + (c().files?.length ?? 0) > 0}>
           <div class="cmp-atts" aria-label="Attachments">
             <For each={c().files ?? []}>

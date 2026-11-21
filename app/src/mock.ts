@@ -19,6 +19,8 @@ import type {
   MessageSummary,
   ConversationScope,
   ListSort,
+  Signature,
+  SignatureDefaults,
   TagDef,
   Action,
   ActionResult,
@@ -574,6 +576,16 @@ export function createMockBackend(): Backend {
   };
 
   const accounts: Account[] = [];
+  // In localStorage, like drafts: compose popups (other pages) see what Settings saved.
+  type SigStore = { signatures: Signature[]; defaults: SignatureDefaults[]; seq: number };
+  const sigLoad = (): SigStore => {
+    try {
+      return JSON.parse(localStorage.getItem('mock.signatures') ?? '') as SigStore;
+    } catch {
+      return { signatures: [], defaults: [], seq: 0 };
+    }
+  };
+  const sigSave = (st: SigStore) => localStorage.setItem('mock.signatures', JSON.stringify(st));
   const folders = new Map<number, Folder>();
   const folderMsgs = new Map<number, MessageSummary[]>();
   const byId = new Map<number, MessageSummary>();
@@ -1748,6 +1760,42 @@ export function createMockBackend(): Backend {
     async index_of({ folderId, id, threaded, sort }) {
       await sleep(3);
       return indexIn(folderId, id, threaded, sort);
+    },
+    async list_signatures() {
+      await sleep(3);
+      const st = sigLoad();
+      return { signatures: st.signatures, defaults: st.defaults };
+    },
+    async save_signature({ id, name, html }) {
+      await sleep(3);
+      if (!name.trim()) throw 'A signature needs a name.';
+      const st = sigLoad();
+      if (id != null) {
+        const s = st.signatures.find((x) => x.id === id);
+        if (!s) throw 'That signature no longer exists.';
+        Object.assign(s, { name: name.trim(), html });
+      } else {
+        id = ++st.seq;
+        st.signatures.push({ id, name: name.trim(), html });
+      }
+      sigSave(st);
+      return id;
+    },
+    async delete_signature({ id }) {
+      await sleep(3);
+      const st = sigLoad();
+      st.signatures = st.signatures.filter((s) => s.id !== id);
+      for (const d of st.defaults) {
+        if (d.newId === id) d.newId = null;
+        if (d.replyId === id) d.replyId = null;
+      }
+      sigSave(st);
+    },
+    async set_signature_defaults({ accountId, newId, replyId }) {
+      await sleep(3);
+      const st = sigLoad();
+      st.defaults = [...st.defaults.filter((d) => d.accountId !== accountId), { accountId, newId, replyId }];
+      sigSave(st);
     },
     async list_groups({ folderId, threaded, sort, bounds }) {
       await sleep(3);

@@ -21,6 +21,7 @@ import type {
   ListGroup,
   ListSort,
   SearchField,
+  Signatures,
   EventMap,
   EventName,
   Folder,
@@ -194,6 +195,13 @@ export const api = {
   /** Create (keyword null) or rename/recolour; returns the keyword. */
   setTag: (keyword: string | null, name: string, color: string): Promise<string> => call('set_tag', { keyword, name, color }),
   deleteTag: (keyword: string): Promise<void> => call('delete_tag', { keyword }),
+  listSignatures: (): Promise<Signatures> => call('list_signatures', undefined),
+  /** Create (id null) or change a signature; returns its id. */
+  saveSignature: (id: number | null, name: string, html: string): Promise<number> => call('save_signature', { id, name, html }),
+  deleteSignature: (id: number): Promise<void> => call('delete_signature', { id }),
+  /** An account's default signatures: for new messages, and for replies and forwards. */
+  setSignatureDefaults: (accountId: number, newId: number | null, replyId: number | null): Promise<void> =>
+    call('set_signature_defaults', { accountId, newId, replyId }),
   appVersion: (): Promise<string> => call('app_version', undefined),
   revealPath: (path: string): Promise<void> => call('reveal_path', { path }),
   setRead: (id: number, read: boolean): Promise<void> => call('set_read', { id, read }),

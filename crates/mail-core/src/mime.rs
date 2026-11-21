@@ -477,6 +477,12 @@ pub fn sanitize_html(html: &str, cid_map: &HashMap<String, String>) -> String {
         .to_string()
 }
 
+/// A signature as kept: shown in the composer itself (not a sandboxed frame), so only plain
+/// formatting stays (ammonia's defaults: no styles, scripts or handlers; links open safely).
+pub fn sanitize_signature(html: &str) -> String {
+    ammonia::Builder::default().link_rel(Some("noopener noreferrer")).clean(html).to_string()
+}
+
 fn replace_cids(html: &str, cid_map: &HashMap<String, String>) -> String {
     let mut out = html.to_string();
     for (cid, data) in cid_map {
@@ -503,6 +509,13 @@ mod tests {
         // left alone: not a reference, an unknown name, a control character
         assert_eq!(clean_subject("AT&T; R&D & more &copy; &#0;"), "AT&T; R&D & more &copy; &#0;");
         assert_eq!(clean_subject("plain"), "plain");
+    }
+
+    #[test]
+    fn signatures_keep_formatting_only() {
+        let out = sanitize_signature(r#"<p><b>Lars</b> <a href="https://x.se" onclick="x()">x.se</a></p><style>body{display:none}</style><script>1</script>"#);
+        assert!(out.contains("<b>Lars</b>") && out.contains(r#"href="https://x.se""#));
+        assert!(!out.contains("onclick") && !out.contains("<style") && !out.contains("script"));
     }
 
     #[test]

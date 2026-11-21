@@ -42,7 +42,8 @@ arrives as it's delivered. Conversations are grouped together, even across folde
 
 **Writing mail** happens in its own window: rich text, attachments by drag and drop, replies
 quoted below your text, and a switch between Reply and Reply all. Addresses are suggested from
-the people you write to most. Sending waits 10 seconds so you can undo it.
+the people you write to most. Signatures (Settings › Signatures) go under your text, a default
+per account for new messages and for replies, switchable in the message. Sending waits 10 seconds so you can undo it.
 
 <img src="docs/screenshots/compose.png" alt="A compose window with address suggestions" width="600">
 
