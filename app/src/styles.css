@@ -5481,3 +5481,46 @@ body.dragging-account * {
 .sig-editor .ProseMirror-selectednode img {
   outline: 2px solid var(--accent);
 }
+
+/* several rows picked: the reader's place */
+.multi-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 32px;
+  text-align: center;
+  color: var(--text-2);
+}
+.multi-hint {
+  max-width: 420px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.multi-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: 520px;
+  width: 100%;
+  text-align: left;
+  font-size: 13px;
+  color: var(--text);
+}
+.multi-list li {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--sep);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.multi-list .multi-more {
+  color: var(--text-3);
+  border-bottom: 0;
+}
+.cmp-att-msg .icon {
+  flex: none;
+}

@@ -33,6 +33,8 @@ export interface ComposeState {
   fwdAttachments: Attachment[];
   /** files attached from disk */
   files?: FileInfo[];
+  /** whole messages sent along as .eml attachments (Forward of several) */
+  fwdMessages?: { id: number; subject: string; size: number }[];
   /** the user has changed something (only then is it a draft worth keeping or listing) */
   edited?: boolean;
   /** the signature under the text (null: none), and its HTML as it was put in */
@@ -56,6 +58,7 @@ function request(c: ComposeState, draftId: number | null): SendRequest {
     replyingTo: c.replyingTo,
     forwarding: c.forwarding,
     forwardAttachments: c.fwdAttachments.map((a) => a.index),
+    forwardMessages: (c.fwdMessages ?? []).map((m) => m.id),
     draft: c,
     draftId,
     listed: !!c.edited,
@@ -128,6 +131,28 @@ export function newMessageTo(to: Addr[]): void {
     forwarding: null,
     quoteHtml: null,
     fwdAttachments: [],
+  });
+}
+
+/** Forward several messages at once: a new message with each attached whole (.eml), from the
+ *  account they're in. */
+export function forwardAsAttachments(accountId: number, messages: { id: number; subject: string; size: number }[]): void {
+  if (!messages.length) return;
+  const one = messages.length === 1 ? messages[0]!.subject.trim() : '';
+  void openDraftWindow({
+    mode: 'new',
+    accountId,
+    to: [],
+    cc: [],
+    bcc: [],
+    showCc: false,
+    subject: one ? `Fwd: ${one.replace(/^(fwd?|fw):\s*/i, '')}` : `Fwd: ${messages.length} messages`,
+    html: '',
+    replyingTo: null,
+    forwarding: null,
+    quoteHtml: null,
+    fwdAttachments: [],
+    fwdMessages: messages,
   });
 }
 
@@ -259,7 +284,11 @@ export const GMAIL_LIMIT = 25 * 1024 * 1024;
 
 /** Total size of everything attached (files and a forward's originals), bytes. */
 export function attachedBytes(c: ComposeState): number {
-  return (c.files ?? []).reduce((n, f) => n + f.size, 0) + c.fwdAttachments.reduce((n, a) => n + a.size, 0);
+  return (
+    (c.files ?? []).reduce((n, f) => n + f.size, 0) +
+    c.fwdAttachments.reduce((n, a) => n + a.size, 0) +
+    (c.fwdMessages ?? []).reduce((n, m) => n + m.size, 0)
+  );
 }
 
 export function updateCompose(patch: Partial<ComposeState>): void {

@@ -83,10 +83,13 @@ you type an address.
 ![The address book](docs/screenshots/contacts.png)
 
 **Everything from a sender** at a glance: Ctrl/⌘+2 opens a panel beside the message with all
-the mail from whoever sent it, in every folder. Tick them all and delete or archive at once —
-the quickest way to clear out a newsletter.
+the mail from whoever sent it, in every folder. Select them all (Ctrl/⌘+A) and delete or archive
+at once — the quickest way to clear out a newsletter.
 
-![The sender panel beside a message, three messages ticked](docs/screenshots/sender.png)
+![The sender panel beside a message, three messages picked](docs/screenshots/sender.png)
+
+**Several at once:** Ctrl/⌘-click or Shift-click messages in the list (or Ctrl/⌘+A for all of
+them) to delete, move, mark or tag them together, or forward them as attachments.
 
 **Getting around:** fold the sidebar into a slim rail (Ctrl/⌘+1), or jump to any folder in any
 account by typing its name (Ctrl/⌘+G).

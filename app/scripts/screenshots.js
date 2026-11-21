@@ -136,15 +136,15 @@ const SCENES = [
     },
   },
   {
-    // Ctrl/⌘+2: everything from the sender beside the message, some ticked to delete.
+    // Ctrl/⌘+2: everything from the sender beside the message, three picked to delete.
     name: 'sender',
     async run({ page, shot }) {
       await openRow(page, '.row:has-text("Invoicely") >> nth=0');
       await page.keyboard.press('Control+2');
       await page.waitForSelector('.sp-row');
-      await page.click('.sp-check >> nth=1');
-      await page.click('.sp-check >> nth=2');
-      await page.click('.sp-check >> nth=3');
+      await page.click('.sp-row >> nth=1');
+      await page.click('.sp-row >> nth=3', { modifiers: ['Shift'] });
+      await page.waitForTimeout(300);
       await shot(page);
     },
   },

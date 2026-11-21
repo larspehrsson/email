@@ -21,6 +21,7 @@ import type {
   ListGroup,
   ListSort,
   ListFilter,
+  SelectionInfo,
   SearchField,
   Signatures,
   SenderPage,
@@ -110,6 +111,12 @@ export const api = {
   openFolder: (folderId: number): Promise<void> => call('open_folder', { folderId }),
   /** Mark every message in the folder read; how many were unread. */
   markFolderRead: (folderId: number): Promise<number> => call('mark_folder_read', { folderId }),
+  /** The list's row ids from `offset` in its order (⇧-click ranges, Select All). */
+  listItemIds: (folderId: number, threaded: boolean, sort: ListSort, filter: ListFilter | undefined, offset: number, limit: number): Promise<number[]> =>
+    call('list_item_ids', { folderId, threaded, sort, filter, offset, limit }),
+  /** The messages behind several picked rows, with their state. */
+  selectionInfo: (folderId: number, items: number[], threaded: boolean): Promise<SelectionInfo> =>
+    call('selection_info', { folderId, items, threaded }),
   listMessages: (folderId: number, offset: number, limit: number, sort: ListSort = 'received', filter?: ListFilter): Promise<MessagePage> =>
     call('list_messages', { folderId, offset, limit, sort, filter }),
   /** The groups the folder's list shows, in its order (counts add up to its rows). By date,

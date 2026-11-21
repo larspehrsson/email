@@ -1609,6 +1609,37 @@ export function createMockBackend(): Backend {
       await latency();
       return [...folders.values()].filter((f) => f.accountId === accountId).map((f) => ({ ...f, path: [...f.path] }));
     },
+    async list_item_ids({ folderId, threaded, sort, filter, offset, limit }) {
+      await sleep(3);
+      if (!threaded) return sortedIn(folderId, sort ?? 'received', filter).slice(offset, offset + limit).map((m) => m.id);
+      const order: number[] = [];
+      const seen = new Set<number>();
+      for (const m of filteredIn(folderId, filter, true)) {
+        const tid = threadOf(m);
+        if (!seen.has(tid)) {
+          seen.add(tid);
+          order.push(tid);
+        }
+      }
+      return order.slice(offset, offset + limit);
+    },
+    async selection_info({ folderId, items, threaded }) {
+      await sleep(3);
+      const want = new Set(items);
+      const ms = (folderMsgs.get(folderId) ?? []).filter((m) => want.has(threaded ? threadOf(m) : m.id));
+      const now = Date.now() / 1000;
+      const snoozes = ms.map((m) => m.snoozedUntil ?? 0).filter((t) => t > now);
+      return {
+        ids: ms.map((m) => m.id),
+        anyUnread: ms.some((m) => m.unread),
+        allFlagged: ms.length > 0 && ms.every((m) => m.flagged),
+        tagSets: ms.map((m) => m.tags ?? []),
+        snoozedUntil: snoozes.length ? Math.max(...snoozes) : null,
+        size: ms.reduce((n, m) => n + (m.size ?? 0), 0),
+        subjects: ms.map((m) => m.subject),
+        sizes: ms.map((m) => m.size ?? 0),
+      };
+    },
     async mark_folder_read({ folderId }) {
       await sleep(3);
       const unread = (folderMsgs.get(folderId) ?? []).filter((m) => m.unread);

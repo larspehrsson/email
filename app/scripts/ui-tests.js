@@ -1004,34 +1004,126 @@ describe('signature pictures', () => {
 });
 
 describe('sender pane', () => {
-  test('shows everything from the sender; tick all, delete, undo', async () => {
+  test('shows everything from the sender; select all, delete, undo', async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {
       await page.locator('.folder-layer .row').first().click();
       const from = (await page.locator('.folder-layer .row.selected .row-from').textContent()).trim();
       await page.keyboard.press('ControlOrMeta+2');
       await hasText(page.locator('.sp-name'), from, 'the sender of the message on screen');
-      const count = async () => Number((await page.locator('.sp-all span').textContent()).replace(/[^\d]/g, ''));
+      /** The sender's total ("12 messages", "3 of 12 selected"). */
+      const count = async () => {
+        const t = await page.locator('.sp-all').textContent();
+        return Number((t.includes(' of ') ? t.split(' of ')[1] : t).replace(/[^\d]/g, ''));
+      };
       const before = await count();
       assert.ok(before >= 1);
       assert.equal(await page.locator('.sp-row.current').count(), 1, 'the open one is marked');
-      await page.locator('.sp-all input').check();
-      const ticked = await page.locator('.sp-row.on').count();
-      assert.equal(ticked, await page.locator('.sp-row').count(), 'all shown are ticked');
-      await page.locator('.sp-bar [aria-label="Delete"]').click();
+      assert.equal(await page.locator('.sp-row input[type="checkbox"]').count(), 0, 'no tick boxes');
+      // A click picks one; ⌘/Ctrl+A in the panel all of them.
+      await page.locator('.sp-row').first().click();
+      assert.equal(await page.locator('.sp-row.on').count(), 1);
+      await page.keyboard.press('ControlOrMeta+a');
+      // (Everything from the sender comes in first, then it's all picked.)
+      await page.waitForFunction(() => document.querySelectorAll('.sp-row.on').length > 1);
+      const picked = await page.locator('.sp-row.on').count();
+      assert.equal(picked, await page.locator('.sp-row').count(), 'all shown are picked');
+      assert.equal(await page.locator('.folder-layer .multi-pane').count(), 0, "the list's selection is its own");
+      await page.keyboard.press('Delete');
       await page.locator('.toast', { hasText: 'Deleted' }).waitFor();
-      await page.waitForFunction((n) => {
-        const t = document.querySelector('.sp-all span')?.textContent ?? '';
-        return Number(t.replace(/[^\d]/g, '')) === n;
-      }, before - ticked);
+      await page.waitForFunction(
+        (n) => {
+          const t = document.querySelector('.sp-all')?.textContent ?? '';
+          return Number((t.includes(' of ') ? t.split(' of ')[1] : t).replace(/[^\d]/g, '')) === n;
+        },
+        before - picked,
+      );
       await page.locator('.toast button', { hasText: 'Undo' }).click();
       await page.waitForFunction((n) => {
-        const t = document.querySelector('.sp-all span')?.textContent ?? '';
-        return Number(t.replace(/[^\d]/g, '')) === n;
+        const t = document.querySelector('.sp-all')?.textContent ?? '';
+        return Number((t.includes(' of ') ? t.split(' of ')[1] : t).replace(/[^\d]/g, '')) === n;
       }, before);
       // Off again, remembered.
       await page.keyboard.press('ControlOrMeta+2');
       assert.equal(await page.locator('.sender-pane').count(), 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('several messages', () => {
+  const rows = (page) => page.locator('.folder-layer .row');
+  const title = (page) => page.locator('.multi-pane .reader-subject');
+
+  test('⌘/Ctrl-click and ⇧-click pick rows; one Delete for all; Undo picks them again', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const ids = async () => page.locator('.folder-layer .row').evaluateAll((els) => els.map((e) => e.dataset.id));
+      const before = await ids();
+      const gone = before.slice(2, 6);
+      await rows(page).nth(0).click();
+      await rows(page).nth(2).click({ modifiers: ['ControlOrMeta'] });
+      await hasText(title(page), '2 messages selected', 'two picked');
+      assert.equal(await page.locator('.folder-layer .row.selected').count(), 2);
+      await rows(page).nth(5).click({ modifiers: ['Shift'] });
+      await hasText(title(page), '4 messages selected', 'rows 2 to 5');
+      await page.locator('.multi-pane [aria-label="Delete"]').click();
+      await page.locator('.toast', { hasText: 'Deleted 4 messages' }).waitFor();
+      await page.waitForTimeout(300);
+      assert.equal(await page.locator('.multi-pane').count(), 0, 'back to one');
+      const after = await ids();
+      assert.ok(gone.every((id) => !after.includes(id)), 'the four are gone');
+      assert.ok(after.includes(before[6]), 'the rows below moved up');
+      await page.locator('.toast button', { hasText: 'Undo' }).click();
+      await hasText(title(page), '4 messages selected', 'picked again');
+      await page.waitForFunction((g) => {
+        const shown = [...document.querySelectorAll('.folder-layer .row')].map((e) => e.dataset.id);
+        return g.every((id) => shown.includes(id));
+      }, gone);
+      // Esc: just the open one again.
+      await page.keyboard.press('Escape');
+      assert.equal(await page.locator('.multi-pane').count(), 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('⌘/Ctrl+A picks the whole folder, conversations too; ⇧-arrows extend', async () => {
+    const { page, errors, close } = await open({ threaded: true });
+    try {
+      const total = Number((await page.locator('.folder-layer .list-sub span').nth(2).textContent()).replace(/[^\d]/g, ''));
+      await rows(page).nth(1).click();
+      await page.keyboard.press('Shift+ArrowDown');
+      await page.keyboard.press('Shift+ArrowDown');
+      await hasText(title(page), '3 conversations selected', 'extended down');
+      await page.keyboard.press('ControlOrMeta+a');
+      await hasText(title(page), `${total.toLocaleString('en-US')} conversations selected`, 'all of them');
+      assert.match(await page.locator('.multi-pane .band-meta').textContent(), /messages/);
+      await page.keyboard.press('ArrowDown');
+      assert.equal(await page.locator('.multi-pane').count(), 0, 'moving on picks one again');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('forward several as attachments', async () => {
+    const { page, errors, context, close } = await open({ threaded: false });
+    try {
+      await rows(page).nth(0).click();
+      await rows(page).nth(1).click({ modifiers: ['ControlOrMeta'] });
+      await hasText(title(page), '2 messages selected', 'two picked');
+      const popup = context.waitForEvent('page');
+      await page.locator('.multi-pane [aria-label="Forward as attachments"]').click();
+      const w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      await w.locator('.cmp-att-msg').first().waitFor();
+      assert.equal(await w.locator('.cmp-att-msg').count(), 2);
+      assert.match(await w.locator('.cmp-att-msg .cmp-att-name').first().textContent(), /\.eml$/);
+      assert.equal(await w.locator('#cmp-subject').inputValue(), 'Fwd: 2 messages');
       assert.deepEqual(errors, []);
     } finally {
       await close();

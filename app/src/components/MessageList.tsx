@@ -52,7 +52,11 @@ import {
   filterOn,
   filterLabel,
   NO_FILTER,
+  picked,
+  setPicked,
+  multiPicked,
 } from '../state';
+import { platform } from '../lib/platform';
 import { CheckIcon, ClockIcon, FlagIcon, ForwardIcon, PaperclipIcon, ReplyIcon } from './Icons';
 
 /** A clock among the row's markers while a snooze is waiting to go off (its time on hover). */
@@ -472,6 +476,66 @@ export function MessageList(props: {
   });
 
   const isSelected = createSelector(selectedId);
+  /** Shown as selected: the rows picked together, or else the open one. */
+  const shownSelected = (id: number) => (multiPicked() ? picked().has(id) : isSelected(id));
+
+  // ---- picking several rows (not in search results): ⌘/Ctrl-click one more, ⇧-click a range,
+  // ⇧-arrows extend it, Select All takes every row (most not loaded: their ids come from the core).
+
+  /** Where ⇧ ranges start: the row clicked last without ⇧. */
+  let anchorIdx = -1;
+  const modKey = (e: MouseEvent | KeyboardEvent) => (platform === 'macos' ? e.metaKey : e.ctrlKey);
+  /** Ids of rows lo..hi (inclusive): from the loaded pages, else from the core. */
+  async function idsBetween(lo: number, hi: number): Promise<number[]> {
+    const out: number[] = [];
+    for (let k = lo; k <= hi; k++) {
+      const m = model.row(k);
+      if (!m) return api.listItemIds(folderId, threaded, sort, filterArg(), lo, hi - lo + 1);
+      out.push(m.id);
+    }
+    return out;
+  }
+  /** The ids picked now: those picked together, or the open row alone. */
+  const pickedNow = (): Set<number> => {
+    if (multiPicked()) return new Set(picked());
+    const id = untrack(selectedId);
+    return new Set(id != null ? [id] : []);
+  };
+  function togglePick(i: number) {
+    const m = model.row(i);
+    if (!m) return;
+    const next = pickedNow();
+    if (next.has(m.id)) next.delete(m.id);
+    else next.add(m.id);
+    anchorIdx = i;
+    if (next.size >= 2) {
+      setPicked(next);
+      setSelIndex(i);
+    } else {
+      // Back to one: it's the open one.
+      setPicked([]);
+      const only = [...next][0];
+      const k = only != null ? model.indexOfId(only) : -1;
+      if (k >= 0) selectIndex(k, false);
+    }
+  }
+  async function pickRange(i: number, add: boolean) {
+    const a = anchorIdx >= 0 ? anchorIdx : Math.max(0, selIndex());
+    const ids = await idsBetween(Math.min(a, i), Math.max(a, i));
+    const next = add ? pickedNow() : new Set<number>();
+    for (const id of ids) next.add(id);
+    setSelIndex(i);
+    if (next.size >= 2) setPicked(next);
+    else selectIndex(i, false);
+  }
+  async function pickAll() {
+    if (search) return;
+    const n = count();
+    if (n < 2) return;
+    setPicked(await api.listItemIds(folderId, threaded, sort, filterArg(), 0, Math.max(n, 1_000_000)));
+  }
+  // The list goes (another folder, sort, filter): so does what was picked in it.
+  if (!search) onCleanup(() => setPicked([]));
 
   function selectIndex(i: number, scroll = true) {
     const n = count();
@@ -591,9 +655,36 @@ export function MessageList(props: {
     if (mainView() !== 'mail') return; // the address book is over the list
     // Only one list drives the keyboard: results while searching, the folder otherwise.
     if (!!search !== searchActive()) return;
+    // The sender panel has its own keys.
+    if (e.target instanceof Element && e.target.closest('.sender-pane')) return;
     const cur = selIndex();
+    if (!search && (e.key === 'ArrowDown' || e.key === 'ArrowUp') && e.shiftKey && !e.metaKey && !e.ctrlKey) {
+      // ⇧-arrows: the range from the anchor to the next row.
+      e.preventDefault();
+      if (anchorIdx < 0) anchorIdx = Math.max(0, cur);
+      const to = Math.max(0, Math.min(count() - 1, (cur < 0 ? 0 : cur) + (e.key === 'ArrowDown' ? 1 : -1)));
+      void pickRange(to, false);
+      virt.scrollToIndex(to, { align: 'auto' });
+      return;
+    }
+    if (!search && modKey(e) && !e.shiftKey && e.key.toLowerCase() === 'a') {
+      e.preventDefault();
+      void pickAll();
+      return;
+    }
+    if (multiPicked() && e.key === 'Escape') {
+      e.preventDefault();
+      setPicked([]);
+      return;
+    }
     // Keys come from the keymap (lib/shortcuts.ts), remappable in Settings.
-    switch (commandFor(e)) {
+    const command = commandFor(e);
+    // Moving on leaves the rows picked together (the open one moves as before).
+    if (multiPicked() && command && ['next', 'prev', 'first', 'last', 'page-down', 'page-up', 'open'].includes(command)) {
+      anchorIdx = -1;
+      setPicked([]);
+    }
+    switch (command) {
       case 'next':
         selectIndex(cur < 0 ? 0 : cur + 1);
         break;
@@ -766,6 +857,25 @@ export function MessageList(props: {
       refresh() {
         model.invalidate();
       },
+      removeMany(items) {
+        const gone = new Set(items);
+        const at: number[] = [];
+        for (const id of items) {
+          const k = model.indexOfId(id);
+          if (k >= 0) at.push(k);
+        }
+        const first = at.length ? Math.min(...at) : -1;
+        batch(() => {
+          if (model.remove(gone) > 0) setGroups(removeRows(groups(), at));
+          const n = count();
+          anchorIdx = -1;
+          if (n > 0 && first >= 0) selectIndex(Math.min(first, n - 1));
+          else threaded ? selectThread(null) : selectMessage(null);
+        });
+      },
+      pickAll() {
+        void pickAll();
+      },
       sync() {
         const id = untrack(selectedId);
         if (id == null) return;
@@ -781,7 +891,8 @@ export function MessageList(props: {
   onMount(() => {
     window.addEventListener('keydown', onKey);
     // Results mount while the user types; don't steal focus from the search field.
-    if (!search) scrollEl.focus({ preventScroll: true });
+    // (Not away from the sender panel: opening a message there brings its folder up.)
+    if (!search && !document.activeElement?.closest('.sender-pane')) scrollEl.focus({ preventScroll: true });
     // Arrived here with N/P from a folder with nothing left unread.
     const arrival = search ? null : takeUnreadOnArrival(folderId);
     if (arrival) void nextUnread(arrival.back);
@@ -895,6 +1006,7 @@ export function MessageList(props: {
         ref={scrollEl}
         tabIndex={0}
         role="listbox"
+        aria-multiselectable={!search}
         aria-label={`${props.folder.displayName} messages`}
         aria-activedescendant={selIndex() >= 0 ? `${rowPrefix}-${selIndex()}` : undefined}
         onFocusIn={() => setListFocused(true)}
@@ -970,16 +1082,30 @@ export function MessageList(props: {
                   class="row"
                   data-id={m()?.id}
                   classList={{
-                    selected: !!m() && isSelected(m()!.id),
+                    selected: !!m() && shownSelected(m()!.id),
                     unread: !!m()?.unread,
                   }}
-                  aria-selected={!!m() && isSelected(m()!.id)}
+                  aria-selected={!!m() && shownSelected(m()!.id)}
                   style={{
                     transform: `translateY(${item.start + (head() ? GROUP_HEAD : 0)}px)`,
-                    ...selectedRowVars(!!m() && isSelected(m()!.id), listFocused(), !windowActive()),
+                    ...selectedRowVars(!!m() && shownSelected(m()!.id), listFocused(), !windowActive()),
                   }}
                   onMouseDown={(e) => {
                     if (e.button !== 0) return;
+                    if (!search && e.shiftKey) {
+                      e.preventDefault(); // no text selection
+                      scrollEl.focus({ preventScroll: true });
+                      void pickRange(item.index, modKey(e));
+                      return;
+                    }
+                    if (!search && modKey(e)) {
+                      e.preventDefault();
+                      scrollEl.focus({ preventScroll: true });
+                      togglePick(item.index);
+                      return;
+                    }
+                    anchorIdx = item.index;
+                    setPicked([]);
                     selectIndex(item.index, false);
                   }}
                   onDblClick={() => props.onOpen()}

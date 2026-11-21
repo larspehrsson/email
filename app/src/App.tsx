@@ -16,6 +16,7 @@ import {
   threadedPref,
   listSort,
   listFilter,
+  multiPicked,
   addingAccount,
   setAddingAccount,
   senderPane,
@@ -52,6 +53,7 @@ import { SenderPane } from './components/SenderPane';
 import { ContactsView } from './components/ContactsView';
 import { AddAccountModal, Onboarding } from './components/AddAccount';
 import { ContextMenuHost } from './components/ContextMenu';
+import { MultiPane } from './components/MultiPane';
 import { DRAG } from './lib/platform';
 
 const SIDEBAR = { min: 180, max: 420, def: 236 };
@@ -310,8 +312,15 @@ export function App() {
             />
           </div>
           <div class="pane pane-reader">
-            <Show when={conversationReader()} fallback={<Reader ref={(el) => (readerEl = el)} />}>
-              <ConversationReader ref={(el) => (readerEl = el)} />
+            <Show
+              when={multiPicked() && !searchActive()}
+              fallback={
+                <Show when={conversationReader()} fallback={<Reader ref={(el) => (readerEl = el)} />}>
+                  <ConversationReader ref={(el) => (readerEl = el)} />
+                </Show>
+              }
+            >
+              <MultiPane />
             </Show>
             <AttachmentToast />
           </div>

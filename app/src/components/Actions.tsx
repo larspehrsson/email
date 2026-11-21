@@ -218,6 +218,13 @@ export interface ActionTarget {
   tagSets: string[][];
   /** the latest snooze still to go off among them (Unix seconds), for the Snooze menu */
   snoozedUntil: number | null;
+  /** several rows picked together: the list rows (message or conversation ids) an action
+   *  that removes them takes out of the list */
+  items?: number[];
+  /** several: Star stars them all (else just `starId`) */
+  starIds?: number[];
+  /** several: Forward sends them along as attachments */
+  forwardAll?: () => void;
 }
 
 function useActions(t: () => ActionTarget | null) {
@@ -239,7 +246,7 @@ function useActions(t: () => ActionTarget | null) {
   async function command(c: BarCommand, anchor?: HTMLElement) {
     const x = t();
     if (!x || x.ids.length === 0) return;
-    const base = { ids: x.ids, folderId: x.folderId, advance: x.advance };
+    const base = { ids: x.ids, folderId: x.folderId, advance: x.advance, items: x.items };
     switch (c) {
       case 'archive':
         return runAction({ kind: 'archive' }, base);
@@ -256,6 +263,7 @@ function useActions(t: () => ActionTarget | null) {
       case 'unread':
         return runAction({ kind: x.anyUnread ? 'read' : 'unread' }, { ...base, advance: false });
       case 'star':
+        if (x.starIds) return runAction({ kind: x.starred ? 'unflag' : 'flag' }, { ids: x.starIds, folderId: x.folderId, advance: false });
         if (x.starId == null) return;
         return runAction({ kind: x.starred ? 'unflag' : 'flag' }, { ids: [x.starId], folderId: x.folderId, advance: false });
       case 'move':
@@ -276,6 +284,7 @@ function useActions(t: () => ActionTarget | null) {
       case 'reply':
       case 'replyAll':
       case 'forward':
+        if (c === 'forward' && x.forwardAll) return x.forwardAll();
         if (x.replyId != null) return startReply(x.replyId, c);
         return;
       default: {
@@ -362,7 +371,7 @@ function useActions(t: () => ActionTarget | null) {
         }}
         onPick={(dest) => {
           setPicker(null);
-          void runAction({ kind: 'move', targetFolderId: dest.id }, { ids: x.ids, folderId: x.folderId, advance: x.advance });
+          void runAction({ kind: 'move', targetFolderId: dest.id }, { ids: x.ids, folderId: x.folderId, advance: x.advance, items: x.items });
         }}
       />
     );
@@ -415,13 +424,15 @@ export function HeaderActions(props: { target: ActionTarget | null }) {
   const x = () => props.target;
   return (
     <div class="act-bar" role="toolbar" aria-label="Message actions" classList={{ off: !x() }}>
-      <Btn label="Reply" key={hint('reply')} onClick={() => void a.command('reply')}>
-        <ReplyIcon />
-      </Btn>
-      <Btn label="Reply all" key={hint('reply-all')} onClick={() => void a.command('replyAll')}>
-        <ReplyAllIcon />
-      </Btn>
-      <Btn label="Forward" key={hint('forward')} onClick={() => void a.command('forward')}>
+      <Show when={!x()?.forwardAll}>
+        <Btn label="Reply" key={hint('reply')} onClick={() => void a.command('reply')}>
+          <ReplyIcon />
+        </Btn>
+        <Btn label="Reply all" key={hint('reply-all')} onClick={() => void a.command('replyAll')}>
+          <ReplyAllIcon />
+        </Btn>
+      </Show>
+      <Btn label={x()?.forwardAll ? 'Forward as attachments' : 'Forward'} key={hint('forward')} onClick={() => void a.command('forward')}>
         <ForwardIcon />
       </Btn>
       <span class="act-sep" />

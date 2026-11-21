@@ -630,6 +630,7 @@ impl Core {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let req = sync::PartRequest {
             message_id,
+            whole: false,
             ordinal,
             section: part.section.clone(),
             encoding: part.encoding.clone(),
@@ -642,6 +643,26 @@ impl Core {
         let data = rx.await.map_err(|_| anyhow!("download was cancelled"))??;
         self.store.cache_attachment(message_id, index, &data)?;
         Ok((part.name.clone(), part.mime.clone(), data))
+    }
+
+    /// The whole message as sent (RFC 822 bytes) and its subject: the stored copy when it's
+    /// complete, else downloaded (bodies kept without their attachments). For forwarding as an
+    /// attachment.
+    pub async fn whole_message(&self, message_id: i64) -> Result<(Vec<u8>, String)> {
+        let subject = self.store.message_subject(message_id)?.unwrap_or_default();
+        let complete = self.store.omitted(message_id)?.is_none_or(|j| j.trim().is_empty() || j.trim() == "[]");
+        if complete && let Some(raw) = self.store.body(message_id)? {
+            return Ok((raw, subject));
+        }
+        let account_id = self.store.message_account(message_id)?.ok_or_else(|| anyhow!("no such message"))?;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let req = sync::PartRequest { message_id, whole: true, ordinal: 0, section: None, encoding: None, reply: tx };
+        match self.running.lock().unwrap().get(&account_id) {
+            Some(s) => s.fetch_part(req),
+            None => return Err(anyhow!("This account isn't connected.")),
+        }
+        let raw = rx.await.map_err(|_| anyhow!("download was cancelled"))??;
+        Ok((raw, subject))
     }
 
     /// Number of attachments (stored + omitted) and the message subject, for "save all".
@@ -671,6 +692,35 @@ impl Core {
             }
         }
         Ok(result)
+    }
+
+    /// The list's row ids from `offset` (see `Store::list_item_ids`).
+    pub fn list_item_ids(
+        &self,
+        folder_id: i64,
+        threaded: bool,
+        sort: sort::ListSort,
+        filter: &sort::ListFilter,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<i64>> {
+        self.store.list_item_ids(folder_id, threaded, sort, filter, offset, limit)
+    }
+
+    /// The messages behind several picked rows, and their state for the action bar.
+    pub fn selection_info(&self, folder_id: i64, items: &[i64], threaded: bool) -> Result<SelectionInfo> {
+        let rows = self.store.selection_messages(folder_id, items, threaded)?;
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
+        Ok(SelectionInfo {
+            any_unread: rows.iter().any(|r| r.1 & flags::SEEN == 0),
+            all_flagged: !rows.is_empty() && rows.iter().all(|r| r.1 & flags::FLAGGED != 0),
+            tag_sets: rows.iter().map(|r| tags::visible(&r.2)).collect(),
+            snoozed_until: rows.iter().filter_map(|r| tags::snoozed_until(&r.2)).filter(|&t| t > now).max(),
+            size: rows.iter().map(|r| r.3).sum(),
+            sizes: rows.iter().map(|r| r.3).collect(),
+            subjects: rows.iter().map(|r| r.4.clone()).collect(),
+            ids: rows.into_iter().map(|r| r.0).collect(),
+        })
     }
 
     /// Mark every message in a folder read (on the server too, in one command per folder).
@@ -810,6 +860,10 @@ impl Core {
                 let (name, content_type, data) = self.attachment(fwd, index).await?;
                 msg.attachments.push(compose::OutAttachment { name, content_type, data });
             }
+        }
+        for &id in &req.forward_messages {
+            let (data, subject) = self.whole_message(id).await?;
+            msg.attachments.push(compose::OutAttachment { name: eml_name(&subject), content_type: "message/rfc822".into(), data });
         }
         for path in &req.attachments {
             let p = std::path::Path::new(path);
@@ -1326,6 +1380,19 @@ impl Core {
 
 /// Apply an action locally and queue its server commands (the caller wakes the outbox). Shared
 /// by `Core::apply_action` and the sync's snooze waker.
+/// A file name for a message forwarded as an attachment: its subject, made safe.
+fn eml_name(subject: &str) -> String {
+    let clean: String = subject
+        .chars()
+        .map(|c| if c.is_control() || "/\\:*?\"<>|".contains(c) { ' ' } else { c })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let short: String = clean.chars().take(80).collect();
+    format!("{}.eml", if short.is_empty() { "message".to_string() } else { short })
+}
+
 pub(crate) fn queue_action(
     store: &Store,
     events: &broadcast::Sender<CoreEvent>,

@@ -202,6 +202,25 @@ pub struct MessageSummary {
     pub size: i64,
 }
 
+/// What the actions need about the messages behind several picked rows.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectionInfo {
+    /// The messages (a conversation's: those in the folder), newest first.
+    pub ids: Vec<i64>,
+    pub any_unread: bool,
+    pub all_flagged: bool,
+    /// Each message's tags, as `ids`.
+    pub tag_sets: Vec<Vec<String>>,
+    /// The latest reminder still to go off among them.
+    pub snoozed_until: Option<i64>,
+    /// Bytes, all together.
+    pub size: i64,
+    /// Each message's subject and size, as `ids` (forwarding them as attachments).
+    pub subjects: Vec<String>,
+    pub sizes: Vec<i64>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessagePage {
@@ -418,6 +437,9 @@ pub struct SendRequest {
     /// Attachments of `forwarding` to send along (their `index`).
     #[serde(default)]
     pub forward_attachments: Vec<usize>,
+    /// Whole messages to send along as attachments (.eml): forwarding several at once.
+    #[serde(default)]
+    pub forward_messages: Vec<i64>,
     /// The composer's own state, handed back by `cancel_send` (undo) to reopen it.
     pub draft: Option<serde_json::Value>,
     /// The draft this comes from: discarded once the message is queued.

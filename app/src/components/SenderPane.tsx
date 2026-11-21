@@ -2,15 +2,19 @@ import { batch, createEffect, createMemo, createSignal, For, on, onCleanup, Show
 import { api, errorMessage, events, type Action, type MessageSummary, type SenderPage } from '../api';
 import { folderById, revealMessage, selectedMessageId, selectedThread, setSenderPane } from '../state';
 import { fmtNum, smartDate } from '../lib/format';
-import { hint } from '../lib/shortcuts';
-import { ArchiveIcon, CloseIcon, ReadIcon, TrashIcon } from './Icons';
+import { hint, MOD } from '../lib/shortcuts';
+import { ArchiveIcon, CloseIcon, ForwardIcon, ReadIcon, TrashIcon } from './Icons';
+import { platform } from '../lib/platform';
+import { registerSenderSelectAll } from '../lib/actions';
+import { forwardAsAttachments } from '../lib/compose';
 import { hideToast, showToast } from './Toast';
 import { cardFor, loadCards } from '../lib/addressBook';
 import { openContacts } from './ContactsView';
 
 // The sender pane (eM Client's contact sidebar, for mail): everything from the sender of the
-// message on screen, in every folder but Trash and Spam, newest first. Tick some (or all) to
-// archive, delete or mark them read at once: clearing out a newsletter takes two clicks.
+// message on screen, in every folder but Trash and Spam, newest first. Pick some (⌘/Ctrl-click,
+// ⇧-click a range, ⌘/Ctrl+A all) to archive, delete, mark read or forward them at once:
+// clearing out a newsletter takes two keys.
 
 const PAGE = 300;
 
@@ -25,7 +29,7 @@ export function SenderPane() {
   const [error, setError] = createSignal<string | null>(null);
   const [picked, setPicked] = createSignal<ReadonlySet<number>>(new Set());
   const [busy, setBusy] = createSignal(false);
-  /** The one ticked last (for shift-click ranges). */
+  /** The one clicked last (for ⇧-click ranges). */
   let anchor: number | null = null;
   let who: Who | null = null;
   let seq = 0;
@@ -91,32 +95,71 @@ export function SenderPane() {
   const rows = () => page()?.messages ?? [];
   const total = () => page()?.total ?? 0;
   const allPicked = () => rows().length > 0 && rows().every((m) => picked().has(m.id));
-  const somePicked = () => picked().size > 0 && !allPicked();
+  const modKey = (e: MouseEvent | KeyboardEvent) => (platform === 'macos' ? e.metaKey : e.ctrlKey);
+  let listEl!: HTMLDivElement;
 
-  function toggle(m: MessageSummary, i: number, shift: boolean) {
-    const next = new Set(picked());
-    const on = !next.has(m.id);
-    if (shift && anchor != null) {
-      const a = rows().findIndex((r) => r.id === anchor);
-      if (a >= 0) {
-        const [lo, hi] = a < i ? [a, i] : [i, a];
-        for (const r of rows().slice(lo, hi + 1)) on ? next.add(r.id) : next.delete(r.id);
-      }
-    } else if (on) next.add(m.id);
-    else next.delete(m.id);
+  /** A click on row `i`: just it (and open it), ⌘/Ctrl one more or one less, ⇧ a range. */
+  function click(m: MessageSummary, i: number, e: MouseEvent) {
+    listEl.focus({ preventScroll: true });
+    if (e.shiftKey) {
+      const a = anchor != null ? rows().findIndex((r) => r.id === anchor) : -1;
+      const from = a >= 0 ? a : i;
+      const [lo, hi] = from < i ? [from, i] : [i, from];
+      const next = new Set(modKey(e) ? picked() : []);
+      for (const r of rows().slice(lo, hi + 1)) next.add(r.id);
+      setPicked(next);
+      return;
+    }
     anchor = m.id;
-    setPicked(next);
+    if (modKey(e)) {
+      const next = new Set(picked());
+      if (next.has(m.id)) next.delete(m.id);
+      else next.add(m.id);
+      setPicked(next);
+      return;
+    }
+    setPicked(new Set([m.id]));
+    revealMessage(m.folderId, m.id);
   }
 
-  function toggleAll() {
-    setPicked(allPicked() ? new Set<number>() : new Set(rows().map((m) => m.id)));
-  }
-
-  /** Every one there is (more than the pane has loaded). */
+  /** Every one there is (more than the pane may have loaded). */
   async function pickEverything() {
     if (!who) return;
-    await load(who, total(), true);
+    if (total() > rows().length) await load(who, total(), true);
     setPicked(new Set(rows().map((m) => m.id)));
+  }
+  registerSenderSelectAll(() => void pickEverything());
+  onCleanup(() => registerSenderSelectAll(null));
+
+  function forward() {
+    const chosen = rows().filter((m) => picked().has(m.id));
+    const accountId = page()?.accountId;
+    if (!chosen.length || accountId == null) return;
+    forwardAsAttachments(accountId, chosen.map((m) => ({ id: m.id, subject: m.subject, size: m.size ?? 0 })));
+  }
+
+  function onKey(e: KeyboardEvent) {
+    const at = rows().findIndex((r) => r.id === anchor);
+    if (modKey(e) && !e.shiftKey && e.key.toLowerCase() === 'a') {
+      void pickEverything();
+    } else if (e.key === 'Escape' && picked().size > 0) {
+      setPicked(new Set<number>());
+    } else if ((e.key === 'Delete' || e.key === 'Backspace') && picked().size > 0) {
+      void act({ kind: 'trash' }, 'Deleted');
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      const i = Math.max(0, Math.min(rows().length - 1, at + (e.key === 'ArrowDown' ? 1 : -1)));
+      const m = rows()[i];
+      if (!m) return;
+      if (e.shiftKey) {
+        const next = new Set(picked());
+        next.add(m.id);
+        setPicked(next);
+        anchor = m.id;
+      } else click(m, i, new MouseEvent('click'));
+      listEl.querySelectorAll('.sp-row')[i]?.scrollIntoView({ block: 'nearest' });
+    } else return;
+    e.preventDefault();
+    e.stopPropagation();
   }
 
   /** Apply `action` to the ticked ones: one action per folder they're in, one Undo for all. */
@@ -199,22 +242,23 @@ export function SenderPane() {
         }
       >
         <div class="sp-bar">
-          <label class="sp-all" title={allPicked() ? 'Untick all' : 'Tick all'}>
-            <input
-              type="checkbox"
-              checked={allPicked()}
-              ref={(el) => createEffect(() => (el.indeterminate = somePicked()))}
-              onChange={toggleAll}
-              aria-label="Tick all"
-            />
-            <span>
-              <Show when={picked().size > 0} fallback={`${fmtNum(total())} ${total() === 1 ? 'message' : 'messages'}`}>
-                {fmtNum(picked().size)} ticked
-              </Show>
-            </span>
-          </label>
+          <span class="sp-all">
+            <Show when={picked().size > 0} fallback={`${fmtNum(total())} ${total() === 1 ? 'message' : 'messages'}`}>
+              {fmtNum(picked().size)} of {fmtNum(total())} selected
+            </Show>
+          </span>
           <span class="sp-fill" />
-          <Show when={picked().size > 0}>
+          <Show
+            when={picked().size > 0}
+            fallback={
+              <button class="link-btn sp-select-all" title={`Select all (${MOD}A)`} onClick={() => void pickEverything()}>
+                Select all
+              </button>
+            }
+          >
+            <button class="icon-btn" title="Forward as attachments" aria-label="Forward as attachments" disabled={busy()} onClick={forward}>
+              <ForwardIcon />
+            </button>
             <button class="icon-btn" title="Mark read" aria-label="Mark read" disabled={busy()} onClick={() => void act({ kind: 'read' }, 'Marked read')}>
               <ReadIcon />
             </button>
@@ -228,31 +272,28 @@ export function SenderPane() {
         </div>
         <Show when={allPicked() && total() > rows().length}>
           <button class="link-btn sp-everything" onClick={() => void pickEverything()}>
-            Tick all {fmtNum(total())}
+            Select all {fmtNum(total())}
           </button>
         </Show>
-        <div class="sp-list" role="list">
+        <div
+          class="sp-list"
+          role="listbox"
+          aria-multiselectable="true"
+          aria-label="Messages from this sender"
+          tabIndex={0}
+          ref={listEl}
+          onKeyDown={onKey}
+        >
           <For each={rows()}>
             {(m, i) => (
               <div
-                role="listitem"
+                role="option"
+                aria-selected={picked().has(m.id)}
                 class="sp-row"
                 classList={{ unread: m.unread, on: picked().has(m.id), current: m.id === source() }}
-                onClick={(e) => {
-                  if ((e.target as Element).closest('input')) return;
-                  revealMessage(m.folderId, m.id);
-                }}
+                onMouseDown={(e) => e.shiftKey && e.preventDefault()}
+                onClick={(e) => click(m, i(), e)}
               >
-                <input
-                  type="checkbox"
-                  class="sp-check"
-                  checked={picked().has(m.id)}
-                  aria-label={`Tick “${m.subject || '(no subject)'}”`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    toggle(m, i(), e.shiftKey);
-                  }}
-                />
                 <div class="sp-text">
                   <div class="sp-line1">
                     <span class="sp-subject">{m.subject || '(no subject)'}</span>

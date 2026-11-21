@@ -316,9 +316,11 @@ enum Job {
     Refresh(i64),
 }
 
-/// Download one omitted attachment (a single MIME part) of a stored message.
+/// Download one omitted attachment (a single MIME part) of a stored message, or with `whole`
+/// the whole message as the server has it (forwarding it as an attachment).
 pub struct PartRequest {
     pub message_id: i64,
+    pub whole: bool,
     /// Position among the message's omitted attachments.
     pub ordinal: usize,
     pub section: Option<String>,
@@ -1637,6 +1639,15 @@ async fn fetch_part(shared: &Shared, conn: &mut Connection, req: &PartRequest, p
         .body_location(req.message_id, preferred)?
         .ok_or_else(|| anyhow::anyhow!("This message is no longer on the server."))?;
     conn.ensure_selected(&loc.raw_name).await?;
+    if req.whole {
+        return conn
+            .fetch_bodies(&[loc.uid])
+            .await?
+            .into_iter()
+            .next()
+            .map(|(_, raw)| raw)
+            .ok_or_else(|| anyhow::anyhow!("This message is no longer on the server."));
+    }
     conn.fetch_omitted_part(loc.uid, req.ordinal, req.section.as_deref(), req.encoding.as_deref()).await
 }
 

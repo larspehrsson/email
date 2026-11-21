@@ -432,6 +432,25 @@ mod tests {
     }
 
     #[test]
+    fn a_message_forwarded_as_an_attachment() {
+        let inner = b"From: a@x.com\r\nTo: b@y.com\r\nSubject: Original\r\nMessage-ID: <o@x>\r\n\r\nHello there\r\n".to_vec();
+        let msg = Outgoing {
+            from: Some(a("me@x.com")),
+            to: vec![a("you@y.com")],
+            subject: "Fwd: 1 message".into(),
+            html: "<p>See attached</p>".into(),
+            attachments: vec![OutAttachment { name: "Original.eml".into(), content_type: "message/rfc822".into(), data: inner }],
+            ..Default::default()
+        };
+        let raw = build(&msg, "f@x", 0).unwrap();
+        let parsed = mail_parser::MessageParser::default().parse(&raw).unwrap();
+        let part = parsed.attachment(0).unwrap();
+        let nested = part.message().expect("read as a message");
+        assert_eq!(nested.subject(), Some("Original"));
+        assert!(nested.body_text(0).unwrap().contains("Hello there"));
+    }
+
+    #[test]
     fn subjects() {
         assert_eq!(reply_subject("Plans"), "Re: Plans");
         assert_eq!(reply_subject("RE: re: Fwd: Plans"), "Re: Plans");

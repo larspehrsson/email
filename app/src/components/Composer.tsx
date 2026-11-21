@@ -25,7 +25,7 @@ import { GMAIL_LIMIT } from '../lib/compose';
 import { MOD } from '../lib/shortcuts';
 import { DRAG } from '../lib/platform';
 import { confirmDialog } from './Actions';
-import { CloseIcon, ForwardIcon, PaperclipIcon, ReplyAllIcon, ReplyIcon, TrashIcon } from './Icons';
+import { CloseIcon, ForwardIcon, MailIcon, PaperclipIcon, ReplyAllIcon, ReplyIcon, TrashIcon } from './Icons';
 import { AutoHeightFrame } from './Conversation';
 import { buildSrcdoc } from './Reader';
 import { fmtSize } from '../lib/format';
@@ -771,8 +771,25 @@ export function Composer() {
             </Show>
           </div>
         </Show>
-        <Show when={c().fwdAttachments.length + (c().files?.length ?? 0) > 0}>
+        <Show when={c().fwdAttachments.length + (c().files?.length ?? 0) + (c().fwdMessages?.length ?? 0) > 0}>
           <div class="cmp-atts" aria-label="Attachments">
+            <For each={c().fwdMessages ?? []}>
+              {(m) => (
+                <span class="cmp-att cmp-att-msg" title={`${m.subject || '(no subject)'} — sent as an attachment`}>
+                  <MailIcon size={12} />
+                  <span class="cmp-att-name">{m.subject || '(no subject)'}.eml</span>
+                  <span class="cmp-att-size">{fmtSize(m.size)}</span>
+                  <button
+                    class="addr-x"
+                    aria-label={`Don't send ${m.subject || 'this message'}`}
+                    title="Remove"
+                    onClick={() => updateCompose({ fwdMessages: (c().fwdMessages ?? []).filter((x) => x.id !== m.id) })}
+                  >
+                    <CloseIcon size={9} />
+                  </button>
+                </span>
+              )}
+            </For>
             <For each={c().files ?? []}>
               {(f) => (
                 <span class="cmp-att" title={f.path}>

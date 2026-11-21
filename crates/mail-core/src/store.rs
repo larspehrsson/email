@@ -2116,6 +2116,65 @@ impl Store {
         }
     }
 
+    pub fn message_subject(&self, id: i64) -> Result<Option<String>> {
+        let db = self.rdb();
+        Ok(db.query_row("SELECT subject FROM messages WHERE id=?1", [id], |r| r.get(0)).optional()?)
+    }
+
+    /// The list's rows (message ids, or conversation ids with `threaded`) from `offset` on, in
+    /// the order `list_messages_by` / `list_threads_filtered` show them: what a ⇧-click range
+    /// or Select All covers, most of it not loaded.
+    pub fn list_item_ids(&self, folder_id: i64, threaded: bool, sort: ListSort, filter: &ListFilter, offset: u32, limit: u32) -> Result<Vec<i64>> {
+        let db = self.rdb();
+        let sql = if threaded {
+            format!(
+                "SELECT e.thread_id, max(e.date) AS d FROM {} GROUP BY e.thread_id
+                 ORDER BY d DESC, e.thread_id DESC LIMIT ?2 OFFSET ?3",
+                thread_rows_from(filter)
+            )
+        } else {
+            let order = match sort.key_sql() {
+                None => "e.date DESC, e.message_id DESC".to_string(),
+                Some(k) => format!("{k}, e.date DESC, e.message_id DESC"),
+            };
+            format!(
+                "SELECT e.message_id FROM entries e JOIN messages m ON m.id = e.message_id
+                 WHERE e.folder_id=?1{} ORDER BY {order} LIMIT ?2 OFFSET ?3",
+                filter.sql(false)
+            )
+        };
+        let mut stmt = db.prepare_cached(&sql)?;
+        Ok(stmt.query_map(params![folder_id, limit, offset], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// The messages behind a list's rows (`items`: message ids, or conversation ids with
+    /// `threaded`: their messages in this folder), with what the actions need: (id, flags,
+    /// keywords, size, subject).
+    pub fn selection_messages(&self, folder_id: i64, items: &[i64], threaded: bool) -> Result<Vec<(i64, i64, String, i64, String)>> {
+        let db = self.rdb();
+        let mut out = Vec::with_capacity(items.len());
+        for chunk in items.chunks(500) {
+            let marks = vec!["?"; chunk.len()].join(",");
+            let sql = if threaded {
+                format!(
+                    "SELECT m.id, m.flags, m.keywords, m.size, m.subject FROM entries e JOIN messages m ON m.id = e.message_id
+                     WHERE e.folder_id = {folder_id} AND e.thread_id IN ({marks}) ORDER BY e.date DESC, m.id DESC"
+                )
+            } else {
+                format!(
+                    "SELECT m.id, m.flags, m.keywords, m.size, m.subject FROM entries e JOIN messages m ON m.id = e.message_id
+                     WHERE e.folder_id = {folder_id} AND e.message_id IN ({marks}) ORDER BY e.date DESC, m.id DESC"
+                )
+            };
+            let mut stmt = db.prepare(&sql)?;
+            let rows = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?;
+            for r in rows {
+                out.push(r?);
+            }
+        }
+        Ok(out)
+    }
+
     /// The unread messages in a folder (Mark all as read).
     pub fn unread_in_folder(&self, folder_id: i64) -> Result<Vec<i64>> {
         let db = self.rdb();
@@ -4216,6 +4275,17 @@ mod tests {
                 assert_eq!(back, *unread.last().unwrap(), "{sort:?} back wraps to the bottom");
             }
         }
+        // Every row's id, in order, for ranges and Select All.
+        for (sort, filter) in [(ListSort::Received, &all), (ListSort::Size, &unread_only), (ListSort::From, &with_files)] {
+            let ids: Vec<i64> = store.list_messages_by(inbox, sort, filter, 0, 100).unwrap().messages.iter().map(|m| m.id).collect();
+            assert_eq!(store.list_item_ids(inbox, false, sort, filter, 0, 1000).unwrap(), ids);
+            assert_eq!(store.list_item_ids(inbox, false, sort, filter, 2, 3).unwrap(), ids[2..5.min(ids.len())]);
+        }
+        let threads: Vec<i64> = store.list_threads(inbox, ThreadScope::default(), 0, 100).unwrap().threads.iter().map(|t| t.id).collect();
+        assert_eq!(store.list_item_ids(inbox, true, ListSort::Received, &all, 0, 1000).unwrap(), threads);
+        let picked = store.selection_messages(inbox, &threads[..2], true).unwrap();
+        assert!(picked.len() >= 2, "a conversation's messages here");
+        assert_eq!(store.selection_messages(inbox, &[threads[0]], false).unwrap().len(), 1, "a message id is just that one");
         // By size: largest first, in ranges.
         let by_size = store.list_messages_by(inbox, ListSort::Size, &all, 0, 100).unwrap().messages;
         assert!(by_size.windows(2).all(|w| w[0].size >= w[1].size));

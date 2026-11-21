@@ -345,7 +345,24 @@ export interface TagDef {
 }
 
 /** A message to send, as the composer has it (see compose in lib/compose.ts). */
+/** What the actions need about the messages behind several picked rows (`selection_info`). */
+export interface SelectionInfo {
+  /** the messages (a conversation's: those in the folder), newest first */
+  ids: number[];
+  anyUnread: boolean;
+  allFlagged: boolean;
+  tagSets: string[][];
+  snoozedUntil: number | null;
+  /** bytes, all together */
+  size: number;
+  /** each message's subject and size, as `ids` */
+  subjects: string[];
+  sizes: number[];
+}
+
 export interface SendRequest {
+  /** whole messages to send along as .eml attachments (forwarding several at once) */
+  forwardMessages?: number[];
   accountId: number;
   to: Addr[];
   cc: Addr[];
@@ -559,6 +576,11 @@ export interface CommandMap {
   apply_action: { args: { action: Action; messageIds: number[]; folderId: number }; ret: ActionResult };
   undo_action: { args: { opId: number }; ret: void };
   mark_folder_read: { args: { folderId: number }; ret: number };
+  list_item_ids: {
+    args: { folderId: number; threaded: boolean; sort: ListSort; filter?: ListFilter; offset: number; limit: number };
+    ret: number[];
+  };
+  selection_info: { args: { folderId: number; items: number[]; threaded: boolean }; ret: SelectionInfo };
   list_tags: { args: undefined; ret: TagDef[] };
   set_tag: { args: { keyword: string | null; name: string; color: string }; ret: string };
   delete_tag: { args: { keyword: string }; ret: void };

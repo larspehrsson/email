@@ -309,6 +309,18 @@ export function setListSort(s: ListSort): void {
   savePref('ui.listSort', s);
 }
 
+/** Rows picked in the folder list (⌘/Ctrl-click, ⇧-click, Select All): their ids (messages,
+ *  or conversations when grouped). Fewer than two is no selection of several: the open row
+ *  is just the selected one then. Cleared when the list goes (another folder, sort, filter). */
+const [picked, setPickedSig] = createSignal<ReadonlySet<number>>(new Set());
+export { picked };
+export function setPicked(ids: Iterable<number>): void {
+  const s = new Set(ids);
+  if (s.size < 2 && picked().size === 0) return;
+  setPickedSig(s.size >= 2 ? s : new Set<number>());
+}
+export const multiPicked = () => picked().size >= 2;
+
 /** The Add account form is open (sidebar, Settings › Accounts, File menu). */
 const [addingAccount, setAddingAccount] = createSignal(false);
 export { addingAccount, setAddingAccount };

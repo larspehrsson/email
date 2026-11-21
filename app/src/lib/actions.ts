@@ -10,6 +10,7 @@ import {
   selectedThreadId,
   selectMessage,
   selectThread,
+  setPicked,
   threaded,
 } from '../state';
 import { hideToast, showToast } from '../components/Toast';
@@ -31,6 +32,11 @@ export interface ListNav {
   refresh(): void;
   /** Re-sync the list's keyboard index to the current selection. */
   sync(): void;
+  /** Drop several rows (own action on rows picked together) and select the row now where the
+   *  first of them was. */
+  removeMany(items: number[]): void;
+  /** Pick all rows (Select All). */
+  pickAll(): void;
 }
 /** The row `advance` dropped. */
 export interface Removed {
@@ -108,11 +114,16 @@ interface UndoEntry {
   removed: Removed | null;
   nav: ListNav | undefined;
   toastId: number;
+  /** rows picked together that the action took away */
+  items?: number[];
 }
 let lastUndo: UndoEntry | null = null;
 
 export interface RunOpts {
   ids: number[];
+  /** rows picked together (message or conversation ids): dropped from the list when this
+   *  removes them, picked again on undo */
+  items?: number[];
   /** folder the messages are being viewed in (apply_action's folderId) */
   folderId: number;
   /** open the next older item first when this removes what's being viewed */
@@ -130,7 +141,11 @@ export async function runAction(action: Action, o: RunOpts): Promise<void> {
   let next: number | null = null;
   let removed: Removed | null = null;
   const nav = activeNav();
-  if (removing && o.advance) {
+  const many = removing && !!o.items?.length;
+  if (many) {
+    nav?.removeMany(o.items!);
+    setPicked([]);
+  } else if (removing && o.advance) {
     // Own action: open the next older item right away (the "left this folder → blank pane"
     // rule is for changes made elsewhere).
     prev = snapshot();
@@ -139,6 +154,11 @@ export async function runAction(action: Action, o: RunOpts): Promise<void> {
     next = currentId();
   }
   const putBack = () => {
+    if (many) {
+      nav?.refresh();
+      setPicked(o.items!);
+      return;
+    }
     if (!prev) return;
     nav?.refresh();
     if (currentId() === next) restore(prev);
@@ -165,7 +185,7 @@ export async function runAction(action: Action, o: RunOpts): Promise<void> {
     }
     if (res.undoable) {
       const target = action.kind === 'move' ? folderById(action.targetFolderId)?.displayName : undefined;
-      const entry: UndoEntry = { opId: res.opId, prev, next, removed, nav, toastId: 0 };
+      const entry: UndoEntry = { opId: res.opId, prev, next, removed, nav, toastId: 0, items: many ? o.items : undefined };
       entry.toastId = showToast({
         kind: 'ok',
         text: describe(action, o.ids.length, target),
@@ -195,8 +215,22 @@ async function undo(entry: UndoEntry) {
   // Then the message back in its place and selected again, even if the user has moved on since;
   // not if they've left that list (another folder, a search). Only once the core has it back:
   // a conversation opened earlier would find nothing in this folder and close again.
-  if (entry.removed && entry.nav && entry.nav === activeNav()) entry.nav.putBack(entry.removed);
+  if (entry.items && entry.nav && entry.nav === activeNav()) {
+    entry.nav.refresh();
+    setPicked(entry.items);
+  } else if (entry.removed && entry.nav && entry.nav === activeNav()) entry.nav.putBack(entry.removed);
   else if (entry.prev != null && currentId() === entry.next) restore(entry.prev);
+}
+
+/** Select All (⌘/Ctrl+A, Edit › Select All) outside a text field: every row of the list, or
+ *  of the sender panel when it has the keyboard. */
+let senderSelectAll: (() => void) | null = null;
+export function registerSenderSelectAll(fn: (() => void) | null): void {
+  senderSelectAll = fn;
+}
+export function selectAllRows(): void {
+  if (senderSelectAll && document.activeElement?.closest('.sender-pane')) senderSelectAll();
+  else if (!searchActive()) navs.folder?.pickAll();
 }
 
 /** `z`: undo the most recent undoable action. */

@@ -398,6 +398,28 @@ async fn apply_action(
     core.apply_action(action, &message_ids, folder_id).map_err(err)
 }
 
+/// The list's row ids from `offset` (⇧-click ranges, Select All).
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn list_item_ids(
+    core: State<'_, Arc<Core>>,
+    folder_id: i64,
+    threaded: bool,
+    sort: Option<ListSort>,
+    filter: Option<ListFilter>,
+    offset: u32,
+    limit: u32,
+) -> Res<Vec<i64>> {
+    let filter = filter.unwrap_or_default();
+    timed("list_item_ids", || core.list_item_ids(folder_id, threaded, sort.unwrap_or_default(), &filter, offset, limit)).map_err(err)
+}
+
+/// The messages behind several picked rows, with their state.
+#[tauri::command]
+async fn selection_info(core: State<'_, Arc<Core>>, folder_id: i64, items: Vec<i64>, threaded: bool) -> Res<SelectionInfo> {
+    timed("selection_info", || core.selection_info(folder_id, &items, threaded)).map_err(err)
+}
+
 /// Mark every message in the folder read; returns how many were unread.
 #[tauri::command]
 async fn mark_folder_read(core: State<'_, Arc<Core>>, folder_id: i64) -> Res<usize> {
@@ -1272,6 +1294,8 @@ pub fn run() {
             set_allow_remote,
             list_threads,
             mark_folder_read,
+            list_item_ids,
+            selection_info,
             get_thread,
             update_password,
             set_keep_attachments,
