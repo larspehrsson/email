@@ -32,13 +32,43 @@ use crate::store::Store;
 use crate::sync::{AccountSync, HeaderSync, SyncOptions};
 
 const KEYRING_SERVICE: &str = "dev.mail-client.imap";
+/// The one keychain item holding every secret (a JSON object, name → secret). macOS asks
+/// whether the app may read an item once per item for each new build of the app; one item, one
+/// question.
+const VAULT_SERVICE: &str = "dev.mail-client";
+const VAULT_NAME: &str = "secrets";
 
 /// Where account secrets live.
 pub enum Secrets {
-    /// OS keychain (macOS Keychain, Secret Service on Linux).
-    Keyring,
+    /// OS keychain (macOS Keychain, Secret Service on Linux): one item for all of them, read
+    /// once and kept in memory. Secrets saved by earlier versions (an item each, under
+    /// `KEYRING_SERVICE`) move into it as they're first read; those items stay, for older builds.
+    Keyring(Mutex<Option<HashMap<String, String>>>),
     /// In-memory only; for tests and benchmarks.
     Memory(Mutex<HashMap<String, String>>),
+}
+
+fn vault_entry() -> Result<keyring::Entry> {
+    Ok(keyring::Entry::new(VAULT_SERVICE, VAULT_NAME)?)
+}
+
+/// The vault's secrets: read from the keychain the first time.
+fn vault_loaded(cache: &mut Option<HashMap<String, String>>) -> Result<&mut HashMap<String, String>> {
+    if cache.is_none() {
+        let map = match vault_entry()?.get_password() {
+            Ok(json) => serde_json::from_str(&json).context("reading the app's keychain item")?,
+            Err(keyring::Error::NoEntry) => HashMap::new(),
+            Err(e) => return Err(anyhow::Error::new(e).context("reading the app's secrets from the system keychain")),
+        };
+        *cache = Some(map);
+    }
+    Ok(cache.as_mut().unwrap())
+}
+
+fn vault_save(map: &HashMap<String, String>) -> Result<()> {
+    vault_entry()?
+        .set_password(&serde_json::to_string(map)?)
+        .context("saving to the system keychain")
 }
 
 impl Secrets {
@@ -46,11 +76,18 @@ impl Secrets {
         Secrets::Memory(Mutex::new(HashMap::new()))
     }
 
+    pub fn keyring() -> Secrets {
+        Secrets::Keyring(Mutex::new(None))
+    }
+
     fn set(&self, email: &str, password: &str) -> Result<()> {
         match self {
-            Secrets::Keyring => keyring::Entry::new(KEYRING_SERVICE, email)?
-                .set_password(password)
-                .context("saving password to the system keychain"),
+            Secrets::Keyring(cache) => {
+                let mut cache = cache.lock().unwrap();
+                let map = vault_loaded(&mut cache)?;
+                map.insert(email.into(), password.into());
+                vault_save(map)
+            }
             Secrets::Memory(m) => {
                 m.lock().unwrap().insert(email.into(), password.into());
                 Ok(())
@@ -60,9 +97,22 @@ impl Secrets {
 
     fn get(&self, email: &str) -> Result<String> {
         match self {
-            Secrets::Keyring => keyring::Entry::new(KEYRING_SERVICE, email)?
-                .get_password()
-                .context("reading password from the system keychain"),
+            Secrets::Keyring(cache) => {
+                let mut cache = cache.lock().unwrap();
+                let map = vault_loaded(&mut cache)?;
+                if let Some(s) = map.get(email) {
+                    return Ok(s.clone());
+                }
+                // Saved by an earlier version: move it in.
+                let old = keyring::Entry::new(KEYRING_SERVICE, email)?
+                    .get_password()
+                    .context("reading password from the system keychain")?;
+                map.insert(email.into(), old.clone());
+                if let Err(e) = vault_save(map) {
+                    tracing::warn!("couldn't move a secret into the app's keychain item: {e:#}");
+                }
+                Ok(old)
+            }
             Secrets::Memory(m) => m
                 .lock()
                 .unwrap()
@@ -74,7 +124,13 @@ impl Secrets {
 
     fn delete(&self, email: &str) {
         match self {
-            Secrets::Keyring => {
+            Secrets::Keyring(cache) => {
+                let mut cache = cache.lock().unwrap();
+                if let Ok(map) = vault_loaded(&mut cache)
+                    && map.remove(email).is_some()
+                {
+                    let _ = vault_save(map);
+                }
                 if let Ok(e) = keyring::Entry::new(KEYRING_SERVICE, email) {
                     let _ = e.delete_credential();
                 }
@@ -540,13 +596,13 @@ impl Core {
     }
 
     /// A page of the folder's messages in `sort`'s order.
-    pub fn list_messages_by(&self, folder_id: i64, sort: sort::ListSort, offset: u32, limit: u32) -> Result<MessagePage> {
-        self.store.list_messages_by(folder_id, sort, offset, limit)
+    pub fn list_messages_by(&self, folder_id: i64, sort: sort::ListSort, filter: &sort::ListFilter, offset: u32, limit: u32) -> Result<MessagePage> {
+        self.store.list_messages_by(folder_id, sort, filter, offset, limit)
     }
 
     /// The groups of a folder's list (see `Store::list_groups`).
-    pub fn list_groups(&self, folder_id: i64, threaded: bool, sort: sort::ListSort, bounds: &[i64]) -> Result<Vec<sort::ListGroup>> {
-        self.store.list_groups(folder_id, threaded, sort, bounds)
+    pub fn list_groups(&self, folder_id: i64, threaded: bool, sort: sort::ListSort, filter: &sort::ListFilter, bounds: &[i64]) -> Result<Vec<sort::ListGroup>> {
+        self.store.list_groups(folder_id, threaded, sort, filter, bounds)
     }
 
     /// An attachment's (name, mime, bytes): from the stored message, the attachment cache, or
@@ -617,6 +673,16 @@ impl Core {
         Ok(result)
     }
 
+    /// Mark every message in a folder read (on the server too, in one command per folder).
+    /// Returns how many were unread.
+    pub fn mark_folder_read(&self, folder_id: i64) -> Result<usize> {
+        let ids = self.store.unread_in_folder(folder_id)?;
+        if !ids.is_empty() {
+            self.apply_action(actions::Action::Read, &ids, folder_id)?;
+        }
+        Ok(ids.len())
+    }
+
     /// Undo an action that hasn't been sent yet (within the undo window).
     pub fn undo_action(&self, op_id: i64) -> Result<()> {
         let snapshot = self
@@ -635,16 +701,23 @@ impl Core {
         Ok(())
     }
 
-    pub fn index_of(&self, folder_id: i64, id: i64, threaded: bool, sort: sort::ListSort) -> Result<Option<u32>> {
-        self.store.index_of_by(folder_id, id, threaded, sort)
+    pub fn index_of(&self, folder_id: i64, id: i64, threaded: bool, sort: sort::ListSort, filter: &sort::ListFilter) -> Result<Option<u32>> {
+        self.store.index_of_by(folder_id, id, threaded, sort, filter)
     }
 
     /// Where a message shows in the folder's list: its row (the message, or with `threaded` its
     /// conversation) and that row's position; None if it isn't in the folder.
-    pub fn locate_message(&self, folder_id: i64, message_id: i64, threaded: bool, sort: sort::ListSort) -> Result<Option<(i64, u32)>> {
+    pub fn locate_message(
+        &self,
+        folder_id: i64,
+        message_id: i64,
+        threaded: bool,
+        sort: sort::ListSort,
+        filter: &sort::ListFilter,
+    ) -> Result<Option<(i64, u32)>> {
         let item = if threaded { self.store.message_thread_id(message_id)? } else { Some(message_id) };
         let Some(item) = item else { return Ok(None) };
-        Ok(self.store.index_of_by(folder_id, item, threaded, sort)?.map(|i| (item, i)))
+        Ok(self.store.index_of_by(folder_id, item, threaded, sort, filter)?.map(|i| (item, i)))
     }
 
     /// A message's detail, downloading its body first if it isn't local yet (waits up to 30 s).
@@ -1072,8 +1145,16 @@ impl Core {
 
     /// The next unread item below `after` in a folder list (wrapping to the top), or with `back`
     /// the previous one above it (wrapping to the bottom).
-    pub fn next_unread(&self, folder_id: i64, after: Option<i64>, threaded: bool, back: bool, sort: sort::ListSort) -> Result<Option<NextUnread>> {
-        Ok(self.store.next_unread_by(folder_id, after, threaded, back, sort)?.map(|(id, index)| NextUnread { id, index }))
+    pub fn next_unread(
+        &self,
+        folder_id: i64,
+        after: Option<i64>,
+        threaded: bool,
+        back: bool,
+        sort: sort::ListSort,
+        filter: &sort::ListFilter,
+    ) -> Result<Option<NextUnread>> {
+        Ok(self.store.next_unread_by(folder_id, after, threaded, back, sort, filter)?.map(|(id, index)| NextUnread { id, index }))
     }
 
     pub fn tags(&self) -> Result<Vec<tags::TagDef>> {
@@ -1152,8 +1233,8 @@ impl Core {
         self.store.message_in_folder(id, folder_id)
     }
 
-    pub fn list_threads(&self, folder_id: i64, scope: ThreadScope, offset: u32, limit: u32) -> Result<ThreadPage> {
-        self.store.list_threads(folder_id, scope, offset, limit)
+    pub fn list_threads(&self, folder_id: i64, scope: ThreadScope, filter: &sort::ListFilter, offset: u32, limit: u32) -> Result<ThreadPage> {
+        self.store.list_threads_filtered(folder_id, scope, filter, offset, limit)
     }
 
     pub fn search(

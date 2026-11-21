@@ -22,6 +22,7 @@ import type {
   Signature,
   SignatureDefaults,
   Card,
+  ListFilter,
   TagDef,
   Action,
   ActionResult,
@@ -35,6 +36,7 @@ import type {
 } from './types';
 
 import { fieldMatches, norm, parseQuery, tokenize, type Term } from './lib/query';
+import { sizeRangeLabel } from './lib/listGroups';
 
 const MOCK_DRAFTS = 'mock.drafts';
 function loadMockDrafts(): Record<number, SendRequest> {
@@ -704,6 +706,8 @@ export function createMockBackend(): Backend {
       }
     }
     meta.set(id, { kind, seed: Math.floor(rnd() * 1e9), accountId: folder.accountId, attachments, cc: rnd() < 0.3, threadId: id });
+    // Size: the text (no rnd(): the rest of the data stays as it was) plus the attachments.
+    m.size = 1500 + ((id * 2654435761) % 90_000) + attachments.reduce((n, a) => n + Math.round(a.size * 1.37), 0);
     // Most bodies are already local; ~25% must be "downloaded" on demand.
     if (rnd() < 0.75) {
       downloaded.add(id);
@@ -1336,18 +1340,34 @@ export function createMockBackend(): Backend {
     return me ? me.displayName || me.email : '';
   }
   const sortKey = (m: MessageSummary, sort: ListSort) => sortShown(m, sort).toLowerCase() || '\u{10FFFF}';
-  /** The folder's messages in `sort`'s order (by date: as kept, newest first). */
-  function sortedIn(folderId: number, sort: ListSort): MessageSummary[] {
+  /** The folder's messages its list filter lets through (the core's ListFilter), newest first. */
+  function filteredIn(folderId: number, f: ListFilter | undefined, threaded: boolean): MessageSummary[] {
     const list = folderMsgs.get(folderId) ?? [];
+    if (!f || (f.read == null && !f.flagged && !f.attachments)) return list;
+    return list.filter(
+      (m) =>
+        (f.keep != null && (threaded ? threadOf(m) === f.keep : m.id === f.keep)) ||
+        ((f.read == null || f.read === !m.unread) && (!f.flagged || m.flagged) && (!f.attachments || m.hasAttachments)),
+    );
+  }
+  /** The folder's messages in `sort`'s order (by date: as kept, newest first). */
+  function sortedIn(folderId: number, sort: ListSort, f?: ListFilter): MessageSummary[] {
+    const list = filteredIn(folderId, f, false);
     if (sort === 'received') return list;
+    if (sort === 'size') {
+      return list
+        .map((m, i) => ({ m, i }))
+        .sort((a, b) => (b.m.size ?? 0) - (a.m.size ?? 0) || a.i - b.i)
+        .map((x) => x.m);
+    }
     const keyed = list.map((m, i) => ({ m, i, k: sortKey(m, sort) }));
     keyed.sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : a.i - b.i));
     return keyed.map((x) => x.m);
   }
 
   /** A message's (or with `threaded`, a conversation's) row in the folder's list. */
-  function indexIn(folderId: number, id: number, threaded: boolean, sort: ListSort = 'received'): number | null {
-    const list = threaded ? (folderMsgs.get(folderId) ?? []) : sortedIn(folderId, sort);
+  function indexIn(folderId: number, id: number, threaded: boolean, sort: ListSort = 'received', f?: ListFilter): number | null {
+    const list = threaded ? filteredIn(folderId, f, true) : sortedIn(folderId, sort, f);
     if (!threaded) {
       const i = list.findIndex((m) => m.id === id);
       return i >= 0 ? i : null;
@@ -1592,10 +1612,10 @@ export function createMockBackend(): Backend {
     async open_folder() {
       await latency();
     },
-    async list_messages({ folderId, offset, limit, sort }) {
+    async list_messages({ folderId, offset, limit, sort, filter }) {
       await latency();
       if (listDelay) await sleep(listDelay);
-      const list = sortedIn(folderId, sort ?? 'received');
+      const list = sortedIn(folderId, sort ?? 'received', filter);
       return {
         total: list.length,
         messages: list.slice(offset, offset + limit).map((m) => ({ ...m })),
@@ -1608,10 +1628,10 @@ export function createMockBackend(): Backend {
       const results = searchCache.results;
       return { total: results.length, messages: results.slice(offset, offset + limit).map((m) => ({ ...m })) };
     },
-    async list_threads({ folderId, offset, limit, scope, includeTrash }) {
+    async list_threads({ folderId, offset, limit, scope, includeTrash, filter }) {
       await latency();
       if (listDelay) await sleep(listDelay);
-      const list = folderMsgs.get(folderId) ?? [];
+      const list = filteredIn(folderId, filter, true);
       const order: number[] = [];
       const newest = new Map<number, MessageSummary>();
       for (const m of list) {
@@ -1760,15 +1780,15 @@ export function createMockBackend(): Backend {
       pendingOps.delete(opId);
       op.rollback();
     },
-    async locate_message({ folderId, messageId, threaded, sort }) {
+    async locate_message({ folderId, messageId, threaded, sort, filter }) {
       await sleep(3);
       const id = threaded ? (meta.get(messageId)?.threadId ?? messageId) : messageId;
-      const index = indexIn(folderId, id, threaded, sort);
+      const index = indexIn(folderId, id, threaded, sort, filter);
       return index == null ? null : { id, index };
     },
-    async index_of({ folderId, id, threaded, sort }) {
+    async index_of({ folderId, id, threaded, sort, filter }) {
       await sleep(3);
-      return indexIn(folderId, id, threaded, sort);
+      return indexIn(folderId, id, threaded, sort, filter);
     },
     async sender_messages({ messageId, accountId, addr, offset, limit }) {
       await latency();
@@ -1902,12 +1922,12 @@ export function createMockBackend(): Backend {
       st.defaults = [...st.defaults.filter((d) => d.accountId !== accountId), { accountId, newId, replyId }];
       sigSave(st);
     },
-    async list_groups({ folderId, threaded, sort, bounds }) {
+    async list_groups({ folderId, threaded, sort, bounds, filter }) {
       await sleep(3);
       if (threaded || sort === 'received') {
         const counts = new Array<number>(bounds.length + 1).fill(0);
         const seen = new Set<number>();
-        for (const m of folderMsgs.get(folderId) ?? []) {
+        for (const m of filteredIn(folderId, filter, threaded)) {
           if (threaded) {
             const tid = threadOf(m);
             if (seen.has(tid)) continue; // newest first: the first is the conversation's newest
@@ -1920,10 +1940,10 @@ export function createMockBackend(): Backend {
       }
       const out: { label: string | null; count: number }[] = [];
       let last: string | null = null;
-      for (const m of sortedIn(folderId, sort)) {
-        const k = sortKey(m, sort);
+      for (const m of sortedIn(folderId, sort, filter)) {
+        const k = sort === 'size' ? sizeRangeLabel(m.size ?? 0) : sortKey(m, sort);
         if (k !== last) {
-          out.push({ label: k === '\u{10FFFF}' ? '' : sortShown(m, sort), count: 0 });
+          out.push({ label: sort === 'size' ? k : k === '\u{10FFFF}' ? '' : sortShown(m, sort), count: 0 });
           last = k;
         }
         out[out.length - 1]!.count++;
@@ -2281,12 +2301,13 @@ export function createMockBackend(): Backend {
       if (stored && Date.now() < stored.sendAt) return stored.draft ?? null;
       throw 'Too late to undo: the message was already sent.';
     },
-    async next_unread({ folderId, after, threaded, back, sort }) {
+    async next_unread({ folderId, after, threaded, back, sort, filter }) {
       await sleep(3);
+      if (filter?.read === true) return null;
       // Rows in list order, as (id, unread): messages, or conversations by their newest message.
       const rows: { id: number; unread: boolean }[] = [];
       const at = new Map<number, number>();
-      for (const m of threaded ? (folderMsgs.get(folderId) ?? []) : sortedIn(folderId, sort ?? 'received')) {
+      for (const m of threaded ? filteredIn(folderId, filter, true) : sortedIn(folderId, sort ?? 'received', filter)) {
         const id = threaded ? threadOf(m) : m.id;
         const k = at.get(id);
         if (k == null) {

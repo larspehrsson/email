@@ -102,6 +102,8 @@ export interface MessageSummary {
   draftId: number | null;
   /** snoozed until then (a reminder still to go off), Unix seconds */
   snoozedUntil?: number | null;
+  /** bytes (the whole message, as the server counts it) */
+  size?: number;
 }
 
 export interface Addr {
@@ -147,7 +149,17 @@ export type ConversationScope = 'folder' | 'all';
 
 /** A folder list's order: newest first, or by sender / first recipient (A to Z, newest first
  *  within each). The list is grouped by the same thing. */
-export type ListSort = 'received' | 'from' | 'to';
+export type ListSort = 'received' | 'from' | 'to' | 'size';
+
+/** What a folder's list shows: all of it, or only what passes every set condition. `keep`:
+ *  shown regardless (the open message or conversation, so reading it doesn't take it away). */
+export interface ListFilter {
+  /** false: unread only; true: read only */
+  read?: boolean | null;
+  flagged?: boolean;
+  attachments?: boolean;
+  keep?: number | null;
+}
 
 /** A person in the address book (id 0: not saved yet). */
 export interface Card {
@@ -466,6 +478,7 @@ export type MenuActionId =
   | 'sort-received'
   | 'sort-from'
   | 'sort-to'
+  | 'sort-size'
   | 'sender-panel'
   | 'address-book';
 export interface MenuActionPayload {
@@ -501,7 +514,7 @@ export interface CommandMap {
   cancel_sign_in: { args: undefined; ret: void };
   list_folders: { args: { accountId: number }; ret: Folder[] };
   open_folder: { args: { folderId: number }; ret: void };
-  list_messages: { args: { folderId: number; offset: number; limit: number; sort: ListSort }; ret: MessagePage };
+  list_messages: { args: { folderId: number; offset: number; limit: number; sort: ListSort; filter?: ListFilter }; ret: MessagePage };
   list_signatures: { args: undefined; ret: Signatures };
   list_cards: { args: undefined; ret: Card[] };
   save_card: { args: { card: Card }; ret: number };
@@ -517,7 +530,7 @@ export interface CommandMap {
   save_signature: { args: { id: number | null; name: string; html: string }; ret: number };
   delete_signature: { args: { id: number }; ret: void };
   set_signature_defaults: { args: { accountId: number; newId: number | null; replyId: number | null }; ret: void };
-  list_groups: { args: { folderId: number; threaded: boolean; sort: ListSort; bounds: number[] }; ret: ListGroup[] };
+  list_groups: { args: { folderId: number; threaded: boolean; sort: ListSort; filter?: ListFilter; bounds: number[] }; ret: ListGroup[] };
   get_message: { args: { id: number; allowRemote: boolean }; ret: MessageDetail | null };
   search_messages: {
     args: {
@@ -531,7 +544,7 @@ export interface CommandMap {
     ret: MessagePage;
   };
   list_threads: {
-    args: { folderId: number; offset: number; limit: number; scope: ConversationScope; includeTrash: boolean };
+    args: { folderId: number; offset: number; limit: number; scope: ConversationScope; includeTrash: boolean; filter?: ListFilter };
     ret: ThreadPage;
   };
   get_thread: {
@@ -550,13 +563,13 @@ export interface CommandMap {
   delete_tag: { args: { keyword: string }; ret: void };
   app_version: { args: undefined; ret: string };
   reveal_path: { args: { path: string }; ret: void };
-  index_of: { args: { folderId: number; id: number; threaded: boolean; sort: ListSort }; ret: number | null };
+  index_of: { args: { folderId: number; id: number; threaded: boolean; sort: ListSort; filter?: ListFilter }; ret: number | null };
   locate_message: {
-    args: { folderId: number; messageId: number; threaded: boolean; sort: ListSort };
+    args: { folderId: number; messageId: number; threaded: boolean; sort: ListSort; filter?: ListFilter };
     ret: { id: number; index: number } | null;
   };
   next_unread: {
-    args: { folderId: number; after: number | null; threaded: boolean; back: boolean; sort: ListSort };
+    args: { folderId: number; after: number | null; threaded: boolean; back: boolean; sort: ListSort; filter?: ListFilter };
     ret: NextUnread | null;
   };
   show_log: { args: undefined; ret: void };

@@ -56,7 +56,7 @@ const [selectedSummary, setSelectedSummary] = createSignal<MessageSummary | null
 const [threadedPref, setThreadedSig] = createSignal<boolean>(loadPref<boolean>('ui.threaded', true) !== false);
 /** The folder list's order (and grouping); app-wide, persisted. */
 const [listSort, setListSortSig] = createSignal<ListSort>(
-  ((s) => (s === 'from' || s === 'to' ? s : 'received'))(loadPref<string>('ui.listSort', 'received')),
+  ((s) => (s === 'from' || s === 'to' || s === 'size' ? s : 'received'))(loadPref<string>('ui.listSort', 'received')),
 );
 /** Conversation view in effect: list shows threads, reader shows the whole conversation. Only
  *  sorted by date: a conversation has no one sender to sort or group it by. */
@@ -307,6 +307,25 @@ export function setListSort(s: ListSort): void {
     }
   });
   savePref('ui.listSort', s);
+}
+
+/** The list's quick filter (View options › Show). Not kept between runs: a list that starts
+ *  filtered looks like missing mail. */
+export type QuickFilter = { read: boolean | null; flagged: boolean; attachments: boolean };
+export const NO_FILTER: QuickFilter = { read: null, flagged: false, attachments: false };
+const [listFilter, setListFilterSig] = createSignal<QuickFilter>(NO_FILTER);
+export { listFilter };
+export const filterOn = (f: QuickFilter = listFilter()) => f.read != null || f.flagged || f.attachments;
+export function setListFilter(f: QuickFilter): void {
+  const cur = listFilter();
+  if (f.read === cur.read && f.flagged === cur.flagged && f.attachments === cur.attachments) return;
+  setListFilterSig({ ...f });
+}
+/** "Unread · Starred · With attachments" */
+export function filterLabel(f: QuickFilter = listFilter()): string {
+  return [f.read === false ? 'Unread' : f.read === true ? 'Read' : null, f.flagged ? 'Starred' : null, f.attachments ? 'With attachments' : null]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 // N/P crossed into another folder: once its list is up, it selects the first (or, going back,

@@ -496,6 +496,40 @@ body.resizing iframe {
   padding: 0 20px 0 24px;
   border-bottom: 1px solid var(--sep);
 }
+/* the list's quick filter, on (View options › Show) */
+.filter-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 20px 6px 24px;
+  font-size: 12px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  border-bottom: 1px solid var(--sep);
+}
+.filter-what {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.filter-clear {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 5px;
+}
+.filter-clear:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
 .list-title {
   min-width: 0;
 }
@@ -654,6 +688,15 @@ body.resizing iframe {
 .row.unread .row-date {
   color: var(--rs-muted, var(--accent));
   font-weight: 500;
+}
+/* sorted by size: the size before the date */
+.row-size {
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--rs-muted, var(--text-2));
+  font-variant-numeric: tabular-nums;
+  margin-right: 8px;
 }
 
 .row-line2 {

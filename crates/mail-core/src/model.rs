@@ -198,6 +198,8 @@ pub struct MessageSummary {
     pub draft_id: Option<i64>,
     /// Snoozed until then (a reminder still to go off), Unix seconds (see `tags::snooze_keyword`).
     pub snoozed_until: Option<i64>,
+    /// Bytes, as the server counts them (the whole message, attachments too).
+    pub size: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]

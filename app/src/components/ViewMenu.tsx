@@ -11,6 +11,10 @@ import {
   setIncludeTrash,
   setListSort,
   setThreaded,
+  listFilter,
+  setListFilter,
+  NO_FILTER,
+  filterOn,
   threaded,
   threadedPref,
 } from '../state';
@@ -19,6 +23,7 @@ const SORTS: { id: ListSort; label: string; title: string }[] = [
   { id: 'received', label: 'Received', title: 'Newest first, grouped by day, week and month' },
   { id: 'from', label: 'From', title: 'By sender, A to Z, grouped by sender' },
   { id: 'to', label: 'To', title: 'By recipient, A to Z, grouped by recipient' },
+  { id: 'size', label: 'Size', title: 'Largest first, grouped by size' },
 ];
 import { CheckIcon, SlidersIcon } from './Icons';
 import { hint } from '../lib/shortcuts';
@@ -119,6 +124,45 @@ export function ViewMenuPopover() {
               </button>
             )}
           </For>
+          <div class="vm-sep" />
+          <div class="vm-section">Show</div>
+          <For each={[null, false, true] as const}>
+            {(read) => (
+              <button
+                role="menuitemradio"
+                aria-checked={listFilter().read === read}
+                class="vm-item"
+                onClick={() => setListFilter({ ...listFilter(), read })}
+              >
+                <Check on={listFilter().read === read} radio />
+                <span class="vm-label">{read == null ? 'Read and unread' : read ? 'Read only' : 'Unread only'}</span>
+              </button>
+            )}
+          </For>
+          <button
+            role="menuitemcheckbox"
+            aria-checked={listFilter().flagged}
+            class="vm-item"
+            onClick={() => setListFilter({ ...listFilter(), flagged: !listFilter().flagged })}
+          >
+            <Check on={listFilter().flagged} />
+            <span class="vm-label">Starred only</span>
+          </button>
+          <button
+            role="menuitemcheckbox"
+            aria-checked={listFilter().attachments}
+            class="vm-item"
+            onClick={() => setListFilter({ ...listFilter(), attachments: !listFilter().attachments })}
+          >
+            <Check on={listFilter().attachments} />
+            <span class="vm-label">With attachments only</span>
+          </button>
+          <Show when={filterOn()}>
+            <button role="menuitem" class="vm-item" onClick={() => setListFilter(NO_FILTER)}>
+              <span class="vm-check" aria-hidden="true" />
+              <span class="vm-label">Show all</span>
+            </button>
+          </Show>
           <div class="vm-sep" />
           <button
             role="menuitemcheckbox"

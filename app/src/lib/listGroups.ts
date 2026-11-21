@@ -114,3 +114,17 @@ export function insertRow(groups: Group[], index: number, label?: string): Group
   if (groups[k]!.start === index && prev && label != null && prev.label.toLowerCase() === label.toLowerCase()) k--;
   return layoutGroups(groups.map((g, j) => ({ label: g.label, count: g.count + (j === k ? 1 : 0) })));
 }
+
+/** Size ranges when sorted by size, largest first: (smallest size in it, label). The core's
+ *  (sort.rs SIZE_RANGES): its groups come labelled; this places a row put back by undo. */
+export const SIZE_RANGES: [number, string][] = [
+  [10 * 2 ** 20, 'Huge (over 10 MB)'],
+  [5 * 2 ** 20, 'Very large (5–10 MB)'],
+  [2 ** 20, 'Large (1–5 MB)'],
+  [100 * 2 ** 10, 'Medium (100 KB–1 MB)'],
+  [25 * 2 ** 10, 'Small (25–100 KB)'],
+  [0, 'Tiny (under 25 KB)'],
+];
+export function sizeRangeLabel(size: number): string {
+  return (SIZE_RANGES.find(([min]) => size >= min) ?? SIZE_RANGES[SIZE_RANGES.length - 1]!)[1];
+}

@@ -708,6 +708,19 @@ impl Connection {
                 self.ensure_selected(folder).await?;
                 store(self, *uid, format!("{}FLAGS.SILENT ({flag})", if *on { "+" } else { "-" })).await?;
             }
+            ServerOp::FlagsMany { folder, uids, flag, on } => {
+                self.ensure_selected(folder).await?;
+                // A few hundred at a time keeps the command line short when UIDs are scattered.
+                for part in uids.chunks(500) {
+                    let r: Vec<_> = self
+                        .session
+                        .uid_store(uid_set(part), format!("{}FLAGS.SILENT ({flag})", if *on { "+" } else { "-" }))
+                        .await?
+                        .try_collect()
+                        .await?;
+                    drop(r);
+                }
+            }
             ServerOp::Expunge { folder, uid } => {
                 self.ensure_selected(folder).await?;
                 store(self, *uid, "+FLAGS.SILENT (\\Deleted)".into()).await?;

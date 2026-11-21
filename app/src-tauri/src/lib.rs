@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mail_core::model::*;
-use mail_core::sort::{ListGroup, ListSort};
+use mail_core::sort::{ListFilter, ListGroup, ListSort};
 use mail_core::{Core, NewAccount, Secrets};
 use serde::Serialize;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
@@ -60,8 +60,10 @@ async fn list_messages(
     offset: u32,
     limit: u32,
     sort: Option<ListSort>,
+    filter: Option<ListFilter>,
 ) -> Res<MessagePage> {
-    timed("list_messages", || core.list_messages_by(folder_id, sort.unwrap_or_default(), offset, limit)).map_err(err)
+    let filter = filter.unwrap_or_default();
+    timed("list_messages", || core.list_messages_by(folder_id, sort.unwrap_or_default(), &filter, offset, limit)).map_err(err)
 }
 
 /// The groups the folder's list is shown in (see `Store::list_groups`).
@@ -71,9 +73,11 @@ async fn list_groups(
     folder_id: i64,
     threaded: bool,
     sort: Option<ListSort>,
+    filter: Option<ListFilter>,
     bounds: Vec<i64>,
 ) -> Res<Vec<ListGroup>> {
-    timed("list_groups", || core.list_groups(folder_id, threaded, sort.unwrap_or_default(), &bounds)).map_err(err)
+    let filter = filter.unwrap_or_default();
+    timed("list_groups", || core.list_groups(folder_id, threaded, sort.unwrap_or_default(), &filter, &bounds)).map_err(err)
 }
 
 /// `allow_remote` is enforced by the reader's iframe CSP; the core always returns the same
@@ -109,8 +113,10 @@ async fn list_threads(
     limit: u32,
     scope: Option<ConversationScope>,
     include_trash: Option<bool>,
+    filter: Option<ListFilter>,
 ) -> Res<ThreadPage> {
-    timed("list_threads", || core.list_threads(folder_id, thread_scope(scope, include_trash), offset, limit)).map_err(err)
+    let filter = filter.unwrap_or_default();
+    timed("list_threads", || core.list_threads(folder_id, thread_scope(scope, include_trash), &filter, offset, limit)).map_err(err)
 }
 
 #[tauri::command]
@@ -392,14 +398,28 @@ async fn apply_action(
     core.apply_action(action, &message_ids, folder_id).map_err(err)
 }
 
+/// Mark every message in the folder read; returns how many were unread.
+#[tauri::command]
+async fn mark_folder_read(core: State<'_, Arc<Core>>, folder_id: i64) -> Res<usize> {
+    core.mark_folder_read(folder_id).map_err(err)
+}
+
 #[tauri::command]
 async fn undo_action(core: State<'_, Arc<Core>>, op_id: i64) -> Res<()> {
     core.undo_action(op_id).map_err(err)
 }
 
 #[tauri::command]
-async fn index_of(core: State<'_, Arc<Core>>, folder_id: i64, id: i64, threaded: bool, sort: Option<ListSort>) -> Res<Option<u32>> {
-    timed("index_of", || core.index_of(folder_id, id, threaded, sort.unwrap_or_default())).map_err(err)
+async fn index_of(
+    core: State<'_, Arc<Core>>,
+    folder_id: i64,
+    id: i64,
+    threaded: bool,
+    sort: Option<ListSort>,
+    filter: Option<ListFilter>,
+) -> Res<Option<u32>> {
+    let filter = filter.unwrap_or_default();
+    timed("index_of", || core.index_of(folder_id, id, threaded, sort.unwrap_or_default(), &filter)).map_err(err)
 }
 
 #[derive(Serialize)]
@@ -416,8 +436,10 @@ async fn locate_message(
     message_id: i64,
     threaded: bool,
     sort: Option<ListSort>,
+    filter: Option<ListFilter>,
 ) -> Res<Option<Located>> {
-    timed("locate_message", || core.locate_message(folder_id, message_id, threaded, sort.unwrap_or_default()))
+    let filter = filter.unwrap_or_default();
+    timed("locate_message", || core.locate_message(folder_id, message_id, threaded, sort.unwrap_or_default(), &filter))
         .map(|l| l.map(|(id, index)| Located { id, index }))
         .map_err(err)
 }
@@ -430,8 +452,9 @@ async fn next_unread(
     threaded: bool,
     back: bool,
     sort: Option<ListSort>,
+    filter: Option<ListFilter>,
 ) -> Res<Option<NextUnread>> {
-    core.next_unread(folder_id, after, threaded, back, sort.unwrap_or_default()).map_err(err)
+    core.next_unread(folder_id, after, threaded, back, sort.unwrap_or_default(), &filter.unwrap_or_default()).map_err(err)
 }
 
 #[tauri::command]
@@ -891,6 +914,7 @@ fn macos_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
             &MenuItem::with_id(app, "sort-received", "Sort by Received", true, None::<&str>)?,
             &MenuItem::with_id(app, "sort-from", "Sort by From", true, None::<&str>)?,
             &MenuItem::with_id(app, "sort-to", "Sort by To", true, None::<&str>)?,
+            &MenuItem::with_id(app, "sort-size", "Sort by Size", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "sender-panel", "Sender Panel", true, Some("CmdOrCtrl+2"))?,
             &PredefinedMenuItem::separator(app)?,
@@ -1190,7 +1214,7 @@ pub fn run() {
                 let _ = std::fs::remove_dir_all(dir);
             }
             let dir = app.path().app_data_dir()?;
-            let core = match Core::open(&dir, Secrets::Keyring) {
+            let core = match Core::open(&dir, Secrets::keyring()) {
                 Ok(core) => Arc::new(core),
                 Err(e) => {
                     cannot_open(app.handle(), &e);
@@ -1247,6 +1271,7 @@ pub fn run() {
             set_read,
             set_allow_remote,
             list_threads,
+            mark_folder_read,
             get_thread,
             update_password,
             set_keep_attachments,

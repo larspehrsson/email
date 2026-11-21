@@ -2,7 +2,7 @@ import { type JSX, batch, on, createEffect, createMemo, createSelector, createSi
 import { createVirtualizer } from '@tanstack/solid-virtual';
 import { api, type Folder, type MessageSummary, type SearchField, type ThreadSummary } from '../api';
 import { createPagedList } from '../lib/messageList';
-import { dayStart, fmtNum, smartDate } from '../lib/format';
+import { dayStart, fmtNum, fmtSize, smartDate } from '../lib/format';
 import {
   datePeriods,
   insertRow,
@@ -12,6 +12,7 @@ import {
   removeRows,
   startsGroup,
   startsThrough,
+  sizeRangeLabel,
   type Group,
   type Period,
 } from '../lib/listGroups';
@@ -46,6 +47,11 @@ import {
   type Reveal,
   focusInConversation,
   revealRequest,
+  listFilter,
+  setListFilter,
+  filterOn,
+  filterLabel,
+  NO_FILTER,
 } from '../state';
 import { CheckIcon, ClockIcon, FlagIcon, ForwardIcon, PaperclipIcon, ReplyIcon } from './Icons';
 
@@ -147,7 +153,7 @@ export function SendState(props: { m: { sending: boolean; sendFailed: boolean };
   );
 }
 
-function RowContent(props: { m: MessageSummary; re?: RegExp | null; subjRe?: RegExp | null; folderTag?: string }) {
+function RowContent(props: { m: MessageSummary; re?: RegExp | null; subjRe?: RegExp | null; folderTag?: string; showSize?: boolean }) {
   return (
     // A tag describes the message: shown as a bar in the first tag's colour beside the text
     // (unread dot stays at the edge); all tags appear as dots on the first line.
@@ -176,6 +182,9 @@ function RowContent(props: { m: MessageSummary; re?: RegExp | null; subjRe?: Reg
           </Show>
           <SnoozeMark until={props.m.snoozedUntil} />
         </span>
+        <Show when={props.showSize}>
+          <span class="row-size">{fmtSize(props.m.size ?? 0)}</span>
+        </Show>
         <SendState m={props.m} fallback={<span class="row-date">{smartDate(props.m.date)}</span>} />
       </div>
       <div class="row-line2">
@@ -293,14 +302,22 @@ export function MessageList(props: {
   const folderId = props.folder.id;
   /** Fixed for the component's life: the parent remounts the list when it changes. */
   const sort = search ? 'received' : untrack(listSort);
+  /** The quick filter, fixed like the sort (the parent remounts the list when it changes). */
+  const quick = search ? NO_FILTER : untrack(listFilter);
+  const filtered = filterOn(quick);
+  /** As the core takes it: with the open item kept in the list whatever the filter says (an
+   *  unread one opened becomes read; it stays until something else is opened). */
+  const filterArg = () => (filtered ? { ...quick, keep: untrack(selectedId) } : undefined);
   const fetcher = props.search
     ? searchFetcher(props.search)
     : threaded
     ? (offset: number, limit: number) =>
         // Options read at fetch time; a change invalidates the pages (effect below).
-        api.listThreads(folderId, offset, limit, conversationScope(), includeTrash()).then((r) => ({ total: r.total, items: r.threads as Item[] }))
+        api
+          .listThreads(folderId, offset, limit, conversationScope(), includeTrash(), filterArg())
+          .then((r) => ({ total: r.total, items: r.threads as Item[] }))
     : (offset: number, limit: number) =>
-        api.listMessages(folderId, offset, limit, sort).then((r) => ({ total: r.total, items: r.messages as Item[] }));
+        api.listMessages(folderId, offset, limit, sort, filterArg()).then((r) => ({ total: r.total, items: r.messages as Item[] }));
 
   // ---- groups: headers above the first row of each (search results have none)
 
@@ -334,7 +351,7 @@ export function MessageList(props: {
     const g = ++groupsGen;
     periods = sort === 'received' ? datePeriods(new Date(), FIRST_DAY) : [];
     api
-      .listGroups(folderId, threaded, sort, periodBounds(periods))
+      .listGroups(folderId, threaded, sort, periodBounds(periods), filterArg())
       .then((res) => {
         if (g !== groupsGen) return;
         const named =
@@ -348,6 +365,7 @@ export function MessageList(props: {
   /** The group a row belongs in, by what it's grouped by (to put an undone row back). */
   function groupLabel(it: Item): string | undefined {
     if (sort === 'from') return (it as MessageSummary).fromName || (it as MessageSummary).fromAddr;
+    if (sort === 'size') return sizeRangeLabel((it as MessageSummary).size ?? 0);
     if (sort === 'received') return periods.find((p) => it.date >= p.from)?.label ?? 'Older';
     return undefined;
   }
@@ -516,7 +534,7 @@ export function MessageList(props: {
       }
       return;
     }
-    const hit = await api.nextUnread(folderId, cur, threaded, back, sort);
+    const hit = await api.nextUnread(folderId, cur, threaded, back, sort, filterArg());
     if (hit && hit.id !== cur) {
       crossing = null;
       await goTo(hit.index, hit.id);
@@ -644,11 +662,11 @@ export function MessageList(props: {
     // index_of answers both questions at once: still in this folder, and where (any depth).
     let target = item;
     const where: Promise<number | null> = asked
-      ? api.locateMessage(folderId, asked.id, threaded, sort).then((l) => {
+      ? api.locateMessage(folderId, asked.id, threaded, sort, filterArg()).then((l) => {
           if (l) target = l.id;
           return l?.index ?? null;
         })
-      : api.indexOf(folderId, item, threaded, sort);
+      : api.indexOf(folderId, item, threaded, sort, filterArg());
     void where
       .catch(() => null)
       .then(async (idx) => {
@@ -863,6 +881,14 @@ export function MessageList(props: {
         </div>
         <ViewMenuButton />
       </header>
+      <Show when={filtered}>
+        <div class="filter-bar" role="status">
+          <span class="filter-what">Showing: {filterLabel(quick)}</span>
+          <button class="filter-clear" title="Show all messages" aria-label="Show all messages" onClick={() => setListFilter(NO_FILTER)}>
+            Show all
+          </button>
+        </div>
+      </Show>
       </Show>
       <div
         class="list-scroll"
@@ -880,10 +906,25 @@ export function MessageList(props: {
           <Show
             when={search}
             fallback={
-              <div class="list-empty">
-                <div class="list-empty-title">No messages</div>
-                <div class="list-empty-sub">This folder is empty.</div>
-              </div>
+              <Show
+                when={filtered}
+                fallback={
+                  <div class="list-empty">
+                    <div class="list-empty-title">No messages</div>
+                    <div class="list-empty-sub">This folder is empty.</div>
+                  </div>
+                }
+              >
+                <div class="list-empty">
+                  <div class="list-empty-title">Nothing here</div>
+                  <div class="list-empty-sub">
+                    No {filterLabel(quick).toLowerCase()} messages in this folder.{' '}
+                    <button class="link-btn" onClick={() => setListFilter(NO_FILTER)}>
+                      Show all
+                    </button>
+                  </div>
+                </div>
+              </Show>
             }
           >
             <div class="list-empty">
@@ -957,6 +998,7 @@ export function MessageList(props: {
                               ? folderById((it() as MessageSummary).folderId)?.displayName
                               : undefined
                           }
+                          showSize={sort === 'size'}
                         />
                       )
                     }

@@ -2,7 +2,10 @@
 //! (A to Z, newest first within each). The list is grouped by the same thing it's sorted by,
 //! so one function gives both the order and the groups: `sender_key` / `recipient_key`,
 //! registered as SQL functions on every connection (`register`), so queries order and group
-//! by exactly what this module says.
+//! by exactly what this module says. By size, largest first, grouped in size ranges.
+//!
+//! A [`ListFilter`] narrows the list (unread, starred, with attachments); every query that
+//! places rows takes the same one, so positions and groups agree with the rows shown.
 
 use rusqlite::Connection;
 use rusqlite::functions::FunctionFlags;
@@ -19,6 +22,8 @@ pub enum ListSort {
     From,
     /// By the first recipient's name (or address), A to Z.
     To,
+    /// Largest first.
+    Size,
 }
 
 impl ListSort {
@@ -28,6 +33,71 @@ impl ListSort {
             ListSort::Received => None,
             ListSort::From => Some("sender_key(m.from_name, m.from_addr)"),
             ListSort::To => Some("recipient_key(m.to_addrs)"),
+            // Ascending like the others, so the same comparisons place a row.
+            ListSort::Size => Some("-m.size"),
+        }
+    }
+}
+
+/// Size ranges the list is grouped in when sorted by size, largest first: (smallest size in
+/// the range, in bytes; label). eM Client's.
+pub const SIZE_RANGES: [(i64, &str); 6] = [
+    (10 << 20, "Huge (over 10 MB)"),
+    (5 << 20, "Very large (5–10 MB)"),
+    (1 << 20, "Large (1–5 MB)"),
+    (100 << 10, "Medium (100 KB–1 MB)"),
+    (25 << 10, "Small (25–100 KB)"),
+    (0, "Tiny (under 25 KB)"),
+];
+
+/// Which of [`SIZE_RANGES`] a size is in.
+pub fn size_range(size: i64) -> usize {
+    SIZE_RANGES.iter().position(|&(min, _)| size >= min).unwrap_or(SIZE_RANGES.len() - 1)
+}
+
+/// What the list shows: all of the folder, or only some of it. All set conditions must hold.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ListFilter {
+    /// Some(false): unread only; Some(true): read only.
+    pub read: Option<bool>,
+    /// Starred only.
+    pub flagged: bool,
+    /// With attachments only.
+    pub attachments: bool,
+    /// Shown whatever the filter says: the open message (or conversation), so reading it (which
+    /// makes it read) doesn't take it out from under the reader.
+    pub keep: Option<i64>,
+}
+
+impl ListFilter {
+    pub fn is_all(&self) -> bool {
+        self.read.is_none() && !self.flagged && !self.attachments
+    }
+
+    /// SQL condition on `m` (messages) and `e` (entries): "" for all, else " AND (…)". The
+    /// kept item is a message id, or with `threaded` a conversation id.
+    pub fn sql(&self, threaded: bool) -> String {
+        if self.is_all() {
+            return String::new();
+        }
+        let mut c: Vec<&str> = Vec::new();
+        match self.read {
+            Some(false) => c.push("(m.flags & 1) = 0"),
+            Some(true) => c.push("(m.flags & 1) != 0"),
+            None => {}
+        }
+        if self.flagged {
+            c.push("(m.flags & 2) != 0");
+        }
+        if self.attachments {
+            c.push("m.has_attachments != 0");
+        }
+        let cond = c.join(" AND ");
+        match self.keep {
+            Some(id) if threaded => format!(" AND (({cond}) OR e.thread_id = {id})"),
+            Some(id) => format!(" AND (({cond}) OR e.message_id = {id})"),
+            None => format!(" AND ({cond})"),
         }
     }
 }
@@ -110,6 +180,24 @@ mod tests {
         assert_eq!(sender_key("ALICE", "a@x"), sender_key("alice", "other@x"));
         assert_eq!(sender_key("", ""), NOBODY);
         assert!(sender_key("zed", "") < sender_key("", ""), "nobody sorts last");
+    }
+
+    #[test]
+    fn size_ranges() {
+        assert_eq!(SIZE_RANGES[size_range(20 << 20)].1, "Huge (over 10 MB)");
+        assert_eq!(size_range(10 << 20), 0);
+        assert_eq!(size_range((10 << 20) - 1), 1);
+        assert_eq!(size_range(0), 5);
+        assert_eq!(size_range(-1), 5);
+    }
+
+    #[test]
+    fn filter_sql() {
+        assert_eq!(ListFilter::default().sql(false), "");
+        let f = ListFilter { read: Some(false), attachments: true, keep: Some(7), ..Default::default() };
+        assert_eq!(f.sql(false), " AND (((m.flags & 1) = 0 AND m.has_attachments != 0) OR e.message_id = 7)");
+        assert_eq!(f.sql(true), " AND (((m.flags & 1) = 0 AND m.has_attachments != 0) OR e.thread_id = 7)");
+        assert_eq!(ListFilter { keep: Some(3), ..Default::default() }.sql(false), "", "keep alone doesn't filter");
     }
 
     #[test]

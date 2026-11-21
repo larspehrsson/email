@@ -49,7 +49,8 @@ per account for new messages and for replies, switchable in the message. Sending
 
 **Sort and group** the list from the View options: by date received (grouped into Today,
 Yesterday, this week's days, last weeks and months), or by sender or recipient, A to Z, with
-each person's messages together under their name.
+each person's messages together under their name, or by size, largest first, to find what
+takes the space. **Filter** it to unread or read mail, starred, or messages with attachments.
 
 ![The Newsletters folder sorted by sender](docs/screenshots/sorted.png)
 

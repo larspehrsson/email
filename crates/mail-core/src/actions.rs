@@ -201,6 +201,8 @@ pub enum ServerOp {
     Move { folder: String, uid: u32, target: String },
     /// `flag` is an IMAP flag such as `\Seen`.
     Flags { folder: String, uid: u32, flag: String, on: bool },
+    /// [`ServerOp::Flags`] for many messages of one folder in one command (see `batch_flags`).
+    FlagsMany { folder: String, uids: Vec<u32>, flag: String, on: bool },
     /// \Deleted + UID EXPUNGE (permanent).
     Expunge { folder: String, uid: u32 },
     /// Gmail: run `then` on the message's copy in `folder` (All Mail), found by X-GM-MSGID when
@@ -230,7 +232,12 @@ impl ServerOp {
         let mut op = self.clone();
         match &mut op {
             ServerOp::Labels { uid: u, .. } | ServerOp::Move { uid: u, .. } | ServerOp::Flags { uid: u, .. } | ServerOp::Expunge { uid: u, .. } => *u = uid,
-            ServerOp::Find { .. } | ServerOp::FindByMessageId { .. } | ServerOp::Append { .. } | ServerOp::Graph { .. } | ServerOp::GraphReport { .. } => {}
+            ServerOp::Find { .. }
+            | ServerOp::FindByMessageId { .. }
+            | ServerOp::Append { .. }
+            | ServerOp::Graph { .. }
+            | ServerOp::GraphReport { .. }
+            | ServerOp::FlagsMany { .. } => {}
         }
         op
     }
@@ -239,7 +246,12 @@ impl ServerOp {
     fn uid(&self) -> Option<u32> {
         match self {
             ServerOp::Labels { uid, .. } | ServerOp::Move { uid, .. } | ServerOp::Flags { uid, .. } | ServerOp::Expunge { uid, .. } => Some(*uid),
-            ServerOp::Find { .. } | ServerOp::FindByMessageId { .. } | ServerOp::Append { .. } | ServerOp::Graph { .. } | ServerOp::GraphReport { .. } => None,
+            ServerOp::Find { .. }
+            | ServerOp::FindByMessageId { .. }
+            | ServerOp::Append { .. }
+            | ServerOp::Graph { .. }
+            | ServerOp::GraphReport { .. }
+            | ServerOp::FlagsMany { .. } => None,
         }
     }
 
@@ -249,6 +261,7 @@ impl ServerOp {
             ServerOp::Labels { folder, .. }
             | ServerOp::Move { folder, .. }
             | ServerOp::Flags { folder, .. }
+            | ServerOp::FlagsMany { folder, .. }
             | ServerOp::Expunge { folder, .. }
             | ServerOp::Find { folder, .. }
             | ServerOp::Append { folder, .. } => folder,
@@ -347,8 +360,52 @@ pub fn plan(
         Action::Archive | Action::Trash | Action::Spam | Action::Move { .. } => {
             plan_leaving(store, account_id, gmail, action, message_ids, context)
         }
-        _ => plan_basic(store, account_id, gmail, action, message_ids, context),
+        _ => {
+            let mut p = plan_basic(store, account_id, gmail, action, message_ids, context)?;
+            p.ops = batch_flags(p.ops);
+            Ok(p)
+        }
     }
+}
+
+/// The same flag change on many messages of a folder (marking a folder read, a selection of
+/// messages starred) as one command per folder instead of one per message. Only plain
+/// commands addressed by UID; the rest keep their place.
+pub fn batch_flags(ops: Vec<ServerOp>) -> Vec<ServerOp> {
+    if ops.len() < 2 {
+        return ops;
+    }
+    let mut out: Vec<ServerOp> = Vec::new();
+    for op in ops {
+        match op {
+            ServerOp::Flags { folder, uid, flag, on } if uid != 0 => {
+                let k = out.iter().position(|o| {
+                    matches!(o, ServerOp::FlagsMany { folder: f, flag: g, on: o_on, .. } if *f == folder && *g == flag && *o_on == on)
+                });
+                match k {
+                    Some(k) => {
+                        if let ServerOp::FlagsMany { uids, .. } = &mut out[k] {
+                            uids.push(uid);
+                        }
+                    }
+                    None => out.push(ServerOp::FlagsMany { folder, uids: vec![uid], flag, on }),
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    // One message alone stays a plain command.
+    out.into_iter()
+        .map(|o| match o {
+            ServerOp::FlagsMany { folder, uids, flag, on } if uids.len() == 1 => ServerOp::Flags { folder, uid: uids[0], flag, on },
+            ServerOp::FlagsMany { folder, mut uids, flag, on } => {
+                uids.sort_unstable();
+                uids.dedup();
+                ServerOp::FlagsMany { folder, uids, flag, on }
+            }
+            o => o,
+        })
+        .collect()
 }
 
 /// [`plan`] for one action, without the snooze bookkeeping.
@@ -772,6 +829,21 @@ mod tests {
 
         let p = plan(&env.store, env.acct, true, Action::Read, &[msg], env.id("Travel")).unwrap();
         assert_eq!(p.ops, vec![ServerOp::Flags { folder: "[Gmail]/All Mail".into(), uid: 900, flag: "\\Seen".into(), on: true }]);
+        // Many at once: one command per folder.
+        let ops = batch_flags(vec![
+            ServerOp::Flags { folder: "A".into(), uid: 9, flag: "\\Seen".into(), on: true },
+            ServerOp::Flags { folder: "B".into(), uid: 1, flag: "\\Seen".into(), on: true },
+            ServerOp::Flags { folder: "A".into(), uid: 3, flag: "\\Seen".into(), on: true },
+            ServerOp::Flags { folder: "A".into(), uid: 0, flag: "\\Seen".into(), on: true },
+        ]);
+        assert_eq!(
+            ops,
+            vec![
+                ServerOp::FlagsMany { folder: "A".into(), uids: vec![3, 9], flag: "\\Seen".into(), on: true },
+                ServerOp::Flags { folder: "B".into(), uid: 1, flag: "\\Seen".into(), on: true },
+                ServerOp::Flags { folder: "A".into(), uid: 0, flag: "\\Seen".into(), on: true },
+            ]
+        );
         assert_eq!(p.delay_ms, 0);
         env.store.apply_local(&p.change).unwrap();
         assert_eq!(env.store.message_flags(msg).unwrap() & flags::SEEN, flags::SEEN);

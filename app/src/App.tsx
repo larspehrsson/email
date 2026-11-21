@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createSignal, Match, onCleanup, onMount, Show, Switch } from 'solid-js';
-import type { Account } from './api';
+import type { Account, ListSort } from './api';
 import {
   accounts,
   flushReader,
@@ -15,6 +15,7 @@ import {
   setThreaded,
   threadedPref,
   listSort,
+  listFilter,
   senderPane,
   setSenderPane,
   mainView,
@@ -139,7 +140,8 @@ export function App() {
         case 'sort-received':
         case 'sort-from':
         case 'sort-to':
-          setListSort(id.slice(5) as 'received' | 'from' | 'to');
+        case 'sort-size':
+          setListSort(id.slice(5) as ListSort);
           break;
         case 'sender-panel':
           setSenderPane(!senderPane());
@@ -274,7 +276,7 @@ export function App() {
                   >
                     {(f) => (
                       // Remounted when the sort changes: the list reads it once.
-                      <Show when={listSort()} keyed>
+                      <Show when={`${listSort()} ${JSON.stringify(listFilter())}`} keyed>
                         {(_sort) => (
                           <Show when={threaded()} fallback={<MessageList folder={f} threaded={false} onOpen={openReader} />}>
                             <MessageList folder={f} threaded onOpen={openReader} />

@@ -806,6 +806,78 @@ describe('sorting', () => {
   });
 });
 
+describe('size and filters', () => {
+  const sizeOf = (t) => {
+    const [n, u] = t.trim().split(' ');
+    return Number(n) * ({ B: 1, KB: 1024, MB: 2 ** 20, GB: 2 ** 30 }[u] ?? 1);
+  };
+  async function menu(page, label) {
+    await page.click('.view-menu-btn');
+    await page.locator('.view-menu .vm-item', { hasText: label }).click();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+  }
+
+  test('by size: largest first, under size ranges, sizes shown', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await menu(page, 'Size');
+      const sizes = await page.locator('.folder-layer .row .row-size').allTextContents();
+      assert.ok(sizes.length > 5, 'sizes on the rows');
+      const bytes = sizes.map(sizeOf);
+      assert.deepEqual(bytes, [...bytes].sort((a, b) => b - a), `largest first: ${sizes.slice(0, 8)}`);
+      const head = await page.locator('.folder-layer .group-head .group-label').first().textContent();
+      assert.match(head, /^(Huge|Very large|Large|Medium|Small|Tiny) \(/);
+      assert.ok(Number(await page.locator('.folder-layer .group-head .group-count').first().textContent()) > 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('unread only: the list shows just those, says so, and the one opened stays', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const all = await page.locator('.folder-layer .list-sub').textContent();
+      await menu(page, 'Unread only');
+      await page.waitForSelector('.folder-layer .filter-bar');
+      assert.match(await page.locator('.folder-layer .filter-what').textContent(), /Unread/);
+      const rows = page.locator('.folder-layer .row');
+      const n = await rows.count();
+      assert.ok(n > 0);
+      assert.equal(await page.locator('.folder-layer .row:not(.unread)').count(), 0, 'only unread rows');
+      assert.notEqual(await page.locator('.folder-layer .list-sub').textContent(), all, 'fewer messages');
+      // Opening one reads it; it stays (with the others) until something else is opened.
+      await rows.first().click();
+      await page.waitForTimeout(1200);
+      const subject = await selected(page).textContent();
+      assert.equal(await page.locator('.folder-layer .row', { hasText: subject }).count(), 1, 'the opened one stays');
+      // Show all again.
+      await page.locator('.folder-layer .filter-clear').click();
+      await page.waitForTimeout(400);
+      assert.equal(await page.locator('.folder-layer .filter-bar').count(), 0);
+      assert.ok((await page.locator('.folder-layer .row:not(.unread)').count()) > 0, 'read ones back');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('with attachments, in conversations too', async () => {
+    const { page, errors, close } = await open({ threaded: true });
+    try {
+      await menu(page, 'With attachments only');
+      await page.waitForSelector('.folder-layer .filter-bar');
+      const rows = await page.locator('.folder-layer .row').count();
+      assert.ok(rows > 0, 'some conversations with attachments');
+      assert.equal(await page.locator('.folder-layer .row').filter({ hasNot: page.locator('.clip') }).count(), 0, 'each shows a paperclip');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('signatures', () => {
   test('made in Settings, a new message gets the account default; it can be switched or taken off', async () => {
     const { page, errors, context, close } = await open({ threaded: false });
