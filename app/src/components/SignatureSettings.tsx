@@ -2,11 +2,13 @@ import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from 's
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
+import Image from '@tiptap/extension-image';
 import { api, errorMessage } from '../api';
 import { accounts } from '../state';
-import { loadSignatures, reloadSignatures, setDefaultsHere, sigs } from '../lib/signatures';
+import { loadSignatures, pictureForSignature, reloadSignatures, setDefaultsHere, sigs } from '../lib/signatures';
 import { confirmDialog } from './Actions';
 import { MOD } from '../lib/shortcuts';
+import { ImageIcon } from './Icons';
 
 // Settings › Signatures: the list on the left, the one chosen on the right (saved as it's
 // typed, like a draft), and each account's defaults below.
@@ -19,6 +21,23 @@ export function SignaturesSection() {
   let nameInput!: HTMLInputElement;
   let editorEl!: HTMLDivElement;
   let editor: Editor | undefined;
+  let pictureInput!: HTMLInputElement;
+
+  /** Put pictures (pasted, dropped or chosen) in at the cursor (or at `pos`). */
+  async function addPictures(files: File[], pos?: number) {
+    for (const f of files.filter((f) => f.type.startsWith('image/'))) {
+      try {
+        const p = await pictureForSignature(f);
+        if (!editor) return;
+        // After what's selected (a picture just put in stays selected: not over it).
+        const at = pos ?? editor.state.selection.to;
+        editor.chain().focus().insertContentAt(at, { type: 'image', attrs: p }).run();
+      } catch {
+        setMsg(`Couldn’t read the picture ${f.name || ''}`.trim());
+      }
+    }
+  }
+  const pictures = (list: FileList | null | undefined) => [...(list ?? [])].filter((f) => f.type.startsWith('image/'));
   /** Loading a signature into the fields isn't a change to save. */
   let loading = false;
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -33,8 +52,31 @@ export function SignaturesSection() {
           horizontalRule: false,
           link: { openOnClick: false, autolink: true, defaultProtocol: 'https' },
         }),
-        Placeholder.configure({ placeholder: 'Your name, title, phone…' }),
+        Placeholder.configure({ placeholder: 'Your name, title, phone… (paste or drop a logo too)' }),
+        // Pictures sit in the text (a logo beside a name), drag a corner to size them; kept as
+        // data: URLs, sent as inline parts (the core's compose::inline_images).
+        Image.configure({
+          inline: true,
+          allowBase64: true,
+          resize: { enabled: true, directions: ['top-left', 'top-right', 'bottom-left', 'bottom-right'], alwaysPreserveAspectRatio: true, minWidth: 16, minHeight: 16 },
+        }),
       ],
+      editorProps: {
+        handlePaste: (_view, event) => {
+          const files = pictures(event.clipboardData?.files);
+          if (!files.length) return false;
+          void addPictures(files);
+          return true;
+        },
+        handleDrop: (view, event) => {
+          const files = pictures(event.dataTransfer?.files);
+          if (!files.length) return false;
+          event.preventDefault();
+          const at = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
+          void addPictures(files, at);
+          return true;
+        },
+      },
       content: '',
       onUpdate: () => changed(),
       onTransaction: () => setTick((t) => t + 1),
@@ -199,6 +241,28 @@ export function SignaturesSection() {
             {fmt('Italic', 'italic', `${MOD}I`, (e) => e.chain().focus().toggleItalic().run())}
             {fmt('Underline', 'underline', `${MOD}U`, (e) => e.chain().focus().toggleUnderline().run())}
             {fmt('Bulleted list', 'bulletList', '', (e) => e.chain().focus().toggleBulletList().run())}
+            <button
+              class="fmt-btn sig-pic-btn"
+              tabIndex={-1}
+              title="Insert a picture (or paste or drop one)"
+              aria-label="Insert picture"
+              disabled={current() == null}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => pictureInput.click()}
+            >
+              <ImageIcon />
+            </button>
+            <input
+              ref={pictureInput}
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              hidden
+              onChange={(e) => {
+                const files = pictures(e.currentTarget.files);
+                e.currentTarget.value = '';
+                void addPictures(files);
+              }}
+            />
             <span class="fmt-fill" />
             <Show when={current() != null}>
               <button class="link-btn sig-delete" onClick={() => void remove()}>

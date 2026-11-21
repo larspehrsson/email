@@ -948,6 +948,61 @@ describe('signatures', () => {
   });
 });
 
+describe('signature pictures', () => {
+  test('a picture pasted or chosen goes in, scaled, and shows in the composer', async () => {
+    const { page, errors, context, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+,' : 'Control+,');
+      await page.locator('.st-nav-item', { hasText: 'Signatures' }).click();
+      await page.locator('.sig-add').click();
+      await page.waitForFunction(() => document.querySelector('.sig-name')?.value === 'Signature');
+      await page.locator('.sig-editor .ProseMirror').click();
+      await page.keyboard.type('Lars ');
+      // Paste a 2000×1000 picture (a big screenshot): it comes in scaled down to 800 wide.
+      await page.locator('.sig-editor .ProseMirror').evaluate(async (el) => {
+        const c = document.createElement('canvas');
+        c.width = 2000;
+        c.height = 1000;
+        const g = c.getContext('2d');
+        g.fillStyle = '#e33';
+        g.fillRect(0, 0, 2000, 1000);
+        const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+        const dt = new DataTransfer();
+        dt.items.add(new File([blob], 'logo.png', { type: 'image/png' }));
+        el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      });
+      const img = page.locator('.sig-editor img[src^="data:image/png"]');
+      await img.waitFor();
+      const natural = await img.evaluate((i) => (i.decode ? i.decode().then(() => i.naturalWidth) : i.naturalWidth));
+      assert.equal(natural, 800, 'scaled down');
+      assert.ok(Number(await img.getAttribute('width')) <= 300, 'shown at most 300 wide');
+      // And one chosen with the button.
+      const png = await page.evaluate(() => {
+        const c = document.createElement('canvas');
+        c.width = c.height = 40;
+        c.getContext('2d').fillRect(0, 0, 40, 40);
+        return c.toDataURL('image/png').split(',')[1];
+      });
+      await page.locator('.sig-edit input[type="file"]').setInputFiles({ name: 'dot.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
+      // (ProseMirror puts spacer <img>s of its own around inline nodes: count pictures.)
+      await page.waitForFunction(() => document.querySelectorAll('.sig-editor img[src^="data:"]').length === 2);
+      await page.waitForTimeout(800);
+      await page.locator('select.sig-default').first().selectOption({ label: 'Signature' });
+      await page.waitForTimeout(200);
+      await page.keyboard.press('Escape');
+      const popup = context.waitForEvent('page');
+      await page.keyboard.press('c');
+      const w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      await w.locator('.cmp-sig-body img').first().waitFor();
+      assert.equal(await w.locator('.cmp-sig-body img[src^="data:image/png"]').count(), 2, 'both in the preview');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('sender pane', () => {
   test('shows everything from the sender; tick all, delete, undo', async () => {
     const { page, errors, close } = await open({ threaded: false });

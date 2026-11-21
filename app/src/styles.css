@@ -5436,3 +5436,48 @@ body.dragging-account * {
 .st-add-account {
   margin-top: 12px;
 }
+
+/* pictures in a signature: drag a corner to size (TipTap's resizable image) */
+.sig-editor img,
+.cmp-sig-body img {
+  max-width: 100%;
+  height: auto;
+  vertical-align: middle;
+}
+.sig-editor [data-resize-container] {
+  vertical-align: middle;
+}
+.sig-editor [data-resize-handle] {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  opacity: 0;
+  transition: opacity 120ms;
+  z-index: 1;
+}
+.sig-editor [data-resize-container]:hover [data-resize-handle],
+.sig-editor .ProseMirror-selectednode [data-resize-handle],
+.sig-editor [data-resize-state='true'] [data-resize-handle] {
+  opacity: 1;
+}
+.sig-editor [data-resize-handle='top-left'] {
+  margin: -5px 0 0 -5px;
+  cursor: nwse-resize;
+}
+.sig-editor [data-resize-handle='bottom-right'] {
+  margin: 0 -5px -5px 0;
+  cursor: nwse-resize;
+}
+.sig-editor [data-resize-handle='top-right'] {
+  margin: -5px -5px 0 0;
+  cursor: nesw-resize;
+}
+.sig-editor [data-resize-handle='bottom-left'] {
+  margin: 0 0 -5px -5px;
+  cursor: nesw-resize;
+}
+.sig-editor .ProseMirror-selectednode img {
+  outline: 2px solid var(--accent);
+}

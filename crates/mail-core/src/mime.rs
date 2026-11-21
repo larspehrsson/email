@@ -480,7 +480,23 @@ pub fn sanitize_html(html: &str, cid_map: &HashMap<String, String>) -> String {
 /// A signature as kept: shown in the composer itself (not a sandboxed frame), so only plain
 /// formatting stays (ammonia's defaults: no styles, scripts or handlers; links open safely).
 pub fn sanitize_signature(html: &str) -> String {
-    ammonia::Builder::default().link_rel(Some("noopener noreferrer")).clean(html).to_string()
+    ammonia::Builder::default()
+        .link_rel(Some("noopener noreferrer"))
+        // Pictures pasted in come as data: URLs (sent as inline parts, see compose::inline_images):
+        // allowed on an <img>'s src, as an image, and nowhere else.
+        .add_url_schemes(["data"])
+        .attribute_filter(|element, attribute, value| {
+            let data = value.trim_start().get(..5).is_some_and(|p| p.eq_ignore_ascii_case("data:"));
+            if !data {
+                return Some(value.into());
+            }
+            let image = ["data:image/png;", "data:image/jpeg;", "data:image/gif;", "data:image/webp;"]
+                .iter()
+                .any(|p| value.trim_start().get(..p.len()).is_some_and(|v| v.eq_ignore_ascii_case(p)));
+            (element == "img" && attribute == "src" && image).then(|| value.into())
+        })
+        .clean(html)
+        .to_string()
 }
 
 fn replace_cids(html: &str, cid_map: &HashMap<String, String>) -> String {
@@ -516,6 +532,10 @@ mod tests {
         let out = sanitize_signature(r#"<p><b>Lars</b> <a href="https://x.se" onclick="x()">x.se</a></p><style>body{display:none}</style><script>1</script>"#);
         assert!(out.contains("<b>Lars</b>") && out.contains(r#"href="https://x.se""#));
         assert!(!out.contains("onclick") && !out.contains("<style") && !out.contains("script"));
+        // A pasted picture stays; data: anywhere else (or not an image) goes.
+        let img = sanitize_signature(r#"<p><img src="data:image/png;base64,iVBORw0KGgo=" width="120" height="40"><a href="data:text/html;base64,PHNjcmlwdD4=">x</a><img src="data:image/svg+xml;base64,PHN2Zz4="></p>"#);
+        assert!(img.contains(r#"src="data:image/png;base64,iVBORw0KGgo=""#) && img.contains(r#"width="120""#), "{img}");
+        assert!(!img.contains("data:text/html") && !img.contains("svg+xml"), "{img}");
     }
 
     #[test]
