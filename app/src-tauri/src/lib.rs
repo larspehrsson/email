@@ -450,6 +450,25 @@ async fn delete_tag(core: State<'_, Arc<Core>>, keyword: String) -> Res<()> {
     core.delete_tag(&keyword).map_err(err)
 }
 
+/// Everything from a sender, newest first (the sender pane): the sender of `message_id`, or
+/// `addr` in `account_id`.
+#[tauri::command]
+async fn sender_messages(
+    core: State<'_, Arc<Core>>,
+    message_id: Option<i64>,
+    account_id: Option<i64>,
+    addr: Option<String>,
+    offset: u32,
+    limit: u32,
+) -> Res<Option<SenderPage>> {
+    timed("sender_messages", || match (message_id, account_id, addr) {
+        (Some(id), _, _) => core.sender_messages(id, offset, limit),
+        (None, Some(a), Some(addr)) => core.messages_from(a, &addr, offset, limit).map(Some),
+        _ => Ok(None),
+    })
+    .map_err(err)
+}
+
 #[tauri::command]
 async fn list_signatures(core: State<'_, Arc<Core>>) -> Res<mail_core::signatures::Signatures> {
     core.signatures().map_err(err)
@@ -1122,6 +1141,7 @@ pub fn run() {
             list_messages,
             list_groups,
             list_signatures,
+            sender_messages,
             save_signature,
             delete_signature,
             set_signature_defaults,

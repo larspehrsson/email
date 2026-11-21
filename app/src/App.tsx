@@ -15,6 +15,8 @@ import {
   setThreaded,
   threadedPref,
   listSort,
+  senderPane,
+  setSenderPane,
   conversationScope,
   setConversationScope,
 } from './state';
@@ -40,6 +42,7 @@ import { MessageList, type SearchSpec } from './components/MessageList';
 import { Reader } from './components/Reader';
 import { ConversationReader } from './components/Conversation';
 import { Resizer } from './components/Resizer';
+import { SenderPane } from './components/SenderPane';
 import { AddAccountModal, Onboarding } from './components/AddAccount';
 import { DRAG } from './lib/platform';
 
@@ -76,6 +79,7 @@ export function App() {
           compose: ready ? newMessage : undefined,
           flyout: ready ? flyoutKey : undefined,
           goto: ready ? openFolderSwitcher : undefined,
+          sender: ready ? () => setSenderPane(!senderPane()) : undefined,
         };
         const f = run[commandFor(e) ?? ''];
         if (f) {
@@ -91,7 +95,10 @@ export function App() {
         return;
       }
       if (!ready) return;
-      if (e.code === 'Digit1') {
+      if (e.code === 'Digit2' && !e.shiftKey) {
+        e.preventDefault();
+        setSenderPane(!senderPane());
+      } else if (e.code === 'Digit1') {
         e.preventDefault();
         if (e.shiftKey) flyoutKey();
         else toggleSidebar();
@@ -214,7 +221,7 @@ export function App() {
       <Match when={true}>
         <div
           class="app"
-          classList={{ 'rail-mode': sidebarMode() === 'rail' }}
+          classList={{ 'rail-mode': sidebarMode() === 'rail', 'with-sender': senderPane() }}
           style={{ '--sidebar-w': `${sidebarMode() === 'rail' ? RAIL_W : sidebarW()}px`, '--list-w': `${listW()}px` }}
         >
           <div class="pane pane-sidebar">
@@ -288,6 +295,11 @@ export function App() {
             </Show>
             <AttachmentToast />
           </div>
+          <Show when={senderPane()}>
+            <div class="pane pane-sender">
+              <SenderPane />
+            </div>
+          </Show>
           <ViewMenuPopover />
           <ManageTagsHost />
           <ConfirmHost />

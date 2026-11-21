@@ -66,6 +66,10 @@ so Outlook shows them too.
 stays where it is and comes back to the top of your Inbox, unread, when it's due, on every
 computer you use Email on.
 
+**Everything from a sender** at a glance: Ctrl/⌘+2 opens a panel beside the message with all
+the mail from whoever sent it, in every folder. Tick them all and delete or archive at once —
+the quickest way to clear out a newsletter.
+
 **Getting around:** fold the sidebar into a slim rail (Ctrl/⌘+1), or jump to any folder in any
 account by typing its name (Ctrl/⌘+G).
 

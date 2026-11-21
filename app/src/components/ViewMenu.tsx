@@ -5,6 +5,8 @@ import {
   conversationScope,
   includeTrash,
   listSort,
+  senderPane,
+  setSenderPane,
   setConversationScope,
   setIncludeTrash,
   setListSort,
@@ -161,6 +163,18 @@ export function ViewMenuPopover() {
           >
             <Check on={includeTrash()} />
             <span class="vm-label">Include Trash</span>
+          </button>
+          <div class="vm-sep" />
+          <button
+            role="menuitemcheckbox"
+            aria-checked={senderPane()}
+            class="vm-item"
+            title="Everything from the sender of the message on screen, to clear out at once"
+            onClick={() => setSenderPane(!senderPane())}
+          >
+            <Check on={senderPane()} />
+            <span class="vm-label">Sender panel</span>
+            <kbd>{hint('sender')}</kbd>
           </button>
           <div class="vm-sep" />
           <button

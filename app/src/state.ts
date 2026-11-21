@@ -108,6 +108,16 @@ export function selectMessage(m: MessageSummary | null): void {
   });
 }
 
+// ------------------------------------------------------------- sender pane
+
+/** The pane beside the reader with everything from the sender on screen. Persisted. */
+const [senderPane, setSenderPaneSig] = createSignal<boolean>(loadPref<boolean>('ui.senderPane', false) === true);
+export { senderPane };
+export function setSenderPane(on: boolean): void {
+  setSenderPaneSig(on);
+  savePref('ui.senderPane', on);
+}
+
 // ------------------------------------------------------------- conversation scope
 
 /** Which messages of a conversation to show; global, persisted. */

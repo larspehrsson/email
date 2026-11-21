@@ -149,6 +149,15 @@ export type ConversationScope = 'folder' | 'all';
  *  within each). The list is grouped by the same thing. */
 export type ListSort = 'received' | 'from' | 'to';
 
+/** Messages from one sender (the sender pane), newest first, each in its folder. */
+export interface SenderPage {
+  accountId: number;
+  name: string;
+  addr: string;
+  total: number;
+  messages: MessageSummary[];
+}
+
 /** A signature: a named block put under what's written (above a reply's quote). */
 export interface Signature {
   id: number;
@@ -438,6 +447,10 @@ export interface CommandMap {
   open_folder: { args: { folderId: number }; ret: void };
   list_messages: { args: { folderId: number; offset: number; limit: number; sort: ListSort }; ret: MessagePage };
   list_signatures: { args: undefined; ret: Signatures };
+  sender_messages: {
+    args: { messageId: number | null; accountId: number | null; addr: string | null; offset: number; limit: number };
+    ret: SenderPage | null;
+  };
   save_signature: { args: { id: number | null; name: string; html: string }; ret: number };
   delete_signature: { args: { id: number }; ret: void };
   set_signature_defaults: { args: { accountId: number; newId: number | null; replyId: number | null }; ret: void };

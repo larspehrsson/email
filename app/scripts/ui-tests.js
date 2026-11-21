@@ -845,3 +845,39 @@ describe('signatures', () => {
     }
   });
 });
+
+describe('sender pane', () => {
+  test('shows everything from the sender; tick all, delete, undo', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.locator('.folder-layer .row').first().click();
+      const from = (await page.locator('.folder-layer .row.selected .row-from').textContent()).trim();
+      await page.keyboard.press('ControlOrMeta+2');
+      await hasText(page.locator('.sp-name'), from, 'the sender of the message on screen');
+      const count = async () => Number((await page.locator('.sp-all span').textContent()).replace(/[^\d]/g, ''));
+      const before = await count();
+      assert.ok(before >= 1);
+      assert.equal(await page.locator('.sp-row.current').count(), 1, 'the open one is marked');
+      await page.locator('.sp-all input').check();
+      const ticked = await page.locator('.sp-row.on').count();
+      assert.equal(ticked, await page.locator('.sp-row').count(), 'all shown are ticked');
+      await page.locator('.sp-bar [aria-label="Delete"]').click();
+      await page.locator('.toast', { hasText: 'Deleted' }).waitFor();
+      await page.waitForFunction((n) => {
+        const t = document.querySelector('.sp-all span')?.textContent ?? '';
+        return Number(t.replace(/[^\d]/g, '')) === n;
+      }, before - ticked);
+      await page.locator('.toast button', { hasText: 'Undo' }).click();
+      await page.waitForFunction((n) => {
+        const t = document.querySelector('.sp-all span')?.textContent ?? '';
+        return Number(t.replace(/[^\d]/g, '')) === n;
+      }, before);
+      // Off again, remembered.
+      await page.keyboard.press('ControlOrMeta+2');
+      assert.equal(await page.locator('.sender-pane').count(), 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});

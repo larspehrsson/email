@@ -207,6 +207,17 @@ pub struct MessagePage {
     pub messages: Vec<MessageSummary>,
 }
 
+/// Messages from one sender (see `Store::sender_messages`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SenderPage {
+    pub account_id: i64,
+    pub name: String,
+    pub addr: String,
+    pub total: u32,
+    pub messages: Vec<MessageSummary>,
+}
+
 /// Which messages of a conversation to show: those in the current folder always; with
 /// `all_folders`, also any outside Trash/Spam; with `include_trash`, also those in Trash/Spam.
 #[derive(Debug, Clone, Copy, Default)]

@@ -19,6 +19,33 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::model::*;
 use crate::sort::{ListGroup, ListSort};
 
+/// A message as listed with its folder: id, folder, subject, from_name, from_addr, date, snippet,
+/// flags, has_attachments, has_body, keywords, (outgoing failed?), draft_id.
+fn placed_summary(r: &rusqlite::Row) -> rusqlite::Result<MessageSummary> {
+    let flags: i64 = r.get(7)?;
+    let keywords: String = r.get(10)?;
+    Ok(MessageSummary {
+        id: r.get(0)?,
+        folder_id: r.get(1)?,
+        subject: r.get(2)?,
+        from_name: r.get(3)?,
+        from_addr: r.get(4)?,
+        date: r.get(5)?,
+        snippet: r.get(6)?,
+        unread: flags & flags::SEEN == 0,
+        flagged: flags & flags::FLAGGED != 0,
+        has_attachments: r.get(8)?,
+        has_body: r.get(9)?,
+        tags: crate::tags::visible(&keywords),
+        answered: flags & flags::ANSWERED != 0,
+        forwarded: crate::tags::is_forwarded(&keywords),
+        snoozed_until: crate::tags::snoozed_until(&keywords),
+        sending: r.get::<_, Option<bool>>(11)? == Some(false),
+        send_failed: r.get::<_, Option<bool>>(11)? == Some(true),
+        draft_id: r.get(12)?,
+    })
+}
+
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS accounts (
     id           INTEGER PRIMARY KEY,
@@ -1682,30 +1709,80 @@ impl Store {
                     (SELECT o.failed IS NOT NULL FROM outgoing o WHERE o.id = m.pending_send), m.draft_id
              FROM {from} WHERE {scope} ORDER BY m.date DESC, m.id DESC LIMIT ?4 OFFSET ?5"
         ))?;
-        let rows = stmt.query_map(rusqlite::params_from_iter(args.iter().map(|b| b.as_ref())), |r| {
-            let flags: i64 = r.get(7)?;
-            Ok(MessageSummary {
-                id: r.get(0)?,
-                folder_id: r.get(1)?,
-                subject: r.get(2)?,
-                from_name: r.get(3)?,
-                from_addr: r.get(4)?,
-                date: r.get(5)?,
-                snippet: r.get(6)?,
-                unread: flags & flags::SEEN == 0,
-                flagged: flags & flags::FLAGGED != 0,
-                has_attachments: r.get(8)?,
-                has_body: r.get(9)?,
-                tags: crate::tags::visible(&r.get::<_, String>(10)?),
-                answered: flags & flags::ANSWERED != 0,
-                forwarded: crate::tags::is_forwarded(&r.get::<_, String>(10)?),
-                snoozed_until: crate::tags::snoozed_until(&r.get::<_, String>(10)?),
-                sending: r.get::<_, Option<bool>>(11)? == Some(false),
-                send_failed: r.get::<_, Option<bool>>(11)? == Some(true),
-                draft_id: r.get(12)?,
-            })
-        })?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(args.iter().map(|b| b.as_ref())), placed_summary)?;
         Ok(MessagePage { total, messages: rows.collect::<rusqlite::Result<_>>()? })
+    }
+
+    /// A message's sender: (account, name, address). For one of our own, the newest someone else
+    /// in its conversation (if any), as that's whom it's with.
+    pub fn sender_of(&self, message_id: i64) -> Result<Option<(i64, String, String)>> {
+        let db = self.rdb();
+        let Some((account_id, mut name, mut addr, thread_id)): Option<(i64, String, String, Option<i64>)> = db
+            .query_row(
+                "SELECT account_id, from_name, from_addr, thread_id FROM messages WHERE id=?1",
+                [message_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .optional()?
+        else {
+            return Ok(None);
+        };
+        let me: String =
+            db.query_row("SELECT email FROM accounts WHERE id=?1", [account_id], |r| r.get(0)).optional()?.unwrap_or_default();
+        if addr.eq_ignore_ascii_case(&me) {
+            if let Some(t) = thread_id {
+                if let Some((n, a)) = db
+                    .query_row(
+                        "SELECT from_name, from_addr FROM messages WHERE thread_id=?1 AND lower(from_addr) <> lower(?2)
+                         ORDER BY date DESC LIMIT 1",
+                        params![t, me],
+                        |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+                    )
+                    .optional()?
+                {
+                    (name, addr) = (n, a);
+                }
+            }
+        }
+        Ok(Some((account_id, name, addr)))
+    }
+
+    /// The messages from `addr` (any case) in an account, newest first, each in its most specific
+    /// folder (as search reports them), leaving out what's only in Trash or Spam. Named as on
+    /// the newest of them (else `name`).
+    pub fn messages_from(&self, account_id: i64, name: &str, addr: &str, offset: u32, limit: u32) -> Result<SenderPage> {
+        let db = self.rdb();
+        let scope = "m.account_id = ?1 AND lower(m.from_addr) = lower(?2)
+             AND EXISTS (SELECT 1 FROM entries e JOIN folders f ON f.id = e.folder_id
+                         WHERE e.message_id = m.id AND coalesce(f.role, '') NOT IN ('trash', 'junk'))";
+        let total: u32 = db.query_row(&format!("SELECT count(*) FROM messages m WHERE {scope}"), params![account_id, addr], |r| r.get(0))?;
+        let newest: Option<String> = db
+            .query_row(
+                &format!("SELECT m.from_name FROM messages m WHERE {scope} AND m.from_name <> '' ORDER BY m.date DESC LIMIT 1"),
+                params![account_id, addr],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let mut stmt = db.prepare_cached(&format!(
+            "SELECT m.id, coalesce((SELECT e.folder_id FROM entries e JOIN folders f ON f.id = e.folder_id
+                        WHERE e.message_id = m.id
+                        ORDER BY CASE f.role WHEN 'inbox' THEN 0 WHEN 'all' THEN 3
+                                 WHEN 'trash' THEN 4 WHEN 'junk' THEN 4 ELSE 1 END LIMIT 1), 0),
+                    m.subject, m.from_name, m.from_addr, m.date, m.snippet, m.flags,
+                    m.has_attachments, m.has_body, m.keywords,
+                    (SELECT o.failed IS NOT NULL FROM outgoing o WHERE o.id = m.pending_send), m.draft_id
+             FROM messages m WHERE {scope} ORDER BY m.date DESC, m.id DESC LIMIT ?3 OFFSET ?4"
+        ))?;
+        let messages = stmt
+            .query_map(params![account_id, addr, limit, offset], placed_summary)?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(SenderPage { account_id, name: newest.unwrap_or_else(|| name.to_string()), addr: addr.to_string(), total, messages })
+    }
+
+    /// [`Store::messages_from`] the sender of `message_id` ([`Store::sender_of`]).
+    pub fn sender_messages(&self, message_id: i64, offset: u32, limit: u32) -> Result<Option<SenderPage>> {
+        let Some((account_id, name, addr)) = self.sender_of(message_id)? else { return Ok(None) };
+        Ok(Some(self.messages_from(account_id, &name, &addr, offset, limit)?))
     }
 
     /// Position of a message (`threaded` = false) or conversation (`threaded` = true, `id` is a
@@ -3808,6 +3885,44 @@ mod tests {
         }
         assert_eq!(store.index_of(inbox, 999_999, false).unwrap(), None);
         assert_eq!(store.index_of(inbox, 999_999, true).unwrap(), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sender_messages_across_folders() {
+        let dir = std::env::temp_dir().join(format!("mail-core-sender-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = Store::open(&dir).unwrap();
+        let a = store.insert_account("me@x.com", "me", Provider::Imap, "h", 993).unwrap();
+        let lf = |n: &str, role| ListedFolder { raw_name: n.into(), path: vec![n.into()], role, selectable: true };
+        store
+            .sync_folder_list(a.id, &[lf("INBOX", Some(FolderRole::Inbox)), lf("News", None), lf("Trash", Some(FolderRole::Trash))])
+            .unwrap();
+        let id = |n: &str| store.folders(a.id).unwrap().into_iter().find(|f| f.raw_name == n).unwrap().id;
+        let m = |uid: u32, from: &str, mid: &str, reply_to: Option<&str>| HeaderRecord {
+            gm_msgid: None,
+            gm_labels: None,
+            message_id: Some(mid.into()),
+            in_reply_to: reply_to.map(Into::into),
+            from_addr: from.into(),
+            ..rec(uid, 0, &[])
+        };
+        let none = HashMap::new();
+        store.upsert_headers(a.id, id("INBOX"), &[m(1, "news@shop.com", "n1@x", None), m(2, "bob@y.com", "b1@x", None)], &none).unwrap();
+        store.upsert_headers(a.id, id("News"), &[m(3, "News@Shop.com", "n2@x", None)], &none).unwrap();
+        store.upsert_headers(a.id, id("Trash"), &[m(4, "news@shop.com", "n3@x", None)], &none).unwrap();
+        store.upsert_headers(a.id, id("INBOX"), &[m(5, "me@x.com", "r1@x", Some("b1@x"))], &none).unwrap();
+        let first = |f: &str| store.list_messages(id(f), 0, 10).unwrap().messages;
+        let n1 = first("INBOX").into_iter().find(|x| x.from_addr == "news@shop.com").unwrap();
+        let page = store.sender_messages(n1.id, 0, 10).unwrap().unwrap();
+        assert_eq!(page.addr, "news@shop.com");
+        assert_eq!(page.total, 2, "any case, any folder, not what's only in Trash");
+        assert_eq!(page.messages.iter().map(|x| x.folder_id).collect::<Vec<_>>(), [id("News"), id("INBOX")], "newest first, in its folder");
+        // Our own reply: whom we replied to.
+        let mine = first("INBOX").into_iter().find(|x| x.from_addr == "me@x.com").unwrap();
+        let page = store.sender_messages(mine.id, 0, 10).unwrap().unwrap();
+        assert_eq!((page.addr.as_str(), page.total), ("bob@y.com", 1));
+        assert!(store.sender_messages(999_999, 0, 10).unwrap().is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

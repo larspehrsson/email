@@ -1761,6 +1761,40 @@ export function createMockBackend(): Backend {
       await sleep(3);
       return indexIn(folderId, id, threaded, sort);
     },
+    async sender_messages({ messageId, accountId, addr, offset, limit }) {
+      await latency();
+      let acct = accountId;
+      let from = addr;
+      let name = '';
+      if (messageId != null) {
+        const m = byId.get(messageId);
+        if (!m) return null;
+        acct = meta.get(m.id)?.accountId ?? null;
+        const me = accounts.find((a) => a.id === acct)?.email.toLowerCase();
+        ({ fromAddr: from, fromName: name } = m);
+        if (m.fromAddr.toLowerCase() === me) {
+          const other = [...byId.values()]
+            .filter((x) => threadOf(x) === threadOf(m) && x.fromAddr.toLowerCase() !== me)
+            .sort((a, b) => b.date - a.date)[0];
+          if (other) ({ fromAddr: from, fromName: name } = other);
+        }
+      }
+      if (acct == null || !from) return null;
+      const want = from.toLowerCase();
+      const all = [...byId.values()]
+        .filter((x) => {
+          const f = folders.get(x.folderId);
+          return meta.get(x.id)?.accountId === acct && x.fromAddr.toLowerCase() === want && f?.role !== 'trash' && f?.role !== 'junk';
+        })
+        .sort((a, b) => b.date - a.date || b.id - a.id);
+      return {
+        accountId: acct,
+        name: all.find((x) => x.fromName)?.fromName ?? name,
+        addr: from,
+        total: all.length,
+        messages: all.slice(offset, offset + limit).map((x) => ({ ...x })),
+      };
+    },
     async list_signatures() {
       await sleep(3);
       const st = sigLoad();

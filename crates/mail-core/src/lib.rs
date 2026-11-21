@@ -1064,6 +1064,16 @@ impl Core {
         self.store.delete_tag(keyword)
     }
 
+    /// The messages from a message's sender (see `Store::sender_messages`).
+    pub fn sender_messages(&self, message_id: i64, offset: u32, limit: u32) -> Result<Option<SenderPage>> {
+        self.store.sender_messages(message_id, offset, limit)
+    }
+
+    /// The messages from an address in an account (see `Store::messages_from`).
+    pub fn messages_from(&self, account_id: i64, addr: &str, offset: u32, limit: u32) -> Result<SenderPage> {
+        self.store.messages_from(account_id, "", addr, offset, limit)
+    }
+
     pub fn signatures(&self) -> Result<signatures::Signatures> {
         self.store.signatures()
     }

@@ -22,6 +22,7 @@ import type {
   ListSort,
   SearchField,
   Signatures,
+  SenderPage,
   EventMap,
   EventName,
   Folder,
@@ -196,6 +197,20 @@ export const api = {
   setTag: (keyword: string | null, name: string, color: string): Promise<string> => call('set_tag', { keyword, name, color }),
   deleteTag: (keyword: string): Promise<void> => call('delete_tag', { keyword }),
   listSignatures: (): Promise<Signatures> => call('list_signatures', undefined),
+  /** Everything from a sender, newest first: the sender of `messageId` (for our own message,
+   *  whom it's with), or `addr` in `accountId`. Leaves out what's only in Trash or Spam. */
+  senderMessages: (
+    from: { messageId: number } | { accountId: number; addr: string },
+    offset: number,
+    limit: number,
+  ): Promise<SenderPage | null> =>
+    call('sender_messages', {
+      messageId: 'messageId' in from ? from.messageId : null,
+      accountId: 'accountId' in from ? from.accountId : null,
+      addr: 'addr' in from ? from.addr : null,
+      offset,
+      limit,
+    }),
   /** Create (id null) or change a signature; returns its id. */
   saveSignature: (id: number | null, name: string, html: string): Promise<number> => call('save_signature', { id, name, html }),
   deleteSignature: (id: number): Promise<void> => call('delete_signature', { id }),
