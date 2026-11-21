@@ -2,6 +2,8 @@ import { type JSX, batch, on, createEffect, createMemo, createSelector, createSi
 import { createVirtualizer } from '@tanstack/solid-virtual';
 import { api, type Folder, type MessageSummary, type SearchField, type ThreadSummary } from '../api';
 import { createPagedList } from '../lib/messageList';
+import { senderPictures } from '../lib/senderIcons';
+import { Avatar } from './Avatar';
 import { dayStart, fmtNum, fmtSize, smartDate } from '../lib/format';
 import {
   datePeriods,
@@ -161,8 +163,15 @@ function RowContent(props: { m: MessageSummary; re?: RegExp | null; subjRe?: Reg
   return (
     // A tag describes the message: shown as a bar in the first tag's colour beside the text
     // (unread dot stays at the edge); all tags appear as dots on the first line.
-    <div class="row-inner" classList={{ tagged: (props.m.tags?.length ?? 0) > 0 }} style={tintStyle(props.m.tags ?? [])}>
+    <div
+      class="row-inner"
+      classList={{ tagged: (props.m.tags?.length ?? 0) > 0, 'with-avatar': senderPictures() }}
+      style={tintStyle(props.m.tags ?? [])}
+    >
       <span class="unread-dot" />
+      <Show when={senderPictures()}>
+        <Avatar name={props.m.fromName} addr={props.m.fromAddr} size={36} class="row-avatar" />
+      </Show>
       <div class="row-line1">
         <span class="row-from">
           <Hl text={props.m.fromName || props.m.fromAddr} re={props.re ?? null} />
@@ -220,8 +229,15 @@ function ThreadRowContent(props: { t: ThreadSummary; me: { name: string; email: 
       .map((p) => (props.me && (p === props.me.name || p.toLowerCase() === props.me.email.toLowerCase()) ? 'me' : p))
       .join(', ');
   return (
-    <div class="row-inner" classList={{ tagged: (props.t.tags?.length ?? 0) > 0 }} style={tintStyle(props.t.tags ?? [])}>
+    <div
+      class="row-inner"
+      classList={{ tagged: (props.t.tags?.length ?? 0) > 0, 'with-avatar': senderPictures() }}
+      style={tintStyle(props.t.tags ?? [])}
+    >
       <span class="unread-dot" />
+      <Show when={senderPictures()}>
+        <Avatar name={props.t.participants[0] ?? null} addr={props.t.fromAddr ?? ''} size={36} class="row-avatar" />
+      </Show>
       <div class="row-line1">
         <span class="row-from">
           {people() || '(no sender)'}

@@ -246,6 +246,8 @@ export interface ThreadSummary {
   subject: string;
   /** sender display names (or addresses), most recent first, unique, max 4 */
   participants: string[];
+  /** the newest one from someone else (ours when all are): the conversation's picture */
+  fromAddr?: string;
   /** messages in the whole conversation (all folders) */
   messageCount: number;
   unread: boolean;
@@ -582,6 +584,7 @@ export interface CommandMap {
   };
   selection_info: { args: { folderId: number; items: number[]; threaded: boolean }; ret: SelectionInfo };
   sender_folders: { args: { messageIds: number[] }; ret: { folderId: number; count: number }[] };
+  sender_icon: { args: { addr: string }; ret: string | null };
   list_tags: { args: undefined; ret: TagDef[] };
   set_tag: { args: { keyword: string | null; name: string; color: string }; ret: string };
   delete_tag: { args: { keyword: string }; ret: void };

@@ -4,6 +4,7 @@ pub mod imap;
 pub mod actions;
 pub mod addressbook;
 pub mod ai;
+pub mod icons;
 pub mod compose;
 pub mod contacts;
 pub mod graph;
@@ -153,7 +154,14 @@ pub struct NewAccount {
 /// The undo-send window: queued mail waits this long before it goes out.
 pub const SEND_DELAY_MS: i64 = 10_000;
 
+/// A picture found is looked up again after this long; a domain without one, sooner.
+const ICON_KEEP_SECS: i64 = 30 * 24 * 3600;
+const ICON_MISS_SECS: i64 = 7 * 24 * 3600;
+
 pub struct Core {
+    /// Sender pictures being looked up (one lookup per domain), and at most a few at a time.
+    icon_lookups: Mutex<HashMap<String, Arc<tokio::sync::OnceCell<Option<String>>>>>,
+    icon_slots: tokio::sync::Semaphore,
     pub store: Arc<Store>,
     events: broadcast::Sender<CoreEvent>,
     secrets: Arc<Secrets>,
@@ -206,6 +214,8 @@ impl Core {
         // Actions interrupted mid-send (quit, crash) are sent again.
         store.reset_started_ops()?;
         Ok(Core {
+            icon_lookups: Mutex::new(HashMap::new()),
+            icon_slots: tokio::sync::Semaphore::new(4),
             store: Arc::new(store),
             events,
             secrets: Arc::new(secrets),
@@ -692,6 +702,40 @@ impl Core {
             }
         }
         Ok(result)
+    }
+
+    /// The picture for a sender's address (a data: URL), from what's kept or looked up now
+    /// (see `icons`). None: no picture (a shared mail service, or the domain has none).
+    pub async fn sender_icon(&self, addr: &str) -> Result<Option<String>> {
+        let Some(domain) = icons::icon_domain(addr) else { return Ok(None) };
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
+        if let Some((icon, fetched)) = self.store.sender_icon(&domain)? {
+            let fresh = now - fetched < if icon.is_some() { ICON_KEEP_SECS } else { ICON_MISS_SECS };
+            if fresh {
+                return Ok(icon.map(|i| i.data_url()));
+            }
+        }
+        let cell = self.icon_lookups.lock().unwrap().entry(domain.clone()).or_default().clone();
+        let url = cell
+            .get_or_init(|| async {
+                let _slot = self.icon_slots.acquire().await.ok();
+                let found = match tokio::time::timeout(std::time::Duration::from_secs(25), icons::fetch(&domain)).await {
+                    Ok(Ok(found)) => found,
+                    Ok(Err(e)) => {
+                        tracing::debug!(domain, "sender picture: {e:#}");
+                        None
+                    }
+                    Err(_) => None,
+                };
+                if let Err(e) = self.store.save_sender_icon(&domain, found.as_ref(), now) {
+                    tracing::warn!("keeping a sender picture: {e:#}");
+                }
+                found.map(|i| i.data_url())
+            })
+            .await
+            .clone();
+        self.icon_lookups.lock().unwrap().remove(&domain);
+        Ok(url)
     }
 
     /// Where these messages' senders' mail is kept: (folder, count), most first.

@@ -26,6 +26,7 @@ const SORTS: { id: ListSort; label: string; title: string }[] = [
   { id: 'size', label: 'Size', title: 'Largest first, grouped by size' },
 ];
 import { CheckIcon, SlidersIcon } from './Icons';
+import { senderPictures, setSenderPictures } from '../lib/senderIcons';
 import { hint } from '../lib/shortcuts';
 import { openShortcuts } from './ShortcutsSheet';
 import { openSettings } from './Settings';
@@ -124,6 +125,17 @@ export function ViewMenuPopover() {
               </button>
             )}
           </For>
+          <div class="vm-sep" />
+          <button
+            role="menuitemcheckbox"
+            aria-checked={senderPictures()}
+            class="vm-item"
+            title="The sender's logo or website icon beside each message (looked up once per domain)"
+            onClick={() => setSenderPictures(!senderPictures())}
+          >
+            <Check on={senderPictures()} />
+            <span class="vm-label">Sender pictures</span>
+          </button>
           <div class="vm-sep" />
           <div class="vm-section">Show</div>
           <For each={[null, false, true] as const}>

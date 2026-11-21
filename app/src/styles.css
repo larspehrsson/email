@@ -5536,3 +5536,25 @@ body.dragging-account * {
 .mp-row.active .mp-count {
   color: inherit;
 }
+
+/* sender pictures in the list: a circle left of the text */
+.row-inner.with-avatar {
+  padding-left: 59px;
+}
+.row-inner.with-avatar::after {
+  left: 59px;
+}
+.row-avatar {
+  position: absolute;
+  left: 12px;
+  top: calc((var(--row-h) - 36px) / 2);
+}
+.avatar.pic {
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--sep);
+}
+.avatar.pic img {
+  width: 66%;
+  height: 66%;
+  object-fit: contain;
+}

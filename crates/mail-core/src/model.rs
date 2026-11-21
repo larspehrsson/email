@@ -261,6 +261,9 @@ pub struct ThreadSummary {
     pub folder_id: i64,
     pub subject: String,
     pub participants: Vec<String>,
+    /// The address of the newest one from someone else (ours when all are ours): the
+    /// conversation's picture.
+    pub from_addr: String,
     pub message_count: u32,
     pub unread: bool,
     pub flagged: bool,

@@ -88,6 +88,8 @@ at once — the quickest way to clear out a newsletter.
 
 ![The sender panel beside a message, three messages picked](docs/screenshots/sender.png)
 
+**Sender pictures** beside each message: the company's logo or website icon, or initials.
+
 **Several at once:** Ctrl/⌘-click or Shift-click messages in the list (or Ctrl/⌘+A for all of
 them) to delete, move, mark or tag them together, or forward them as attachments.
 

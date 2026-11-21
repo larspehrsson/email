@@ -218,6 +218,14 @@ CREATE TABLE IF NOT EXISTS address_book (
     updated INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
+-- Sender pictures by domain (crate::icons): mime + data, or both NULL for "has none"; when.
+CREATE TABLE IF NOT EXISTS sender_icons (
+    domain  TEXT PRIMARY KEY,
+    mime    TEXT,
+    data    BLOB,
+    fetched INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS entries (
     folder_id  INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
     message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -1589,6 +1597,7 @@ impl Store {
                 folder_id,
                 subject: first.1.clone(),
                 participants,
+                from_addr: incoming.map(|i| rows[i].3.clone()).unwrap_or_else(|| latest.3.clone()),
                 message_count: count as u32,
                 unread: rows.iter().any(|r| r.4 & flags::SEEN == 0),
                 flagged: rows.iter().any(|r| r.4 & flags::FLAGGED != 0),
@@ -2139,6 +2148,26 @@ impl Store {
              GROUP BY e.folder_id ORDER BY n DESC"
         ))?;
         Ok(stmt.query_map(rusqlite::params_from_iter(addrs.iter()), |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// A domain's kept picture: Some((icon or None for "has none", when looked up)).
+    pub fn sender_icon(&self, domain: &str) -> Result<Option<(Option<crate::icons::Icon>, i64)>> {
+        let db = self.rdb();
+        Ok(db
+            .query_row("SELECT mime, data, fetched FROM sender_icons WHERE domain=?1", [domain], |r| {
+                let mime: Option<String> = r.get(0)?;
+                let data: Option<Vec<u8>> = r.get(1)?;
+                Ok((mime.zip(data).map(|(mime, data)| crate::icons::Icon { mime, data }), r.get(2)?))
+            })
+            .optional()?)
+    }
+
+    pub fn save_sender_icon(&self, domain: &str, icon: Option<&crate::icons::Icon>, fetched: i64) -> Result<()> {
+        self.db().execute(
+            "INSERT OR REPLACE INTO sender_icons (domain, mime, data, fetched) VALUES (?1, ?2, ?3, ?4)",
+            params![domain, icon.map(|i| i.mime.as_str()), icon.map(|i| i.data.as_slice()), fetched],
+        )?;
+        Ok(())
     }
 
     pub fn message_subject(&self, id: i64) -> Result<Option<String>> {

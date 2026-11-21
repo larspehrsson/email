@@ -421,6 +421,12 @@ struct FolderCount {
     count: u32,
 }
 
+/// A sender's picture (data: URL) from their domain, kept or looked up now; null: none.
+#[tauri::command]
+async fn sender_icon(core: State<'_, Arc<Core>>, addr: String) -> Res<Option<String>> {
+    core.sender_icon(&addr).await.map_err(err)
+}
+
 /// Where these messages' senders' mail is kept, most first (the Move list's order).
 #[tauri::command]
 async fn sender_folders(core: State<'_, Arc<Core>>, message_ids: Vec<i64>) -> Res<Vec<FolderCount>> {
@@ -1312,6 +1318,7 @@ pub fn run() {
             list_item_ids,
             selection_info,
             sender_folders,
+            sender_icon,
             get_thread,
             update_password,
             set_keep_attachments,

@@ -894,6 +894,7 @@ export function createMockBackend(): Backend {
       folderId,
       subject: first?.subject ?? newestInFolder.subject,
       participants,
+      fromAddr: all[all.length - 1]?.fromAddr ?? newestInFolder.fromAddr,
       messageCount: all.length,
       tags: [...new Set(all.flatMap((m) => m.tags))],
       unread: all.some((m) => m.unread),
@@ -1622,6 +1623,26 @@ export function createMockBackend(): Backend {
         }
       }
       return order.slice(offset, offset + limit);
+    },
+    async sender_icon({ addr }) {
+      await sleep(20);
+      // Companies in the demo have a logo (made up here); people and free mail don't.
+      const LOGOS: Record<string, [string, string]> = {
+        'github.com': ['#24292f', 'G'],
+        'linear.app': ['#5e6ad2', 'L'],
+        'invoicely.io': ['#0f9d58', 'I'],
+        'figma.com': ['#a259ff', 'F'],
+        'parcelco.shop': ['#ff5a36', 'P'],
+        'morningbrief.news': ['#111827', 'M'],
+        'lumengoods.com': ['#b45309', 'L'],
+        'northwind-air.com': ['#0369a1', 'N'],
+        'fieldnotes.email': ['#15803d', 'F'],
+      };
+      const domain = addr.split('@')[1]?.toLowerCase() ?? '';
+      const logo = LOGOS[domain];
+      if (!logo) return null;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="${logo[0]}"/><text x="16" y="22" text-anchor="middle" font-family="Helvetica,Arial" font-weight="700" font-size="18" fill="#fff">${logo[1]}</text></svg>`;
+      return `data:image/svg+xml;base64,${btoa(svg)}`;
     },
     async sender_folders({ messageIds }) {
       await sleep(3);
