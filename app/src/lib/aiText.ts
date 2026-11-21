@@ -24,6 +24,8 @@ export function textToHtml(text: string): string {
 export function htmlToText(html: string, parse: (h: string) => { body: { innerText?: string; textContent: string | null } }): string {
   // Block ends and <br> as new lines before the markup goes.
   const marked = html
+    // Not text: a newsletter's CSS would fill the prompt.
+    .replace(/<(style|script|head|title|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(p|div|li|tr|h[1-6]|blockquote)>/gi, '$&\n')
     .replace(/<li[^>]*>/gi, '$&- ');

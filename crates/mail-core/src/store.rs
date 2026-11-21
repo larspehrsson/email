@@ -254,6 +254,10 @@ END;
 /// users this needs a stricter policy.
 const BASE_VERSION: i64 = 4;
 /// Schema changes since the base, oldest first. Add one per change (and change `SCHEMA` too).
+/// A change that only adds tables (or indexes) needs no step: `SCHEMA` (all `IF NOT EXISTS`) runs
+/// at every open and adds them, and the version stays, so an older build still opens the
+/// database (it ignores tables it doesn't know). Signatures (`signatures`,
+/// `signature_defaults`) came that way.
 const MIGRATIONS: &[fn(&Connection) -> Result<()>] = &[
     // 5: an account can keep its attachments for offline use
     |db| Ok(db.execute_batch("ALTER TABLE accounts ADD COLUMN keep_attachments INTEGER NOT NULL DEFAULT 0;")?),
@@ -298,17 +302,6 @@ const MIGRATIONS: &[fn(&Connection) -> Result<()>] = &[
     },
     // 12: Microsoft accounts can keep tags and snooze through Graph
     |db| Ok(db.execute_batch("ALTER TABLE accounts ADD COLUMN graph INTEGER;")?),
-    // 13: signatures, and each account's default ones
-    |db| {
-        Ok(db.execute_batch(
-            "CREATE TABLE IF NOT EXISTS signatures (
-                 id INTEGER PRIMARY KEY, name TEXT NOT NULL, html TEXT NOT NULL, position INTEGER NOT NULL);
-             CREATE TABLE IF NOT EXISTS signature_defaults (
-                 account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
-                 new_id INTEGER REFERENCES signatures(id) ON DELETE SET NULL,
-                 reply_id INTEGER REFERENCES signatures(id) ON DELETE SET NULL);",
-        )?)
-    },
 ];
 const SCHEMA_VERSION: i64 = BASE_VERSION + MIGRATIONS.len() as i64;
 
@@ -4259,3 +4252,4 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+

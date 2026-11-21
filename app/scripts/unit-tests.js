@@ -203,7 +203,7 @@ test('groups: where they start, and keeping them right through removes and undo'
 
 // ------------------------------------------------------------- writing help text
 
-import { clipOriginal, textToHtml } from '../src/lib/aiText.ts';
+import { clipOriginal, htmlToText, textToHtml } from '../src/lib/aiText.ts';
 
 test('the model’s plain text becomes paragraphs, line breaks and lists', () => {
   assert.equal(textToHtml('Hi Anna,\n\nThursday works.\nSee you <then>.\n\n- one\n- two'), '<p>Hi Anna,</p><p>Thursday works.<br>See you &lt;then&gt;.</p><ul><li><p>one</p></li><li><p>two</p></li></ul>');
@@ -215,4 +215,10 @@ test('a very long original keeps its newest part', () => {
   const c = clipOriginal(long);
   assert.ok(c.length < 61_000 && c.endsWith('left out]'));
   assert.equal(clipOriginal('short'), 'short');
+});
+
+test('an email’s text for the prompt leaves out its CSS and scripts', () => {
+  const parse = (h) => ({ body: { textContent: h.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&') } });
+  const html = '<html><head><title>T</title><style>.a{color:red}</style></head><body><p>Hi&amp;bye</p><STYLE type="text/css">p{x:y}</STYLE><ul><li>one</li></ul><script>x()</script>Done</body></html>';
+  assert.equal(htmlToText(html, parse), 'Hi&bye\n- one\nDone');
 });
