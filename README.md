@@ -51,6 +51,8 @@ per account for new messages and for replies, switchable in the message. Sending
 Yesterday, this week's days, last weeks and months), or by sender or recipient, A to Z, with
 each person's messages together under their name.
 
+![The Newsletters folder sorted by sender](docs/screenshots/sorted.png)
+
 **Search** as you type, over senders, recipients and subjects, in every folder or just the
 current one. It understands `from:`, `to:`, `subject:`, `"exact phrases"` and `-exclusions`.
 
@@ -71,13 +73,19 @@ then ✨ AI in a message (Ctrl/⌘+J) drafts a reply or a new message from a few
 what you wrote better, shorter, more formal or friendlier, fixes the spelling, or translates it.
 You see it first and choose whether to use it.
 
+<img src="docs/screenshots/writing-help.png" alt="Writing help drafting a reply" width="600">
+
 **An address book** (Ctrl/⌘+Shift+B): the people you keep, with their addresses, phone
 numbers, company and notes. Add someone from the sender panel in one click; they come first when
 you type an address.
 
+![The address book](docs/screenshots/contacts.png)
+
 **Everything from a sender** at a glance: Ctrl/⌘+2 opens a panel beside the message with all
 the mail from whoever sent it, in every folder. Tick them all and delete or archive at once —
 the quickest way to clear out a newsletter.
+
+![The sender panel beside a message, three messages ticked](docs/screenshots/sender.png)
 
 **Getting around:** fold the sidebar into a slim rail (Ctrl/⌘+1), or jump to any folder in any
 account by typing its name (Ctrl/⌘+G).
