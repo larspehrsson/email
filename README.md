@@ -1,6 +1,6 @@
 # Email
 
-A fast desktop email app for Linux and macOS. All your accounts in one window, your mail kept
+A fast desktop email app for Linux, macOS and Windows. All your accounts in one window, your mail kept
 on your computer so everything opens instantly, and a keyboard for everything.
 
 <picture>
@@ -17,6 +17,9 @@ page:
 - **Fedora and other RPM-based Linux:** the `.rpm`, installed with `sudo dnf install ./Email-*.rpm`.
 - **Debian, Ubuntu:** the `.deb`, installed with `sudo apt install ./Email_*.deb`.
 - **Any other Linux:** the `.AppImage`. Make it executable and run it.
+- **Windows:** the `-setup.exe` (or the `.msi`). It isn't signed, so Windows SmartScreen asks
+  once: More info › Run anyway. To open email links with it, choose Email for "mailto" in
+  Settings › Apps › Default apps.
 
 Installing a newer build over an older one upgrades it; your mail and settings stay.
 
@@ -90,6 +93,8 @@ at once — the quickest way to clear out a newsletter.
 
 **Message source** (⌥⌘U, or right-click a message), with questions to Claude about it: why wasn't this marked as spam, is it genuine, who really sent it.
 
+**AI apps:** let Claude Desktop, Claude Code or another MCP app read, search, draft and tidy your mail (Settings › AI apps; off until you turn it on; deleting and sending always ask you first).
+
 **Sender pictures** beside each message: the company's logo or website icon, or initials.
 
 **Several at once:** Ctrl/⌘-click or Shift-click messages in the list (or Ctrl/⌘+A for all of
@@ -116,11 +121,12 @@ also teaches your provider's spam filter.
 
 ## Good to know
 
-- **Your mail stays on your computer.** Nothing goes anywhere but your mail servers — except,
-  only when you ask for writing help, the message you're replying to and what you've written,
-  to Anthropic with your own key. It's
-  stored in `~/.local/share/dev.mailclient.desktop/` on Linux and
-  `~/Library/Application Support/dev.mailclient.desktop/` on macOS.
+- **Your mail stays on your computer.** It goes nowhere but your mail servers, except what you
+  ask for: writing help and questions about a message (to Anthropic, with your own key) and
+  Google Contacts sync. Sender pictures are looked up from each sender's own domain (once per
+  domain; View options turns them off). It's stored in `~/.local/share/dev.mailclient.desktop/`
+  on Linux, `~/Library/Application Support/dev.mailclient.desktop/` on macOS and
+  `%APPDATA%\dev.mailclient.desktop\` on Windows.
 - **Tags and Snooze on Outlook and Microsoft 365** go through Microsoft Graph, which needs
   your permission once: Settings › Accounts › Tags & snooze › Turn on…. A work or school
   account may need your administrator to allow it first.

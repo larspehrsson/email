@@ -5802,3 +5802,103 @@ body.dragging-account * {
   overflow: auto;
   max-height: 220px;
 }
+
+/* Settings › AI apps */
+.mcp-intro {
+  margin: 0 0 14px;
+  line-height: 1.5;
+}
+.mcp-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 0;
+  font-size: 13px;
+}
+.mcp-master {
+  font-size: 13.5px;
+}
+.mcp-perms {
+  margin: 4px 0 6px 22px;
+}
+.mcp-perms.off {
+  opacity: 0.55;
+}
+.mcp-accounts {
+  margin-top: 8px;
+}
+.mcp-head {
+  margin: 20px 0 6px;
+  font-size: 13px;
+}
+.mcp-how {
+  margin: 6px 0;
+  line-height: 1.5;
+}
+.mcp-code {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.mcp-code pre {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--sep);
+  border-radius: 6px;
+  font: 11.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+.mcp-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 12.5px;
+}
+.mcp-log li {
+  display: flex;
+  gap: 10px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--sep);
+}
+.mcp-log li.declined .mcp-log-what {
+  color: var(--text-3);
+  text-decoration: line-through;
+}
+.mcp-log-when {
+  flex: none;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+/* an AI app's question */
+.mcp-ask {
+  max-width: 520px;
+}
+.mcp-ask-who {
+  margin: 0 0 2px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.mcp-ask-title {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+.mcp-ask-line {
+  margin: 2px 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.mcp-ask-body {
+  max-height: 260px;
+  overflow: auto;
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--sep);
+  border-radius: 8px;
+  font: 13px/1.5 var(--font);
+  white-space: pre-wrap;
+  user-select: text;
+}

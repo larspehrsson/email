@@ -461,7 +461,7 @@ pub struct PendingOp {
 }
 
 /// Header data for one message as fetched from a folder.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct HeaderRecord {
     pub uid: u32,
     pub gm_msgid: Option<u64>,
@@ -2208,6 +2208,13 @@ impl Store {
             params![domain, icon.map(|i| i.mime.as_str()), icon.map(|i| i.data.as_slice()), fetched],
         )?;
         Ok(())
+    }
+
+    /// A folder's name as shown (its path, "/"-joined), for AI apps' answers.
+    pub fn folder_name(&self, folder_id: i64) -> Result<Option<String>> {
+        let db = self.rdb();
+        let path: Option<String> = db.query_row("SELECT path FROM folders WHERE id=?1", [folder_id], |r| r.get(0)).optional()?;
+        Ok(path.map(|p| serde_json::from_str::<Vec<String>>(&p).map(|v| v.join("/")).unwrap_or(p)))
     }
 
     pub fn message_subject(&self, id: i64) -> Result<Option<String>> {

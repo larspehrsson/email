@@ -581,6 +581,7 @@ export function createMockBackend(): Backend {
 
   const accounts: Account[] = [];
   const aiCancelled = new Set<number>();
+  const mcpAnswers = new Map<number, (allow: boolean) => void>();
   const googleLoad = (): GoogleStatus => {
     try {
       return JSON.parse(localStorage.getItem('mock.google') ?? 'null') ?? { clientId: null, links: [] };
@@ -1126,7 +1127,14 @@ export function createMockBackend(): Backend {
       __stopBusySync: () => void;
       __newInboxMail: () => string;
       __askClose: (quit: boolean) => boolean;
+      __mcpAsk: (c: EventMap['mcp-confirm']) => Promise<boolean>;
     };
+    // An AI app asking (delete, send), as the core would: resolves with the user's answer.
+    w.__mcpAsk = (c) =>
+      new Promise((resolve) => {
+        mcpAnswers.set(c.id, resolve);
+        emit('mcp-confirm', c);
+      });
     // Closing the window (or quitting) while an export runs, as the desktop app asks.
     w.__askClose = (quit) => {
       if (!exporting) return false;
@@ -1792,6 +1800,29 @@ export function createMockBackend(): Backend {
         setStatus(acc.id, 'connecting', null, 0, 0, null);
         setTimeout(() => void simulateSync(acc, 6_000, 'mail.example.org'), 300);
       }
+    },
+    async mcp_status() {
+      await sleep(3);
+      let settings = { enabled: false, drafts: false, organize: false, delete: false, send: false, accounts: null as number[] | null };
+      try {
+        settings = { ...settings, ...JSON.parse(localStorage.getItem('mock.mcp') ?? '{}') };
+      } catch {
+        /* defaults */
+      }
+      return { settings, command: '/Applications/Email.app/Contents/MacOS/mail-app' };
+    },
+    async set_mcp_settings({ settings }) {
+      await sleep(3);
+      localStorage.setItem('mock.mcp', JSON.stringify(settings));
+    },
+    async mcp_log() {
+      await sleep(3);
+      return [];
+    },
+    async mcp_answer({ id, allow }) {
+      await sleep(3);
+      mcpAnswers.get(id)?.(allow);
+      mcpAnswers.delete(id);
     },
     async message_source({ id }) {
       await sleep(10);

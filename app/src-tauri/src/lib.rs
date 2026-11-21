@@ -14,6 +14,7 @@ use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 
 mod default_mail;
+mod mcp;
 mod notify;
 mod window_state;
 
@@ -301,6 +302,39 @@ async fn disable_graph(core: State<'_, Arc<Core>>, account_id: i64) -> Res<()> {
 #[tauri::command]
 async fn message_source(core: State<'_, Arc<Core>>, id: i64) -> Res<String> {
     core.message_source(id).await.map_err(err)
+}
+
+/// AI apps: what's allowed, and how an MCP client starts the bridge.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct McpStatus {
+    settings: mail_core::mcp::Settings,
+    /// The program an MCP client runs (with `--mcp`).
+    command: String,
+}
+
+#[tauri::command]
+fn mcp_status(state: State<'_, Arc<mcp::McpState>>) -> McpStatus {
+    McpStatus {
+        settings: state.settings(),
+        command: std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default(),
+    }
+}
+
+#[tauri::command]
+fn set_mcp_settings(state: State<'_, Arc<mcp::McpState>>, settings: mail_core::mcp::Settings) -> Res<()> {
+    state.set_settings(settings)
+}
+
+#[tauri::command]
+fn mcp_log(state: State<'_, Arc<mcp::McpState>>) -> Vec<mcp::LogEntry> {
+    state.log()
+}
+
+/// The user's answer to an AI app's question (delete, send).
+#[tauri::command]
+fn mcp_answer(state: State<'_, Arc<mcp::McpState>>, id: u64, allow: bool) {
+    state.answer(id, allow);
 }
 
 /// Google Contacts: the OAuth client and the linked accounts.
@@ -1347,6 +1381,10 @@ pub fn run() {
             };
             tracing::info!("data directory: {}", dir.display());
             app.manage(core.clone());
+            // AI apps (MCP): listening, though they can do nothing until allowed in Settings.
+            let mcp_state = Arc::new(mcp::McpState::load(app.handle()));
+            app.manage(mcp_state.clone());
+            mcp::start(app.handle().clone(), core.clone(), mcp_state);
             tauri::async_runtime::spawn(health_log());
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -1403,6 +1441,10 @@ pub fn run() {
             allow_remote_sender,
             account_logos,
             google_status,
+            mcp_status,
+            set_mcp_settings,
+            mcp_log,
+            mcp_answer,
             message_source,
             set_google_client,
             google_connect,
@@ -1466,4 +1508,9 @@ pub fn run() {
             }
 
         });
+}
+
+/// `Email --mcp`: relay an MCP client to the running app (see `mcp`). The exit code.
+pub fn mcp_bridge() -> i32 {
+    mcp::bridge()
 }

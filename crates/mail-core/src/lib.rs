@@ -6,6 +6,7 @@ pub mod addressbook;
 pub mod ai;
 pub mod gcontacts;
 pub mod icons;
+pub mod mcp;
 pub mod compose;
 pub mod contacts;
 pub mod graph;
@@ -54,11 +55,53 @@ fn vault_entry() -> Result<keyring::Entry> {
     Ok(keyring::Entry::new(VAULT_SERVICE, VAULT_NAME)?)
 }
 
+/// Windows' Credential Manager keeps at most 2,560 bytes (1,280 UTF-16 characters) in an item,
+/// less than a couple of Microsoft refresh tokens: there the vault goes in pieces of this many
+/// characters. Elsewhere it's one item.
+const VAULT_CHUNK: usize = if cfg!(windows) { 1000 } else { usize::MAX };
+/// In the main item when the vault is in pieces: how many follow (`secrets.1` …).
+const VAULT_PARTS: &str = "#vault-parts";
+
+fn vault_part(i: usize) -> Result<keyring::Entry> {
+    Ok(keyring::Entry::new(VAULT_SERVICE, &format!("{VAULT_NAME}.{i}"))?)
+}
+
+/// What to store for the vault's JSON: the JSON itself when it fits in `chunk` characters, else
+/// a marker saying how many parts there are, then the parts.
+fn vault_pieces(json: &str, chunk: usize) -> Vec<String> {
+    if json.chars().count() <= chunk {
+        return vec![json.to_string()];
+    }
+    let chars: Vec<char> = json.chars().collect();
+    let parts: Vec<String> = chars.chunks(chunk).map(|c| c.iter().collect()).collect();
+    let mut out = vec![format!("{{\"{VAULT_PARTS}\":{}}}", parts.len())];
+    out.extend(parts);
+    out
+}
+
+/// The vault's JSON from its main item, with the parts it names (`part(i)`, from 1).
+fn vault_join(first: &str, mut part: impl FnMut(usize) -> Result<String>) -> Result<String> {
+    let v: serde_json::Value = serde_json::from_str(first).context("reading the app's keychain item")?;
+    let Some(n) = v.get(VAULT_PARTS).and_then(serde_json::Value::as_u64) else {
+        return Ok(first.to_string());
+    };
+    let mut json = String::new();
+    for i in 1..=n as usize {
+        json.push_str(&part(i)?);
+    }
+    Ok(json)
+}
+
 /// The vault's secrets: read from the keychain the first time.
 fn vault_loaded(cache: &mut Option<HashMap<String, String>>) -> Result<&mut HashMap<String, String>> {
     if cache.is_none() {
         let map = match vault_entry()?.get_password() {
-            Ok(json) => serde_json::from_str(&json).context("reading the app's keychain item")?,
+            Ok(first) => {
+                let json = vault_join(&first, |i| {
+                    vault_part(i)?.get_password().with_context(|| format!("reading part {i} of the app's keychain item"))
+                })?;
+                serde_json::from_str(&json).context("reading the app's keychain item")?
+            }
             Err(keyring::Error::NoEntry) => HashMap::new(),
             Err(e) => return Err(anyhow::Error::new(e).context("reading the app's secrets from the system keychain")),
         };
@@ -68,9 +111,23 @@ fn vault_loaded(cache: &mut Option<HashMap<String, String>>) -> Result<&mut Hash
 }
 
 fn vault_save(map: &HashMap<String, String>) -> Result<()> {
-    vault_entry()?
-        .set_password(&serde_json::to_string(map)?)
-        .context("saving to the system keychain")
+    let pieces = vault_pieces(&serde_json::to_string(map)?, VAULT_CHUNK);
+    // The parts first, the item naming them last.
+    for (i, p) in pieces.iter().enumerate().skip(1) {
+        vault_part(i)?.set_password(p).context("saving to the system keychain")?;
+    }
+    vault_entry()?.set_password(&pieces[0]).context("saving to the system keychain")?;
+    // Parts left over from a longer vault (only where it's split at all).
+    if VAULT_CHUNK != usize::MAX {
+        let mut i = pieces.len().max(1);
+        while let Ok(e) = vault_part(i) {
+            if e.delete_credential().is_err() {
+                break;
+            }
+            i += 1;
+        }
+    }
+    Ok(())
 }
 
 impl Secrets {
@@ -849,7 +906,7 @@ impl Core {
     }
 
     /// A message's detail, downloading its body first if it isn't local yet (waits up to 30 s).
-    async fn detail_now(&self, id: i64) -> Result<MessageDetail> {
+    pub async fn detail_now(&self, id: i64) -> Result<MessageDetail> {
         let mut rx = self.events.subscribe();
         if let Some(d) = self.get_message(id)? {
             return Ok(d);
@@ -1669,4 +1726,32 @@ fn not_suggested(store: &Store) -> Result<Vec<String>> {
     let mut out: Vec<String> = store.accounts()?.into_iter().map(|a| a.email.to_ascii_lowercase()).collect();
     out.extend(store.forgotten_addresses()?);
     Ok(out)
+}
+
+#[cfg(test)]
+mod vault_tests {
+    use super::*;
+
+    #[test]
+    fn the_vault_in_pieces_and_back() {
+        let mut map = HashMap::new();
+        map.insert("me@x.com".to_string(), "pässwörd-ü".repeat(300));
+        map.insert("#ai:anthropic".to_string(), "sk-ant-".to_string() + &"k".repeat(120));
+        let json = serde_json::to_string(&map).unwrap();
+        // Small enough: one item, as on macOS and Linux.
+        assert_eq!(vault_pieces(&json, usize::MAX), vec![json.clone()]);
+        assert_eq!(vault_pieces("{}", 2), vec!["{}".to_string()], "exactly at the limit");
+        // Windows-sized pieces: a marker, then parts of at most 1000 characters, multi-byte safe.
+        let pieces = vault_pieces(&json, 1000);
+        assert!(pieces.len() > 2);
+        assert!(pieces[1..].iter().all(|p| p.chars().count() <= 1000));
+        let back = vault_join(&pieces[0], |i| Ok(pieces[i].clone())).unwrap();
+        assert_eq!(back, json);
+        let again: HashMap<String, String> = serde_json::from_str(&back).unwrap();
+        assert_eq!(again, map);
+        // A vault saved whole (before, or elsewhere) reads as it is.
+        assert_eq!(vault_join(&json, |_| panic!("no parts")).unwrap(), json);
+        // A missing part is an error, not an empty vault.
+        assert!(vault_join(&pieces[0], |_| anyhow::bail!("gone")).is_err());
+    }
 }

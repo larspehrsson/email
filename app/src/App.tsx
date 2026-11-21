@@ -56,6 +56,7 @@ import { SenderPane } from './components/SenderPane';
 import { ContactsView } from './components/ContactsView';
 import { AddAccountModal, Onboarding } from './components/AddAccount';
 import { ContextMenuHost } from './components/ContextMenu';
+import { AiAppsHost } from './components/AiApps';
 import { startGoogleSync } from './lib/googleContacts';
 import { MultiPane } from './components/MultiPane';
 import { openSource, SourceHost } from './components/SourceView';
@@ -353,6 +354,7 @@ export function App() {
           <ViewMenuPopover />
           <ManageTagsHost />
           <ConfirmHost />
+          <AiAppsHost />
           <ContextMenuHost />
           <SourceHost />
           <ShortcutsHost />

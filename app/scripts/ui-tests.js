@@ -1351,6 +1351,42 @@ describe('message source', () => {
   });
 });
 
+describe('ai apps', () => {
+  test('off by default; turned on with chosen permissions; shows how to connect; asks before sending', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'AI apps' }).click();
+      const master = page.locator('.mcp-master input');
+      assert.equal(await master.isChecked(), false, 'off by default');
+      assert.equal(await page.locator('.mcp-perms input').first().isDisabled(), true);
+      await master.check();
+      await page.locator('.mcp-row', { hasText: 'Write drafts' }).locator('input').check();
+      await page.waitForTimeout(100);
+      const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('mock.mcp')));
+      assert.equal(saved.enabled, true);
+      assert.equal(saved.drafts, true);
+      assert.equal(saved.send, false);
+      // Leaving out an account lists the rest.
+      await page.locator('.mcp-accounts input').first().uncheck();
+      await page.waitForTimeout(100);
+      assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('mock.mcp')))).accounts.length, 1);
+      assert.match(await page.locator('.mcp-code pre').first().textContent(), /"--mcp"/);
+      await page.keyboard.press('Escape');
+      // An AI app asks to send: the user sees it and declines.
+      const answer = page.evaluate(() => window.__mcpAsk({ id: 7, client: 'Claude', title: 'Send this message?', lines: ['To: bob@x.com', 'Subject: Hi'], body: 'Hello Bob', ok: 'Send' }));
+      await page.locator('.mcp-ask').waitFor();
+      assert.match(await page.locator('.mcp-ask').textContent(), /Claude asks:.*Send this message\?.*To: bob@x.com.*Hello Bob/s);
+      await page.locator('.mcp-ask .btn', { hasText: "Don't" }).click();
+      assert.equal(await answer, false);
+      assert.equal(await page.locator('.mcp-ask').count(), 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('move list', () => {
   test("the folders with most of the sender's mail come first", async () => {
     const { page, errors, close } = await open({ threaded: false });
@@ -1472,7 +1508,7 @@ describe('writing help', () => {
       await page.bringToFront();
 
       await page.keyboard.press('ControlOrMeta+,');
-      await page.locator('.st-nav-item', { hasText: 'AI' }).click();
+      await page.locator('.st-nav-item', { hasText: /^AI$/ }).click();
       await page.locator('input.ai-key').fill('sk-ant-test');
       await page.locator('.st-pane button', { hasText: 'Save' }).click();
       await page.locator('.st-pane button', { hasText: 'Try it' }).click();

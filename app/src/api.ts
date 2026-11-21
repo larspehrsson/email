@@ -23,6 +23,9 @@ import type {
   ListFilter,
   SelectionInfo,
   GoogleStatus,
+  McpStatus,
+  McpSettings,
+  McpLogEntry,
   SearchField,
   Signatures,
   SenderPage,
@@ -117,6 +120,10 @@ export const api = {
     call('list_item_ids', { folderId, threaded, sort, filter, offset, limit }),
   accountLogos: (): Promise<{ accountId: number; dataUrl: string }[]> => call('account_logos', undefined),
   googleStatus: (): Promise<GoogleStatus> => call('google_status', undefined),
+  mcpStatus: (): Promise<McpStatus> => call('mcp_status', undefined),
+  setMcpSettings: (settings: McpSettings): Promise<void> => call('set_mcp_settings', { settings }),
+  mcpLog: (): Promise<McpLogEntry[]> => call('mcp_log', undefined),
+  mcpAnswer: (id: number, allow: boolean): Promise<void> => call('mcp_answer', { id, allow }),
   /** A message's whole source as text. */
   messageSource: (id: number): Promise<string> => call('message_source', { id }),
   setGoogleClient: (id: string | null, secret: string | null): Promise<void> => call('set_google_client', { id, secret }),
@@ -337,4 +344,7 @@ export const events = {
   onExportFinished: (cb: (p: EventMap['export-finished']) => void) => on('export-finished', cb),
   onConfirmClose: (cb: (p: EventMap['confirm-close']) => void) => on('confirm-close', cb),
   onAiText: (cb: (p: EventMap['ai-text']) => void) => on('ai-text', cb),
+  onMcpConfirm: (cb: (p: EventMap['mcp-confirm']) => void) => on('mcp-confirm', cb),
+  onMcpConfirmDone: (cb: (p: EventMap['mcp-confirm-done']) => void) => on('mcp-confirm-done', cb),
+  onMcpActivity: (cb: (p: EventMap['mcp-activity']) => void) => on('mcp-activity', cb),
 };
