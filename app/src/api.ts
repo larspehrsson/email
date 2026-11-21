@@ -108,6 +108,8 @@ export const api = {
     }),
   listFolders: (accountId: number): Promise<Folder[]> => call('list_folders', { accountId }),
   openFolder: (folderId: number): Promise<void> => call('open_folder', { folderId }),
+  /** Mark every message in the folder read; how many were unread. */
+  markFolderRead: (folderId: number): Promise<number> => call('mark_folder_read', { folderId }),
   listMessages: (folderId: number, offset: number, limit: number, sort: ListSort = 'received', filter?: ListFilter): Promise<MessagePage> =>
     call('list_messages', { folderId, offset, limit, sort, filter }),
   /** The groups the folder's list shows, in its order (counts add up to its rows). By date,

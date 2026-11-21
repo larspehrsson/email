@@ -1,4 +1,5 @@
 import { batch, createEffect, createMemo, createSignal, For, Match, onCleanup, Show, Switch, untrack } from 'solid-js';
+import { folderMenu } from './ContextMenu';
 import { hint } from '../lib/shortcuts';
 import { createStore } from 'solid-js/store';
 import { api, type Account, type Folder, type FolderRole, type SyncStatus } from '../api';
@@ -6,7 +7,7 @@ import { folderById, foldersByAccount, moveAccount, selectedFolderId, selectFold
 import { AccountDot } from './FolderSwitcher';
 import { cancelExport, exportLabel, exportNow } from '../lib/exports';
 import { fmtNum, loadPref, savePref } from '../lib/format';
-import { AlertIcon, CheckIcon, ChevronIcon, FolderIcon, LockIcon, PeopleIcon, PlusIcon, RoleIcon, SidebarIcon } from './Icons';
+import { AlertIcon, CheckIcon, ChevronIcon, FolderIcon, LockIcon, PeopleIcon, RoleIcon, SidebarIcon } from './Icons';
 import { PasswordDialog } from './PasswordPrompt';
 import { toggleSidebar } from '../lib/layout';
 import { DRAG, platform } from '../lib/platform';
@@ -410,6 +411,7 @@ function FolderRow(props: { folder: Folder; depth: number; role?: boolean }) {
       classList={{ selected: selected(), role: !!props.role }}
       style={{ 'padding-left': `${12 + props.depth * 14 + 18}px` }}
       onClick={() => selectFolder(props.folder.id)}
+      onContextMenu={(e) => folderMenu(e, props.folder)}
       title={props.folder.path.join(' / ')}
     >
       <span class="folder-icon">
@@ -441,6 +443,10 @@ function TreeItem(props: { node: TreeNode }) {
           const f = n().folder;
           if (f && f.selectable) selectFolder(f.id);
           else if (hasKids()) toggleNode(n());
+        }}
+        onContextMenu={(e) => {
+          const f = n().folder;
+          if (f?.selectable) folderMenu(e, f);
         }}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -642,7 +648,7 @@ function AccountSection(props: { account: Account; index: number }) {
   );
 }
 
-export function Sidebar(props: { onAddAccount: () => void; flyout?: boolean }) {
+export function Sidebar(props: { flyout?: boolean }) {
   return (
     <nav class="sidebar" classList={{ flyout: !!props.flyout }} aria-label="Mailboxes">
       <div class="sidebar-top" data-tauri-drag-region={DRAG}>
@@ -659,9 +665,6 @@ export function Sidebar(props: { onAddAccount: () => void; flyout?: boolean }) {
             aria-pressed={mainView() === 'contacts'}
           >
             <PeopleIcon />
-          </button>
-          <button class="icon-btn" onClick={props.onAddAccount} title="Add account" aria-label="Add account">
-            <PlusIcon />
           </button>
           <button
             class="icon-btn"

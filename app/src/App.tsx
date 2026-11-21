@@ -16,6 +16,8 @@ import {
   threadedPref,
   listSort,
   listFilter,
+  addingAccount,
+  setAddingAccount,
   senderPane,
   setSenderPane,
   mainView,
@@ -49,6 +51,7 @@ import { Resizer } from './components/Resizer';
 import { SenderPane } from './components/SenderPane';
 import { ContactsView } from './components/ContactsView';
 import { AddAccountModal, Onboarding } from './components/AddAccount';
+import { ContextMenuHost } from './components/ContextMenu';
 import { DRAG } from './lib/platform';
 
 const SIDEBAR = { min: 180, max: 420, def: 236 };
@@ -58,7 +61,6 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 export function App() {
   const [sidebarW, setSidebarW] = createSignal(clamp(loadPref('ui.sidebarWidth', SIDEBAR.def), SIDEBAR.min, SIDEBAR.max));
   const [listW, setListW] = createSignal(clamp(loadPref('ui.listWidth', LIST.def), LIST.min, LIST.max));
-  const [showAdd, setShowAdd] = createSignal(false);
   let readerEl: HTMLElement | undefined;
 
   onMount(() => {
@@ -154,7 +156,7 @@ export function App() {
           break;
         case 'add-account':
           // With no accounts the onboarding form is already the whole window.
-          if ((accounts()?.length ?? 0) > 0) setShowAdd(true);
+          if ((accounts()?.length ?? 0) > 0) setAddingAccount(true);
           break;
         case 'shortcuts':
           openShortcuts();
@@ -205,7 +207,7 @@ export function App() {
   const conversationReader = () => threaded() && !searchActive();
 
   const added = (a: Account) => {
-    setShowAdd(false);
+    setAddingAccount(false);
     void onAccountAdded(a);
   };
 
@@ -247,7 +249,7 @@ export function App() {
               when={sidebarMode() === 'rail'}
               fallback={
                 <>
-                  <Sidebar onAddAccount={() => setShowAdd(true)} />
+                  <Sidebar />
                   <Resizer
                     label="Resize sidebar"
                     width={sidebarW}
@@ -261,7 +263,7 @@ export function App() {
             </Show>
           </div>
           <Show when={flyout()}>
-            <Flyout width={sidebarW()} onAddAccount={() => setShowAdd(true)} />
+            <Flyout width={sidebarW()} />
           </Show>
           <div class="pane pane-list">
             <div class="list-pane">
@@ -327,11 +329,12 @@ export function App() {
           <ViewMenuPopover />
           <ManageTagsHost />
           <ConfirmHost />
+          <ContextMenuHost />
           <ShortcutsHost />
           <SettingsHost />
           <FolderSwitcherHost />
-          <Show when={showAdd()}>
-            <AddAccountModal onAdded={added} onClose={() => setShowAdd(false)} />
+          <Show when={addingAccount()}>
+            <AddAccountModal onAdded={added} onClose={() => setAddingAccount(false)} />
           </Show>
         </div>
       </Match>

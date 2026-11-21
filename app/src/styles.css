@@ -5427,3 +5427,12 @@ body.dragging-account * {
   margin-top: 4px;
   font-size: 12px;
 }
+
+/* right-click menus (ContextMenu.tsx): at the pointer */
+.ctx-menu {
+  min-width: 180px;
+  transform-origin: top left;
+}
+.st-add-account {
+  margin-top: 12px;
+}

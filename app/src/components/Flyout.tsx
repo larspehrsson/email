@@ -7,7 +7,7 @@ import { Sidebar } from './Sidebar';
  * The full sidebar tree slid out over the list (rail mode). Overlay only: never resizes
  * anything. Opened explicitly; closes on Esc, a click outside, or picking a folder.
  */
-export function Flyout(props: { width: number; onAddAccount: () => void }) {
+export function Flyout(props: { width: number }) {
   let el!: HTMLDivElement;
   const close = () => setFlyout(false);
 
@@ -49,7 +49,7 @@ export function Flyout(props: { width: number; onAddAccount: () => void }) {
 
   return (
     <div class="flyout" ref={el} style={{ left: `${RAIL_W}px`, width: `${props.width}px` }}>
-      <Sidebar onAddAccount={props.onAddAccount} flyout />
+      <Sidebar flyout />
     </div>
   );
 }

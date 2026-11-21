@@ -17,7 +17,7 @@ import {
 } from '../lib/shortcuts';
 import { ChevronIcon, CloseIcon } from './Icons';
 import { api, errorMessage, events, type Account, type AccountDetails, type AccountStorage, type AttachmentCounts } from '../api';
-import { accountMark, accounts, notifyNewMail, reloadAccounts, setNotifyNewMail } from '../state';
+import { accountMark, accounts, notifyNewMail, reloadAccounts, setAddingAccount, setNotifyNewMail } from '../state';
 import { MARK_COLORS } from '../lib/accountMarks';
 import { AccountTools } from './AccountTools';
 import { fmtNum, fmtSize, loadPref, savePref } from '../lib/format';
@@ -646,6 +646,17 @@ function AccountsSection() {
       <Show when={details.error}>
         <p class="st-acct-msg error">{errorMessage(details.error)}</p>
       </Show>
+      <div class="st-add-account">
+        <button
+          class="btn secondary"
+          onClick={() => {
+            close();
+            setAddingAccount(true);
+          }}
+        >
+          + Add account
+        </button>
+      </div>
     </div>
   );
 }

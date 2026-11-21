@@ -309,6 +309,10 @@ export function setListSort(s: ListSort): void {
   savePref('ui.listSort', s);
 }
 
+/** The Add account form is open (sidebar, Settings › Accounts, File menu). */
+const [addingAccount, setAddingAccount] = createSignal(false);
+export { addingAccount, setAddingAccount };
+
 /** The list's quick filter (View options › Show). Not kept between runs: a list that starts
  *  filtered looks like missing mail. */
 export type QuickFilter = { read: boolean | null; flagged: boolean; attachments: boolean };

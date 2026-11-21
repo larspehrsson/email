@@ -1,4 +1,5 @@
 import { createMemo, For, Show } from 'solid-js';
+import { folderMenu } from './ContextMenu';
 import { hint } from '../lib/shortcuts';
 import type { Account, Folder } from '../api';
 import { fmtNum } from '../lib/format';
@@ -27,6 +28,7 @@ function RailFolder(props: { f: Folder }) {
       aria-label={tip()}
       aria-current={selectedFolderId() === props.f.id ? 'page' : undefined}
       onClick={() => selectFolder(props.f.id)}
+      onContextMenu={(e) => folderMenu(e, props.f)}
     >
       <RoleIcon role={props.f.role ?? (isInboxPath(props.f) ? 'inbox' : null)} size={17} />
       <Show when={n() > 0}>

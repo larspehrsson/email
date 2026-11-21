@@ -1609,6 +1609,24 @@ export function createMockBackend(): Backend {
       await latency();
       return [...folders.values()].filter((f) => f.accountId === accountId).map((f) => ({ ...f, path: [...f.path] }));
     },
+    async mark_folder_read({ folderId }) {
+      await sleep(3);
+      const unread = (folderMsgs.get(folderId) ?? []).filter((m) => m.unread);
+      const touched = new Set<number>([folderId]);
+      for (const m of unread) {
+        m.unread = false;
+        // Every copy of it (a conversation's messages are one object per folder here).
+        for (const c of threads.get(threadOf(m)) ?? []) if (c.id === m.id) touched.add(c.folderId);
+      }
+      for (const id of touched) {
+        const f = folders.get(id);
+        if (f) recount(f);
+      }
+      emit('messages-changed', { folderIds: [...touched] });
+      const f = folders.get(folderId);
+      if (f) emit('folders-changed', { accountId: f.accountId });
+      return unread.length;
+    },
     async open_folder() {
       await latency();
     },

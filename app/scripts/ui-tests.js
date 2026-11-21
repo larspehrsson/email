@@ -662,7 +662,12 @@ describe('accounts', () => {
   test('a Microsoft account can turn on tags and snooze', async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {
-      await page.locator('[aria-label="Add account"]').first().click();
+      // From Settings › Accounts (the sidebar has no + any more).
+      assert.equal(await page.locator('.sidebar [aria-label="Add account"]').count(), 0);
+      await page.keyboard.press('Control+,');
+      await page.locator('.settings .st-nav-item', { hasText: 'Accounts' }).click().catch(() => {});
+      await page.getByRole('button', { name: '+ Add account' }).click();
+      assert.equal(await page.locator('.settings').count(), 0, 'Settings makes way for the form');
       await page.fill('input[placeholder="you@example.com"]', 'jane@outlook.com');
       await page.getByRole('button', { name: 'Continue with Microsoft' }).click();
       await page.waitForSelector('.sidebar .account-name:has-text("jane@outlook.com")', { timeout: 15000 });
@@ -871,6 +876,31 @@ describe('size and filters', () => {
       const rows = await page.locator('.folder-layer .row').count();
       assert.ok(rows > 0, 'some conversations with attachments');
       assert.equal(await page.locator('.folder-layer .row').filter({ hasNot: page.locator('.clip') }).count(), 0, 'each shows a paperclip');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('folder menu', () => {
+  test('right-click a folder: Mark all as read', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const inbox = page.locator('.sidebar .folder', { hasText: 'Inbox' }).first();
+      const badge = inbox.locator('.badge');
+      assert.ok(Number((await badge.textContent()).replace(/\D/g, '')) > 0, 'unread to begin with');
+      await inbox.click({ button: 'right' });
+      await page.locator('.ctx-menu .vm-item', { hasText: 'Mark all as read' }).click();
+      await page.waitForSelector('.toast:has-text("as read")');
+      await page.waitForTimeout(300);
+      assert.equal(await badge.count(), 0, 'no unread badge');
+      assert.equal(await page.locator('.folder-layer .row.unread').count(), 0, 'no unread rows');
+      // Nothing left: the item is greyed out.
+      await inbox.click({ button: 'right' });
+      assert.equal(await page.locator('.ctx-menu .vm-item', { hasText: 'Mark all as read' }).isDisabled(), true);
+      await page.keyboard.press('Escape');
+      assert.equal(await page.locator('.ctx-menu').count(), 0);
       assert.deepEqual(errors, []);
     } finally {
       await close();
