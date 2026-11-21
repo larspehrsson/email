@@ -59,7 +59,8 @@ import {
   multiPicked,
 } from '../state';
 import { platform } from '../lib/platform';
-import { CheckIcon, ClockIcon, FlagIcon, ForwardIcon, PaperclipIcon, ReplyIcon } from './Icons';
+import { CheckIcon, ClockIcon, FlagIcon, ForwardIcon, PaperclipIcon, ReplyIcon, TrashIcon } from './Icons';
+import { confirmDialog } from './Actions';
 
 /** A clock among the row's markers while a snooze is waiting to go off (its time on hover). */
 function SnoozeMark(props: { until?: number | null }) {
@@ -74,7 +75,7 @@ function SnoozeMark(props: { until?: number | null }) {
 import { ViewMenuButton } from './ViewMenu';
 import { TagDots, tintStyle } from './Tags';
 import { climbToParent, FolderCrumbs, folderPathLabel } from './FolderSwitcher';
-import { registerListNav, runShortcut } from '../lib/actions';
+import { registerListNav, runAction, runShortcut } from '../lib/actions';
 import { commandFor, hint } from '../lib/shortcuts';
 import { hideToast, showToast } from './Toast';
 import { badgeFor, railOrder } from './Sidebar';
@@ -550,6 +551,34 @@ export function MessageList(props: {
     if (n < 2) return;
     setPicked(await api.listItemIds(folderId, threaded, sort, filterArg(), 0, Math.max(n, 1_000_000)));
   }
+  /** A click on a group's header: all its rows, picked together. */
+  async function pickGroup(g: Group) {
+    scrollEl.focus({ preventScroll: true });
+    const ids = await idsBetween(g.start, g.start + g.count - 1);
+    anchorIdx = g.start;
+    if (ids.length >= 2) {
+      setPicked(ids);
+      setSelIndex(g.start);
+    } else selectIndex(g.start, false);
+  }
+  /** Its header's trash: every message in the group, after saying how many. */
+  async function deleteGroup(g: Group) {
+    const items = await idsBetween(g.start, g.start + g.count - 1);
+    const info = await api.selectionInfo(folderId, items, threaded);
+    const n = info.ids.length;
+    if (n === 0) return;
+    const forever = props.folder.role === 'trash' || props.folder.role === 'junk';
+    const what = n === 1 ? '1 message' : `${fmtNum(n)} messages`;
+    if (forever || n > 1) {
+      const ok = await confirmDialog(
+        forever ? `Delete ${what} in “${g.label}” forever? This can't be undone.` : `Delete ${what} in “${g.label}”?`,
+        forever ? 'Delete forever' : `Delete ${what}`,
+      );
+      if (!ok) return;
+    }
+    await runAction({ kind: forever ? 'deleteForever' : 'trash' }, { ids: info.ids, folderId, advance: false, items });
+  }
+
   // The list goes (another folder, sort, filter): so does what was picked in it.
   if (!search) onCleanup(() => setPicked([]));
 
@@ -1084,11 +1113,29 @@ export function MessageList(props: {
                 <>
                 <Show when={head()}>
                   {(g) => (
-                    <div class="group-head" role="presentation" style={{ transform: `translateY(${item.start}px)` }}>
+                    <div
+                      class="group-head"
+                      role="button"
+                      title={`Select all ${fmtNum(g().count)} in “${g().label}”`}
+                      style={{ transform: `translateY(${item.start}px)` }}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => void pickGroup(g())}
+                    >
                       <span class="group-label">{g().label}</span>
                       <Show when={sort !== 'received'}>
                         <span class="group-count">{fmtNum(g().count)}</span>
                       </Show>
+                      <button
+                        class="group-del"
+                        title={`Delete all ${fmtNum(g().count)} in “${g().label}”…`}
+                        aria-label={`Delete all in ${g().label}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void deleteGroup(g());
+                        }}
+                      >
+                        <TrashIcon size={12} />
+                      </button>
                     </div>
                   )}
                 </Show>

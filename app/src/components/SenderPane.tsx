@@ -10,6 +10,7 @@ import { forwardAsAttachments } from '../lib/compose';
 import { hideToast, showToast } from './Toast';
 import { cardFor, loadCards } from '../lib/addressBook';
 import { openContacts } from './ContactsView';
+import { confirmDialog } from './Actions';
 
 // The sender pane (eM Client's contact sidebar, for mail): everything from the sender of the
 // message on screen, in every folder but Trash and Spam, newest first. Pick some (⌘/Ctrl-click,
@@ -166,6 +167,10 @@ export function SenderPane() {
   async function act(action: Action, label: string) {
     const chosen = rows().filter((m) => picked().has(m.id));
     if (!chosen.length || busy()) return;
+    if (action.kind === 'trash' && chosen.length > 1) {
+      const n = fmtNum(chosen.length);
+      if (!(await confirmDialog(`Delete ${n} messages from ${name()}?`, `Delete ${n} messages`))) return;
+    }
     const byFolder = new Map<number, number[]>();
     for (const m of chosen) byFolder.set(m.folderId, [...(byFolder.get(m.folderId) ?? []), m.id]);
     setBusy(true);

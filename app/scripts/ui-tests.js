@@ -811,6 +811,40 @@ describe('sorting', () => {
   });
 });
 
+describe('group headers', () => {
+  test("a header's click picks its group; its trash deletes them all after asking", async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.click('.view-menu-btn');
+      await page.locator('.view-menu .vm-item', { hasText: 'From' }).click();
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(400);
+      // A sender with several messages.
+      const heads = page.locator('.folder-layer .group-head');
+      const counts = await heads.locator('.group-count').allTextContents();
+      const k = counts.findIndex((c) => Number(c) >= 2);
+      assert.ok(k >= 0, `a group of two or more: ${counts}`);
+      const head = heads.nth(k);
+      const n = Number(counts[k]);
+      const label = (await head.locator('.group-label').textContent()).trim();
+      await head.click();
+      await hasText(page.locator('.multi-pane .reader-subject'), `${n} messages selected`, 'the group picked');
+      await page.keyboard.press('Escape');
+      await head.hover();
+      await head.locator('.group-del').click();
+      assert.match(await page.locator('.confirm-backdrop .confirm-text').textContent(), new RegExp(`Delete ${n} messages in`));
+      await page.locator('.confirm-backdrop .btn.danger').click();
+      await page.locator('.toast', { hasText: `Deleted ${n} messages` }).waitFor();
+      await page.waitForTimeout(300);
+      const left = await page.locator('.folder-layer .group-head .group-label').allTextContents();
+      assert.ok(!left.map((x) => x.trim()).includes(label), 'the group is gone');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('size and filters', () => {
   const sizeOf = (t) => {
     const [n, u] = t.trim().split(' ');
@@ -1030,6 +1064,7 @@ describe('sender pane', () => {
       assert.equal(picked, await page.locator('.sp-row').count(), 'all shown are picked');
       assert.equal(await page.locator('.folder-layer .multi-pane').count(), 0, "the list's selection is its own");
       await page.keyboard.press('Delete');
+      if (picked > 1) await page.locator('.confirm-backdrop .btn.danger').click();
       await page.locator('.toast', { hasText: 'Deleted' }).waitFor();
       await page.waitForFunction(
         (n) => {
@@ -1212,6 +1247,9 @@ describe('several messages', () => {
       await rows(page).nth(5).click({ modifiers: ['Shift'] });
       await hasText(title(page), '4 messages selected', 'rows 2 to 5');
       await page.locator('.multi-pane [aria-label="Delete"]').click();
+      // More than one: asked first.
+      assert.match(await page.locator('.confirm-backdrop .confirm-text').textContent(), /Delete 4 messages\?/);
+      await page.locator('.confirm-backdrop .btn.danger').click();
       await page.locator('.toast', { hasText: 'Deleted 4 messages' }).waitFor();
       await page.waitForTimeout(300);
       assert.equal(await page.locator('.multi-pane').count(), 0, 'back to one');

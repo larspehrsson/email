@@ -285,6 +285,11 @@ function useActions(t: () => ActionTarget | null) {
       case 'archive':
         return runAction({ kind: 'archive' }, base);
       case 'delete':
+        if (!inTrash() && x.items && x.ids.length > 1) {
+          // Several picked together: say how many first.
+          const n = x.ids.length;
+          if (!(await confirmDialog(`Delete ${n.toLocaleString()} messages?`, `Delete ${n.toLocaleString()} messages`))) return;
+        }
         if (inTrash()) {
           const n = x.ids.length;
           const ok = await confirmDialog(`Delete ${n === 1 ? '1 message' : `${n} messages`} forever? This can't be undone.`, 'Delete forever');

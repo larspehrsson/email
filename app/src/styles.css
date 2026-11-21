@@ -2275,8 +2275,36 @@ body.resizing iframe {
   letter-spacing: 0.02em;
   text-transform: uppercase;
   color: var(--text-3);
-  pointer-events: none;
   contain: strict;
+  cursor: pointer;
+}
+.group-head:hover {
+  color: var(--text-2);
+}
+/* the group's trash: on hover */
+.group-del {
+  flex: none;
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 20px;
+  margin-bottom: -3px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 100ms;
+}
+.group-head:hover .group-del,
+.group-del:focus-visible {
+  opacity: 1;
+}
+.group-del:hover {
+  background: var(--bg-hover);
+  color: var(--danger);
 }
 .group-label {
   min-width: 0;
