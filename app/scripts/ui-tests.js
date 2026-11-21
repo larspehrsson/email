@@ -36,6 +36,13 @@ async function open({ threaded, query = '' }) {
   const context = await browser.newContext({ viewport: { width: 1400, height: 850 }, locale: 'en-US', timezoneId: 'America/New_York' });
   await context.clock.setFixedTime(NOW);
   await context.addInitScript((t) => localStorage.setItem('ui.threaded', JSON.stringify(t)), threaded);
+  // The app's window refuses blob: pictures (its CSP allows data:); a browser tab wouldn't, so
+  // make them fail here too.
+  await context.addInitScript(() => {
+    URL.createObjectURL = () => {
+      throw new Error('blob: URLs are refused in the app window (CSP img-src)');
+    };
+  });
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));

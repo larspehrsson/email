@@ -1,5 +1,6 @@
 import { createSignal } from 'solid-js';
 import { api } from '../api';
+import { loadPicture } from './pictures';
 
 // The accounts' own marker pictures (Settings › Accounts › Marker): shown instead of the
 // letter wherever the marker is (sidebar, rail, folder switcher, sync status).
@@ -37,20 +38,13 @@ export async function setAccountLogo(accountId: number, dataUrl: string | null):
 
 /** A chosen picture scaled to fit 128 px (PNG, keeping transparency), as a data: URL. */
 export async function logoFromFile(file: Blob): Promise<string> {
-  const url = URL.createObjectURL(file);
-  try {
-    const img = new Image();
-    img.src = url;
-    await img.decode();
-    const scale = Math.min(1, 128 / Math.max(img.naturalWidth, img.naturalHeight));
-    const w = Math.max(1, Math.round(img.naturalWidth * scale));
-    const h = Math.max(1, Math.round(img.naturalHeight * scale));
-    const c = document.createElement('canvas');
-    c.width = w;
-    c.height = h;
-    c.getContext('2d')!.drawImage(img, 0, 0, w, h);
-    return c.toDataURL('image/png');
-  } finally {
-    URL.revokeObjectURL(url);
-  }
+  const img = await loadPicture(file);
+  const scale = Math.min(1, 128 / Math.max(img.naturalWidth, img.naturalHeight));
+  const w = Math.max(1, Math.round(img.naturalWidth * scale));
+  const h = Math.max(1, Math.round(img.naturalHeight * scale));
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  c.getContext('2d')!.drawImage(img, 0, 0, w, h);
+  return c.toDataURL('image/png');
 }
