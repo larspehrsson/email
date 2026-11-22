@@ -1373,7 +1373,7 @@ pub fn run() {
             init_logging(app.path().app_log_dir().ok());
             tracing::info!(version = version_label(), "starting");
             create_main_window(app)?;
-            notify::init();
+            notify::init(app.handle());
             mailto_links(app);
             if let Ok(dir) = opened_attachments_dir(app.handle()) {
                 let _ = std::fs::remove_dir_all(dir);
