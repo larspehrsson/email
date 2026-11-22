@@ -90,7 +90,7 @@ You see it first and choose whether to use it.
 <img src="docs/screenshots/writing-help.png" alt="Writing help drafting a reply" width="600">
 
 **An address book** (Ctrl/⌘+Shift+B): the people you keep, with their addresses, phone
-numbers, company and notes, synced both ways with Google Contacts if you like ([setup](docs/GOOGLE_CONTACTS.md)). Add someone from the sender panel in one click; they come first when
+numbers, company and notes, synced both ways with Google Contacts if you like ([setup](docs/GOOGLE_CONTACTS.md)). With Google Contacts, a column on the left shows each account's contacts and its groups (Starred, Family…), and every contact's groups are on its row. Add someone from the sender panel in one click; they come first when
 you type an address.
 
 ![The address book](docs/screenshots/contacts.png)

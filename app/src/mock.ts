@@ -1889,14 +1889,22 @@ export function createMockBackend(): Backend {
       // Their contacts come in (made up): Google's, linked to this account.
       const all = cardsLoad();
       let next = Math.max(0, ...all.map((c) => c.id)) + 1;
-      const people: [string, string, string][] = [
-        ['Olivia Hart', 'olivia.hart@example.com', 'Fabrikam'],
-        ['Noah Becker', 'noah@becker.example', ''],
-        ['Emma Lindqvist', 'emma.lindqvist@example.se', 'Nordlys'],
+      // In groups there, as Google Contacts has them.
+      const g = (r: string) => `contactGroups/${r}`;
+      const groups = [
+        { resource: g('myContacts'), name: 'My Contacts' },
+        { resource: g('starred'), name: 'Starred' },
+        { resource: g('family1'), name: 'Familie' },
+        { resource: g('work1'), name: 'Kolleger' },
       ];
-      const added = people.map(([name, email, company]) => ({ id: next++, name, emails: [email], phones: [], company, notes: '', google: accountId }));
+      const people: [string, string, string, string[]][] = [
+        ['Olivia Hart', 'olivia.hart@example.com', 'Fabrikam', [g('myContacts'), g('starred'), g('work1')]],
+        ['Noah Becker', 'noah@becker.example', '', [g('myContacts'), g('family1')]],
+        ['Emma Lindqvist', 'emma.lindqvist@example.se', 'Nordlys', [g('myContacts')]],
+      ];
+      const added = people.map(([name, email, company, groups]) => ({ id: next++, name, emails: [email], phones: [], company, notes: '', google: accountId, groups }));
       localStorage.setItem('mock.cards', JSON.stringify([...all, ...added]));
-      st.links = [...st.links.filter((l) => l.accountId !== accountId), { accountId, googleEmail: email, synced: Math.floor(Date.now() / 1000), error: null, count: added.length }];
+      st.links = [...st.links.filter((l) => l.accountId !== accountId), { accountId, googleEmail: email, synced: Math.floor(Date.now() / 1000), error: null, count: added.length, groups }];
       localStorage.setItem('mock.google', JSON.stringify(st));
       return email;
     },

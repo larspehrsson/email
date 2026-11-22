@@ -1430,6 +1430,78 @@ describe('google contacts', () => {
   });
 });
 
+describe('contact groups', () => {
+  test('the address book by Google account and group, with each contact\'s groups on its row', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const g = (r) => `contactGroups/${r}`;
+      await page.evaluate((groups) => {
+        localStorage.setItem(
+          'mock.google',
+          JSON.stringify({ clientId: 'x.apps.googleusercontent.com', links: [{ accountId: 1, googleEmail: 'me@gmail.com', synced: 1, error: null, count: 3, groups }] }),
+        );
+        const card = (id, name, google, groups) => ({ id, name, emails: [`${name.split(' ')[0].toLowerCase()}@x.com`], phones: [], company: '', notes: '', google, groups });
+        localStorage.setItem(
+          'mock.cards',
+          JSON.stringify([
+            card(1, 'Olivia Hart', 1, [groups[0].resource, groups[1].resource, groups[3].resource]),
+            card(2, 'Noah Becker', 1, [groups[0].resource, groups[2].resource]),
+            card(3, 'Emma Lindqvist', 1, [groups[0].resource]),
+            card(4, 'Local Person', null, []),
+          ]),
+        );
+        localStorage.removeItem('contacts.source');
+      }, [
+        { resource: g('myContacts'), name: 'My Contacts' },
+        { resource: g('starred'), name: 'Starred' },
+        { resource: g('family1'), name: 'Familie' },
+        { resource: g('work1'), name: 'Kolleger' },
+      ]);
+      // (One way in: the shortcut and the button both toggle it.)
+      const openContacts = async () => {
+        await page.locator('.sidebar [aria-label="Address book"]').click();
+        await page.locator('.contacts').waitFor();
+      };
+      await page.reload();
+      await openContacts();
+      const sources = page.locator('.ct-sources');
+      await sources.waitFor();
+      const rows = async () => (await page.locator('.ct-row .ct-name').allTextContents()).map((t) => t.replace(/G$/, '').trim());
+      const source = (name) => sources.locator('.ct-source', { hasText: name });
+      // Everyone, each with their groups (Starred first; My Contacts not shown).
+      await page.locator('.ct-row', { hasText: 'Olivia Hart' }).waitFor();
+      assert.deepEqual(await rows(), ['Emma Lindqvist', 'Local Person', 'Noah Becker', 'Olivia Hart']);
+      assert.match(await source('All contacts').textContent(), /4$/);
+      assert.deepEqual(await page.locator('.ct-row', { hasText: 'Olivia Hart' }).locator('.ct-chip').allTextContents(), ['Starred', 'Kolleger']);
+      assert.equal(await page.locator('.ct-row', { hasText: 'Emma Lindqvist' }).locator('.ct-chip').count(), 0);
+      // One group; the account; this computer's.
+      await source('Familie').click();
+      assert.deepEqual(await rows(), ['Noah Becker']);
+      assert.equal(await page.locator('.ct-row.on .ct-name').count(), 1, 'one of them chosen');
+      await source('Starred').click();
+      assert.deepEqual(await rows(), ['Olivia Hart']);
+      await source('me@gmail.com').click();
+      assert.deepEqual(await rows(), ['Emma Lindqvist', 'Noah Becker', 'Olivia Hart']);
+      await source('This computer').click();
+      assert.deepEqual(await rows(), ['Local Person']);
+      // A new contact goes where you're looking.
+      await source('Kolleger').click();
+      await page.locator('[aria-label="New contact"]').click();
+      assert.equal(await page.locator('select.ct-save-in').inputValue(), '1');
+      await page.keyboard.press('Escape');
+      // Kept for next time.
+      await page.reload();
+      await openContacts();
+      await page.locator('.ct-source.on', { hasText: 'Kolleger' }).waitFor();
+      await page.locator('.ct-row', { hasText: 'Olivia Hart' }).waitFor();
+      assert.deepEqual(await rows(), ['Olivia Hart']);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('sender pictures', () => {
   test('a Google contact\'s own photo, in place of their company\'s logo', async () => {
     const { page, errors, close } = await open({ threaded: false });

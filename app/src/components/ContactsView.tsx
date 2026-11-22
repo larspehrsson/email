@@ -1,16 +1,32 @@
-import { batch, createEffect, createMemo, createResource, createSignal, For, Index, on, onCleanup, onMount, Show } from 'solid-js';
-import { api, errorMessage, type Card, type ContactDay, type Labeled } from '../api';
+import { batch, createEffect, createMemo, createResource, createSignal, For, Index, on, onCleanup, onMount, Show, type JSX } from 'solid-js';
+import { api, errorMessage, type Card, type ContactDay, type ContactGroup, type Labeled } from '../api';
 import { cards, emptyCard, loadCards, reloadCards } from '../lib/addressBook';
 import { newMessageTo } from '../lib/compose';
 import { hint } from '../lib/shortcuts';
 import { accounts, setMainView, setSearchQuery, setSearchScope } from '../state';
 import { googleStatus, reloadGoogleStatus, syncGoogle, syncGoogleSoon } from '../lib/googleContacts';
 import { confirmDialog } from './Actions';
-import { CloseIcon, PeopleIcon, PlusIcon } from './Icons';
+import { CloseIcon, CloudIcon, FolderIcon, PeopleIcon, PlusIcon, StarIcon, TagIcon } from './Icons';
 import { focusSearch } from './SearchBar';
 
 // The address book: everyone kept, searchable, on the left; the one chosen on the right, to
-// change, write to, or see their mail.
+// change, write to, or see their mail. With Google Contacts linked, a column further left
+// chooses whose: everyone, one account's, one of its groups (as in Google Contacts), or the
+// contacts kept only on this computer.
+
+/** Which contacts the list shows. */
+type Source = { kind: 'all' } | { kind: 'local' } | { kind: 'account'; id: number } | { kind: 'group'; id: number; group: string };
+const sourceKey = (s: Source) =>
+  s.kind === 'account' ? `account:${s.id}` : s.kind === 'group' ? `group:${s.id}:${s.group}` : s.kind;
+function sourceFrom(key: string | null): Source {
+  const [kind, id, ...group] = (key ?? '').split(':');
+  if (kind === 'local') return { kind: 'local' };
+  if (kind === 'account' && id) return { kind: 'account', id: Number(id) };
+  if (kind === 'group' && id && group.length) return { kind: 'group', id: Number(id), group: group.join(':') };
+  return { kind: 'all' };
+}
+const MY_CONTACTS = 'contactGroups/myContacts';
+const STARRED = 'contactGroups/starred';
 
 /** A contact to show when the view opens (e.g. "In contacts" in the sender panel), or a new one
  *  prefilled (name, address). */
@@ -55,11 +71,65 @@ export function ContactsView() {
     onCleanup(() => window.removeEventListener('keydown', onKey));
   });
 
+  // Whose contacts: kept between visits.
+  const [source, setSourceRaw] = createSignal<Source>(
+    sourceFrom(
+      (() => {
+        try {
+          return localStorage.getItem('contacts.source');
+        } catch {
+          return null;
+        }
+      })(),
+    ),
+  );
+  const links = () => googleStatus()?.links ?? [];
+  /** The source, if it's still there (an account unlinked, a group deleted in Google: all). */
+  const where = createMemo<Source>(() => {
+    const s = source();
+    if (s.kind === 'account' || s.kind === 'group') {
+      const l = links().find((x) => x.accountId === s.id);
+      if (!l || (s.kind === 'group' && !(l.groups ?? []).some((g) => g.resource === s.group))) return { kind: 'all' };
+    }
+    return s;
+  });
+  function setSource(s: Source) {
+    setSourceRaw(s);
+    try {
+      localStorage.setItem('contacts.source', sourceKey(s));
+    } catch {
+      /* only a convenience */
+    }
+  }
+  const inSource = (c: Card, s: Source) =>
+    s.kind === 'all' ||
+    (s.kind === 'local' && c.google == null) ||
+    (s.kind === 'account' && c.google === s.id) ||
+    (s.kind === 'group' && c.google === s.id && (c.groups ?? []).includes(s.group));
+  const count = (s: Source) => cards().filter((c) => inSource(c, s)).length;
+  /** A group's name, for the chips on a row. */
+  const groupNames = createMemo(() => {
+    const m = new Map<string, string>();
+    for (const l of links()) for (const g of l.groups ?? []) m.set(`${l.accountId}:${g.resource}`, g.name);
+    return m;
+  });
+  /** The groups a row shows (all but My Contacts, which nearly everyone is in). */
+  const chips = (c: Card): ContactGroup[] =>
+    c.google == null
+      ? []
+      : (c.groups ?? [])
+          .filter((r) => r !== MY_CONTACTS)
+          .flatMap((r) => {
+            const name = groupNames().get(`${c.google}:${r}`);
+            return name ? [{ resource: r, name }] : [];
+          })
+          .sort((a, b) => Number(b.resource === STARRED) - Number(a.resource === STARRED) || a.name.localeCompare(b.name));
+
   const shown = createMemo(() => {
     const q = query().trim().toLowerCase();
-    if (!q) return cards();
-    return cards().filter((c) =>
-      [c.name, c.company, c.notes, ...c.emails, ...c.phones].some((f) => f.toLowerCase().includes(q)),
+    const s = where();
+    return cards().filter(
+      (c) => inSource(c, s) && (!q || [c.name, c.company, c.notes, ...c.emails, ...c.phones].some((f) => f.toLowerCase().includes(q))),
     );
   });
 
@@ -73,8 +143,12 @@ export function ContactsView() {
       setMsg(null);
     });
   }
-  /** Where a new contact goes: the last place chosen, if still linked. */
+  /** Where a new contact goes: the account being looked at, else the last place chosen, if
+   *  still linked. */
   const lastPlace = () => {
+    const s = where();
+    if (s.kind === 'account' || s.kind === 'group') return s.id;
+    if (s.kind === 'local') return null;
     const g = Number(localStorage.getItem('contacts.saveIn') ?? 0);
     return googleStatus()?.links.some((l) => l.accountId === g) ? g : null;
   };
@@ -165,6 +239,15 @@ export function ContactsView() {
     queueMicrotask(() => focusSearch());
   }
 
+  // Another source: the first of its contacts, unless the one chosen is in it (or being edited).
+  createEffect(
+    on(where, () => {
+      const f = form();
+      if (dirty() || (f?.id && shown().some((c) => c.id === f.id))) return;
+      choose(shown()[0] ?? null);
+    }, { defer: true }),
+  );
+
   // Keep the list's choice in view when cards change underneath (another window saved).
   createEffect(
     on(cards, () => {
@@ -173,8 +256,49 @@ export function ContactsView() {
     }, { defer: true }),
   );
 
+  /** A row of the sources column: its name, how many, chosen or not. */
+  function SourceRow(props: { label: string; icon: JSX.Element; s: Source; heading?: boolean; nested?: boolean }) {
+    const on = () => sourceKey(where()) === sourceKey(props.s);
+    return (
+      <button
+        class="ct-source"
+        classList={{ on: on(), heading: !!props.heading, nested: !!props.nested }}
+        aria-current={on() ? 'true' : undefined}
+        title={props.label}
+        onClick={() => setSource(props.s)}
+      >
+        <span class="ct-source-icon">{props.icon}</span>
+        <span class="ct-source-name">{props.label}</span>
+        <span class="ct-source-count">{count(props.s)}</span>
+      </button>
+    );
+  }
+
   return (
-    <section class="contacts" aria-label="Address book">
+    <section class="contacts" classList={{ 'has-sources': links().length > 0 }} aria-label="Address book">
+      <Show when={links().length > 0}>
+        <nav class="ct-sources" aria-label="Contact groups">
+          <SourceRow label="All contacts" icon={<PeopleIcon size={14} />} s={{ kind: 'all' }} />
+          <For each={links()}>
+            {(l) => (
+              <>
+                <SourceRow label={l.googleEmail} icon={<CloudIcon size={14} />} s={{ kind: 'account', id: l.accountId }} heading />
+                <For each={l.groups ?? []}>
+                  {(g) => (
+                    <SourceRow
+                      label={g.name}
+                      icon={g.resource === STARRED ? <StarIcon size={13} /> : g.resource === MY_CONTACTS ? <PeopleIcon size={13} /> : <TagIcon size={13} />}
+                      s={{ kind: 'group', id: l.accountId, group: g.resource }}
+                      nested
+                    />
+                  )}
+                </For>
+              </>
+            )}
+          </For>
+          <SourceRow label="This computer" icon={<FolderIcon size={14} />} s={{ kind: 'local' }} heading />
+        </nav>
+      </Show>
       <div class="ct-list">
         <header class="ct-head">
           <span class="ct-title">
@@ -197,7 +321,14 @@ export function ContactsView() {
           onInput={(e) => setQuery(e.currentTarget.value)}
         />
         <div class="ct-rows" role="listbox" aria-label="Contacts">
-          <For each={shown()} fallback={<p class="ct-empty">{cards().length ? 'No one matches.' : 'No contacts yet. Add one with +, or from the Sender panel (⌘2) while reading.'}</p>}>
+          <For
+            each={shown()}
+            fallback={
+              <p class="ct-empty">
+                {query().trim() ? 'No one matches.' : where().kind !== 'all' ? 'No one here.' : cards().length ? 'No one matches.' : 'No contacts yet. Add one with +, or from the Sender panel (⌘2) while reading.'}
+              </p>
+            }
+          >
             {(c) => (
               <button
                 role="option"
@@ -212,7 +343,10 @@ export function ContactsView() {
                     <span class="ct-google" title={`Google Contacts: ${googleEmail(c.google!)}`}>G</span>
                   </Show>
                 </span>
-                <span class="ct-sub">{c.emails[0] ?? c.company}</span>
+                <span class="ct-sub">
+                  <For each={chips(c)}>{(g) => <span class="ct-chip" classList={{ star: g.resource === STARRED }}>{g.name}</span>}</For>
+                  {c.emails[0] ?? c.company}
+                </span>
               </button>
             )}
           </For>

@@ -186,6 +186,8 @@ export interface Card {
   notes: string;
   /** a Google contact of this account (null: kept only here); for a new card, where to make it */
   google?: number | null;
+  /** a Google contact's groups (`contactGroups/…`, see GoogleLink.groups); changed in Google */
+  groups?: string[];
 }
 
 /** What AI apps (MCP clients) may do (Settings › AI apps). */
@@ -227,6 +229,12 @@ export interface McpLogEntry {
   ok: boolean;
 }
 
+/** A group in Google Contacts ("label" there): My Contacts, Starred, or one of the user's. */
+export interface ContactGroup {
+  /** `contactGroups/…` */
+  resource: string;
+  name: string;
+}
 /** An account linked to its Google contacts. */
 export interface GoogleLink {
   accountId: number;
@@ -235,6 +243,8 @@ export interface GoogleLink {
   synced: number | null;
   error: string | null;
   count: number;
+  /** its groups, in the order shown (My Contacts, Starred, then the user's own by name) */
+  groups: ContactGroup[];
 }
 /** A value with Google's name for its kind ("Mobile", "Work"; may be empty). */
 export interface Labeled {

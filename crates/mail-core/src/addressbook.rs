@@ -20,6 +20,10 @@ pub struct Card {
     /// here. For a new card, the account to create it in.
     #[serde(default)]
     pub google: Option<i64>,
+    /// A Google contact's groups (`contactGroups/…`, see `gcontacts::ContactGroup`), as last
+    /// read from Google; changed there, not here.
+    #[serde(default)]
+    pub groups: Vec<String>,
 }
 
 impl Card {

@@ -248,6 +248,15 @@ CREATE TABLE IF NOT EXISTS card_photos (
     mime    TEXT NOT NULL,
     data    BLOB NOT NULL
 );
+-- A linked account's groups in Google Contacts (crate::gcontacts::ContactGroup), in the order
+-- shown; replaced by every sync. A card's own groups are in its person (card_links.raw).
+CREATE TABLE IF NOT EXISTS contact_groups (
+    account_id INTEGER NOT NULL,
+    position   INTEGER NOT NULL,
+    resource   TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    PRIMARY KEY (account_id, resource)
+);
 -- Google contacts deleted here, still to delete there.
 CREATE TABLE IF NOT EXISTS card_tombstones (
     account_id INTEGER NOT NULL,
@@ -3689,7 +3698,10 @@ impl Store {
     pub fn cards(&self) -> Result<Vec<crate::addressbook::Card>> {
         let db = self.rdb();
         let mut stmt = db.prepare_cached(
-            "SELECT b.id, b.name, b.emails, b.phones, b.company, b.notes, l.account_id
+            "SELECT b.id, b.name, b.emails, b.phones, b.company, b.notes, l.account_id,
+                    (SELECT json_group_array(json_extract(m.value, '$.contactGroupMembership.contactGroupResourceName'))
+                     FROM json_each(l.raw, '$.memberships') m
+                     WHERE json_extract(m.value, '$.contactGroupMembership.contactGroupResourceName') IS NOT NULL)
              FROM address_book b LEFT JOIN card_links l ON l.card_id = b.id",
         )?;
         let mut cards: Vec<crate::addressbook::Card> = stmt
@@ -3702,6 +3714,7 @@ impl Store {
                     company: r.get(4)?,
                     notes: r.get(5)?,
                     google: r.get(6)?,
+                    groups: r.get::<_, Option<String>>(7)?.and_then(|g| serde_json::from_str(&g).ok()).unwrap_or_default(),
                 })
             })?
             .collect::<rusqlite::Result<_>>()?;
@@ -3749,6 +3762,17 @@ impl Store {
     // ---- Google Contacts (crate::gcontacts) --------------------------------------------------
 
     pub fn google_links(&self) -> Result<Vec<crate::gcontacts::GoogleLink>> {
+        let links = self.google_links_only()?;
+        links
+            .into_iter()
+            .map(|mut l| {
+                l.groups = self.contact_groups(l.account_id)?;
+                Ok(l)
+            })
+            .collect()
+    }
+
+    fn google_links_only(&self) -> Result<Vec<crate::gcontacts::GoogleLink>> {
         let db = self.rdb();
         let mut stmt = db.prepare_cached(
             "SELECT g.account_id, g.google_email, g.sync_token, g.synced, g.error,
@@ -3764,9 +3788,33 @@ impl Store {
                     synced: r.get(3)?,
                     error: r.get(4)?,
                     count: r.get(5)?,
+                    groups: Vec::new(),
                 })
             })?
             .collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// An account's groups in Google Contacts, in the order shown.
+    pub fn contact_groups(&self, account_id: i64) -> Result<Vec<crate::gcontacts::ContactGroup>> {
+        let db = self.rdb();
+        let mut stmt = db.prepare_cached("SELECT resource, name FROM contact_groups WHERE account_id=?1 ORDER BY position")?;
+        Ok(stmt
+            .query_map([account_id], |r| Ok(crate::gcontacts::ContactGroup { resource: r.get(0)?, name: r.get(1)? }))?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn set_contact_groups(&self, account_id: i64, groups: &[crate::gcontacts::ContactGroup]) -> Result<()> {
+        let mut db = self.db();
+        let tx = db.transaction()?;
+        tx.execute("DELETE FROM contact_groups WHERE account_id=?1", [account_id])?;
+        for (i, g) in groups.iter().enumerate() {
+            tx.execute(
+                "INSERT OR REPLACE INTO contact_groups (account_id, position, resource, name) VALUES (?1,?2,?3,?4)",
+                params![account_id, i as i64, g.resource, g.name],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn google_link(&self, account_id: i64) -> Result<Option<crate::gcontacts::GoogleLink>> {
@@ -3800,6 +3848,7 @@ impl Store {
         db.execute("DELETE FROM card_photos WHERE card_id IN (SELECT card_id FROM card_links WHERE account_id=?1)", [account_id])?;
         db.execute("DELETE FROM card_links WHERE account_id=?1", [account_id])?;
         db.execute("DELETE FROM card_tombstones WHERE account_id=?1", [account_id])?;
+        db.execute("DELETE FROM contact_groups WHERE account_id=?1", [account_id])?;
         db.execute("DELETE FROM google_links WHERE account_id=?1", [account_id])?;
         Ok(())
     }

@@ -32,7 +32,7 @@ use crate::store::Store;
 /// The fields a sync reads, and the ones an update replaces. The others are shown with the
 /// contact (`details`), and edited in Google.
 pub const PERSON_FIELDS: &str =
-    "names,emailAddresses,phoneNumbers,organizations,biographies,metadata,photos,addresses,birthdays,events,urls,nicknames,relations,imClients";
+    "names,emailAddresses,phoneNumbers,organizations,biographies,metadata,photos,addresses,birthdays,events,urls,nicknames,relations,imClients,memberships";
 pub const UPDATE_FIELDS: &str = "names,emailAddresses,phoneNumbers,organizations,biographies";
 
 /// Google's sync token only works with the fields it was made for, so it's kept tagged with
@@ -173,6 +173,52 @@ pub struct GoogleLink {
     pub error: Option<String>,
     /// Contacts here from it.
     pub count: u32,
+    /// Its groups (as of the last sync), in the order to show them.
+    pub groups: Vec<ContactGroup>,
+}
+
+/// One of an account's groups in Google Contacts ("labels" there): "My Contacts" (everyone the
+/// user keeps; `contactGroups/myContacts`), "Starred", and the user's own (Family, Work…).
+/// Google's other system groups (friends, family, coworkers, all, blocked…) are left out, as
+/// Google Contacts itself does.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ContactGroup {
+    /// `contactGroups/…`, as in `Card::groups`.
+    pub resource: String,
+    pub name: String,
+}
+
+/// An account's groups to show, from Google's list: My Contacts, Starred, then the user's own
+/// by name.
+pub fn groups_from(list: &[Value]) -> Vec<ContactGroup> {
+    let mut system = Vec::new();
+    let mut own = Vec::new();
+    for g in list {
+        let Some(resource) = g.get("resourceName").and_then(Value::as_str) else { continue };
+        let name = ["formattedName", "name"].iter().filter_map(|k| g.get(*k).and_then(Value::as_str)).find(|n| !n.trim().is_empty());
+        let Some(name) = name else { continue };
+        let group = ContactGroup { resource: resource.to_string(), name: name.trim().to_string() };
+        match (g.get("groupType").and_then(Value::as_str), resource) {
+            (Some("USER_CONTACT_GROUP"), _) => own.push(group),
+            (_, "contactGroups/myContacts") => system.insert(0, group),
+            (_, "contactGroups/starred") => system.push(group),
+            _ => {}
+        }
+    }
+    own.sort_by_key(|g| g.name.to_lowercase());
+    system.extend(own);
+    system
+}
+
+/// The groups a person is in (`contactGroups/…`).
+pub fn groups_of(p: &Value) -> Vec<String> {
+    p.get("memberships")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m.pointer("/contactGroupMembership/contactGroupResourceName").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect()
 }
 
 /// A card that is a Google contact.
@@ -236,6 +282,8 @@ pub trait PeopleApi {
     async fn create(&self, person: &Value) -> Result<Value, PeopleError>;
     async fn update(&self, resource: &str, person: &Value) -> Result<Value, PeopleError>;
     async fn delete(&self, resource: &str) -> Result<(), PeopleError>;
+    /// Every contact group (Google's `contactGroups` list, as JSON).
+    async fn groups(&self) -> Result<Vec<Value>, PeopleError>;
 }
 
 // ------------------------------------------------------------- mapping
@@ -279,6 +327,7 @@ pub fn card_from_person(p: &Value, account_id: i64) -> Card {
         company: text(first(p, "organizations"), "name"),
         notes: first(p, "biographies").and_then(|b| b.get("value")).and_then(Value::as_str).unwrap_or("").trim().to_string(),
         google: Some(account_id),
+        groups: groups_of(p),
     }
     .cleaned()
 }
@@ -512,7 +561,7 @@ pub async fn sync<A: PeopleApi>(store: &Store, account_id: i64, api: &A, now: i6
                     continue;
                 }
                 let before = store.card(l.card_id)?;
-                if before.as_ref().is_none_or(|b| !same(b, &card)) {
+                if before.as_ref().is_none_or(|b| !same(b, &card) || b.groups != card.groups) {
                     store.save_card(Card { id: l.card_id, ..card })?;
                     report.changed += 1;
                 }
@@ -542,6 +591,8 @@ pub async fn sync<A: PeopleApi>(store: &Store, account_id: i64, api: &A, now: i6
             }
         }
     }
+    // The groups' names (new ones, renamed ones): a short list, read whole every time.
+    store.set_contact_groups(account_id, &groups_from(&api.groups().await.map_err(other)?))?;
     store.set_google_sync(account_id, next_token.as_deref().map(tag_token).as_deref(), Some(now), None)?;
     Ok(report)
 }
@@ -608,6 +659,23 @@ impl PeopleApi for GoogleApi {
         self.call("GET", &format!("/v1/{resource}?personFields={}", q(PERSON_FIELDS)), None).await
     }
 
+    async fn groups(&self) -> Result<Vec<Value>, PeopleError> {
+        let mut all = Vec::new();
+        let mut page: Option<String> = None;
+        loop {
+            let mut path = "/v1/contactGroups?pageSize=1000&groupFields=name,groupType".to_string();
+            if let Some(p) = &page {
+                path.push_str(&format!("&pageToken={}", q(p)));
+            }
+            let v = self.call("GET", &path, None).await?;
+            all.extend(v.get("contactGroups").and_then(Value::as_array).cloned().unwrap_or_default());
+            match v.get("nextPageToken").and_then(Value::as_str) {
+                Some(next) => page = Some(next.to_string()),
+                None => return Ok(all),
+            }
+        }
+    }
+
     async fn create(&self, person: &Value) -> Result<Value, PeopleError> {
         self.call("POST", &format!("/v1/people:createContact?personFields={}", q(PERSON_FIELDS)), Some(person)).await
     }
@@ -648,6 +716,8 @@ mod tests {
         fail_page: RefCell<Option<usize>>,
         expire: RefCell<bool>,
         calls: RefCell<Vec<String>>,
+        /// Google's list of groups.
+        groups: RefCell<Vec<Value>>,
     }
 
     impl Fake {
@@ -764,6 +834,9 @@ mod tests {
             self.bump(resource);
             Ok(out)
         }
+        async fn groups(&self) -> Result<Vec<Value>, PeopleError> {
+            Ok(self.groups.borrow().clone())
+        }
         async fn delete(&self, resource: &str) -> Result<(), PeopleError> {
             self.calls.borrow_mut().push(format!("delete {resource}"));
             if self.people.borrow_mut().remove(resource).is_none() {
@@ -787,6 +860,45 @@ mod tests {
     }
     fn block<F: std::future::Future>(f: F) -> F::Output {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(f)
+    }
+
+    #[test]
+    fn groups_come_with_their_contacts() {
+        let (dir, store, acct) = setup("groups");
+        let g = Fake::new(10);
+        let member = |r: &str| json!({ "contactGroupMembership": { "contactGroupResourceName": r } });
+        *g.groups.borrow_mut() = vec![
+            json!({ "resourceName": "contactGroups/starred", "groupType": "SYSTEM_CONTACT_GROUP", "name": "starred", "formattedName": "Starred" }),
+            json!({ "resourceName": "contactGroups/friends", "groupType": "SYSTEM_CONTACT_GROUP", "name": "friends", "formattedName": "Friends" }),
+            json!({ "resourceName": "contactGroups/b2", "groupType": "USER_CONTACT_GROUP", "name": "kolleger", "formattedName": "Kolleger" }),
+            json!({ "resourceName": "contactGroups/a1", "groupType": "USER_CONTACT_GROUP", "name": "Familie", "formattedName": "Familie" }),
+            json!({ "resourceName": "contactGroups/myContacts", "groupType": "SYSTEM_CONTACT_GROUP", "name": "myContacts", "formattedName": "My Contacts" }),
+        ];
+        let ann = g.add("Ann", "ann@x.com", "work");
+        g.edit(&ann, |p| p["memberships"] = json!([member("contactGroups/myContacts"), member("contactGroups/a1"), member("contactGroups/starred")]));
+        g.add("Bob", "bob@x.com", "home");
+        block(sync(&store, acct, &g, 100)).unwrap();
+
+        let shown: Vec<(String, String)> =
+            store.google_link(acct).unwrap().unwrap().groups.into_iter().map(|g| (g.resource, g.name)).collect();
+        let want = [("myContacts", "My Contacts"), ("starred", "Starred"), ("a1", "Familie"), ("b2", "Kolleger")];
+        assert_eq!(shown, want.map(|(r, n)| (format!("contactGroups/{r}"), n.to_string())), "Google's old system groups left out");
+        let card = |name: &str| store.cards().unwrap().into_iter().find(|c| c.name == name).unwrap();
+        assert_eq!(card("Ann").groups, ["contactGroups/myContacts", "contactGroups/a1", "contactGroups/starred"]);
+        assert!(card("Bob").groups.is_empty());
+
+        // Put in a group there, nothing else changed: changed here.
+        g.edit(&ann, |p| p["memberships"] = json!([member("contactGroups/myContacts")]));
+        let r = block(sync(&store, acct, &g, 101)).unwrap();
+        assert_eq!(r.changed, 1);
+        assert_eq!(card("Ann").groups, ["contactGroups/myContacts"]);
+        // A card kept here has none.
+        let id = store.save_card(Card { name: "Local".into(), emails: vec!["l@x.com".into()], ..Default::default() }).unwrap();
+        assert!(store.card(id).unwrap().unwrap().groups.is_empty());
+
+        store.remove_google_link(acct).unwrap();
+        assert!(store.contact_groups(acct).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -913,7 +1025,7 @@ mod tests {
         block(sync(&store, acct, &g, 1)).unwrap();
         let ann = store.cards().unwrap().into_iter().find(|c| c.name == "Ann").unwrap().id;
         let local = store
-            .save_card(crate::addressbook::Card { id: 0, name: "Bob".into(), emails: vec!["bob@x.com".into()], phones: vec![], company: String::new(), notes: String::new(), google: None })
+            .save_card(crate::addressbook::Card { id: 0, name: "Bob".into(), emails: vec!["bob@x.com".into()], phones: vec![], company: String::new(), notes: String::new(), google: None, groups: vec![] })
             .unwrap();
         assert_eq!(store.google_cards_with_email("ann@x.com").unwrap(), vec![ann]);
         assert_eq!(store.google_cards_with_email(" ANN@x.com ").unwrap(), vec![ann]);
