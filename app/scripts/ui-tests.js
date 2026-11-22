@@ -351,6 +351,36 @@ describe('a busy sync', () => {
 });
 
 describe('selected row colours', () => {
+  test('a message body (its own frame) counts as the window: clicking in it stays blue, and brings the window back', async () => {
+    const { page, errors, close } = await open({ threaded: false, query: '&picture' });
+    try {
+      await page.locator('.folder-layer .row', { hasText: 'picture as the body' }).first().click();
+      const frame = page.frameLocator('.reader iframe').first();
+      await frame.locator('img').waitFor();
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      const icon = () => page.evaluate(() => getComputedStyle(document.querySelector('.folder .folder-icon')).color);
+      await page.waitForTimeout(150);
+      const blue = await icon();
+      // into the body: the page blurs, the window doesn't
+      await frame.locator('body').click({ position: { x: 5, y: 5 } });
+      await page.waitForTimeout(150);
+      assert.equal(await page.evaluate(() => document.activeElement?.tagName), 'IFRAME');
+      assert.equal(await icon(), blue, 'still blue with the focus in the message');
+      // another window in front, then back by a click into the body: only the frame is focused
+      await page.locator('.reader h1').first().click();
+      assert.notEqual(await page.evaluate(() => document.activeElement?.tagName), 'IFRAME');
+      await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+      await page.waitForTimeout(150);
+      assert.notEqual(await icon(), blue, 'grey in the background');
+      await page.evaluate(() => document.querySelector('.reader iframe').contentWindow.dispatchEvent(new Event('focus')));
+      await page.waitForTimeout(150);
+      assert.equal(await icon(), blue, 'blue again');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('in the background the window greys its selection and folder icons', async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {
@@ -556,7 +586,58 @@ describe('search', () => {
   });
 });
 
+describe('mac title band', () => {
+  test('with the sidebar folded, the rail top is the colour of the search row beside it', async () => {
+    const { page, errors, close } = await open({ threaded: false, query: '&mac' });
+    try {
+      await page.keyboard.press('Meta+1');
+      await page.waitForSelector('.app.rail-mode');
+      await page.waitForTimeout(300);
+      const rail = await page.locator('.pane-sidebar').boundingBox();
+      const band = await page.locator('.search-bar').first().boundingBox();
+      // one pixel each, in the band above the search field (where the traffic lights sit)
+      const pixel = (x, y) => page.screenshot({ clip: { x, y, width: 1, height: 1 } });
+      const left = await pixel(rail.x + 4, 4);
+      const right = await pixel(band.x + band.width / 2, band.y + 4);
+      assert.ok(left.equals(right), 'one colour across the band');
+      // and below the band the rail keeps its own colour
+      assert.ok(!(await pixel(rail.x + 4, band.y + band.height + 40)).equals(right), 'the rail below is the sidebar colour');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('compose', () => {
+  test('a pasted picture goes into the text', async () => {
+    const { page, errors, context, close } = await open({ threaded: false });
+    try {
+      const popup = context.waitForEvent('page');
+      await page.keyboard.press('c');
+      const w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      const editor = w.locator('.cmp-editor .ProseMirror');
+      await editor.waitFor();
+      await editor.click();
+      await w.keyboard.type('Look: ');
+      await editor.evaluate((el) => {
+        // a 1×1 PNG, as a screenshot or "Copy image" puts it on the clipboard
+        const b64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+        const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+        const dt = new DataTransfer();
+        dt.items.add(new File([bytes], 'image.png', { type: 'image/png' }));
+        el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      });
+      const img = editor.locator('img[src^="data:image/png;base64,"]');
+      await img.waitFor();
+      assert.match(await editor.innerHTML(), /Look:\s*(&nbsp;)?\s*<img/);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('a suggested address can be removed for good', async () => {
     const { page, errors, context, close } = await open({ threaded: false });
     try {

@@ -52,5 +52,20 @@ const setActive = (active: boolean) => {
   setWindowActive(active);
 };
 window.addEventListener('focus', () => setActive(true));
-window.addEventListener('blur', () => setActive(false));
+// A click into a message body (its own frame, its own document) blurs this page too, but the
+// window still has the focus: only another window taking it puts this one in the background.
+window.addEventListener('blur', () => setActive(document.activeElement?.tagName === 'IFRAME'));
 setActive(document.hasFocus());
+
+/**
+ * Follow the focus in a message frame (call on each load): coming back to the window by
+ * clicking into a message body focuses only the frame, and leaving it from there blurs only
+ * the frame.
+ */
+export function watchFrameFocus(frame: HTMLIFrameElement): void {
+  const win = frame.contentWindow;
+  if (!win) return;
+  win.addEventListener('focus', () => setActive(true));
+  // Focus moving back to the page brings its own 'focus'; nothing focused: another window.
+  win.addEventListener('blur', () => setTimeout(() => setActive(document.hasFocus())));
+}

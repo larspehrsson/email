@@ -111,10 +111,60 @@ fn getrandom(buf: &mut [u8]) {
     }
 }
 
-/// Build the message: multipart/alternative (plain text from the HTML, then HTML), inside
-/// multipart/mixed when there are attachments.
+/// A picture in the body (pasted into the editor), sent as a part of the message.
+struct Embedded {
+    cid: String,
+    content_type: String,
+    data: Vec<u8>,
+}
+
+/// Pictures the HTML carries as `data:` addresses (pasted ones, quoted ones) become parts of
+/// the message, referred to by `cid:` (many mail apps, Gmail and Outlook among them, show no
+/// `data:` images). The same picture twice is sent once.
+fn embed_images(html: &str, message_id: &str) -> (String, Vec<Embedded>) {
+    use base64::Engine;
+    let mut out = String::with_capacity(html.len());
+    let mut found: Vec<(String, Embedded)> = Vec::new();
+    let mut rest = html;
+    while let Some(at) = ["src=\"data:image/", "src='data:image/"].iter().filter_map(|p| rest.find(p)).min() {
+        let quote = rest.as_bytes()[at + 4] as char;
+        let start = at + 5; // the data: address
+        let Some(len) = rest[start..].find(quote) else { break };
+        let uri = &rest[start..start + len];
+        out.push_str(&rest[..start]);
+        rest = &rest[start + len..];
+        let parsed = uri.strip_prefix("data:").and_then(|u| u.split_once(";base64,")).and_then(|(ct, b64)| {
+            let b64: String = b64.chars().filter(|c| !c.is_whitespace()).collect();
+            let data = base64::engine::general_purpose::STANDARD.decode(b64).ok()?;
+            (ct.starts_with("image/") && !ct.contains(['"', '\'', ';'])).then(|| (ct.to_string(), data))
+        });
+        match parsed {
+            Some((content_type, data)) => {
+                let cid = match found.iter().find(|(u, _)| u == uri) {
+                    Some((_, e)) => e.cid.clone(),
+                    None => {
+                        let cid = format!("img{}.{message_id}", found.len() + 1);
+                        found.push((uri.to_string(), Embedded { cid: cid.clone(), content_type, data }));
+                        cid
+                    }
+                };
+                out.push_str("cid:");
+                out.push_str(&cid);
+            }
+            None => out.push_str(uri),
+        }
+    }
+    out.push_str(rest);
+    (out, found.into_iter().map(|(_, e)| e).collect())
+}
+
+/// Build the message: multipart/alternative (plain text from the HTML, then HTML); with
+/// pictures in the body, inside multipart/related with them; inside multipart/mixed when
+/// there are attachments.
 pub fn build(msg: &Outgoing, message_id: &str, date: i64) -> Result<Vec<u8>> {
-    let text = mail_parser::decoders::html::html_to_text(&msg.html);
+    use mail_builder::mime::MimePart;
+    let (html, images) = embed_images(&msg.html, message_id);
+    let text = mail_parser::decoders::html::html_to_text(&html);
     let mut b = MessageBuilder::new().message_id(message_id).date(date).subject(msg.subject.as_str());
     if let Some(from) = &msg.from {
         b = b.from(address(std::slice::from_ref(from)));
@@ -131,11 +181,29 @@ pub fn build(msg: &Outgoing, message_id: &str, date: i64) -> Result<Vec<u8>> {
     if !msg.references.is_empty() {
         b = b.references(msg.references.iter().map(|s| s.as_str()).collect::<Vec<_>>());
     }
-    b = b.text_body(text).html_body(msg.html.as_str());
-    for a in &msg.attachments {
-        b = b.attachment(a.content_type.as_str(), a.name.as_str(), a.data.as_slice());
+    if images.is_empty() {
+        b = b.text_body(text).html_body(html.as_str());
+        for a in &msg.attachments {
+            b = b.attachment(a.content_type.as_str(), a.name.as_str(), a.data.as_slice());
+        }
+        return Ok(b.write_to_vec()?);
     }
-    Ok(b.write_to_vec()?)
+    let alternative = MimePart::new("multipart/alternative", vec![MimePart::new("text/plain", text.as_str()), MimePart::new("text/html", html.as_str())]);
+    let mut related = vec![alternative];
+    for i in &images {
+        related.push(MimePart::new(i.content_type.as_str(), i.data.as_slice()).inline().cid(i.cid.as_str()));
+    }
+    let related = MimePart::new("multipart/related", related);
+    let body = if msg.attachments.is_empty() {
+        related
+    } else {
+        let mut mixed = vec![related];
+        for a in &msg.attachments {
+            mixed.push(MimePart::new(a.content_type.as_str(), a.data.as_slice()).attachment(a.name.as_str()));
+        }
+        MimePart::new("multipart/mixed", mixed)
+    };
+    Ok(b.body(body).write_to_vec()?)
 }
 
 // ------------------------------------------------------------- replies and forwards
@@ -285,6 +353,39 @@ mod tests {
     }
     fn n(name: &str, addr: &str) -> Addr {
         Addr { name: Some(name.into()), addr: addr.into() }
+    }
+
+    #[test]
+    fn pasted_pictures_go_as_parts_of_the_message() {
+        // a 1×1 PNG, pasted twice, and one that isn't a picture
+        let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+        let html = format!(
+            "<p>Look:</p><p><img src=\"data:image/png;base64,{png}\"></p><p><img src='data:image/png;base64,{png}' alt=\"again\"></p><p><img src=\"data:text/html;base64,PGI+\"></p>"
+        );
+        let msg = Outgoing {
+            from: Some(a("john.doe@example.com")),
+            to: vec![a("jane.doe@example.net")],
+            subject: "Picture".into(),
+            html,
+            attachments: vec![OutAttachment { name: "notes.txt".into(), content_type: "text/plain".into(), data: b"hi".to_vec() }],
+            ..Default::default()
+        };
+        let raw = build(&msg, "pic@example.com", 1_700_000_000).unwrap();
+        let parsed = mail_parser::MessageParser::default().parse(&raw).unwrap();
+        assert_eq!(parsed.content_type().map(|c| c.c_type.as_ref()), Some("multipart"));
+        let s = String::from_utf8_lossy(&raw);
+        assert!(s.contains("multipart/mixed") && s.contains("multipart/related") && s.contains("multipart/alternative"), "{s}");
+        let html = parsed.body_html(0).unwrap();
+        assert_eq!(html.matches("src=\"cid:img1.pic@example.com\"").count() + html.matches("src='cid:img1.pic@example.com'").count(), 2, "{html}");
+        assert!(!html.contains("data:image/") && html.contains("data:text/html"), "only pictures become parts: {html}");
+        // one picture part, sent once; the file still an attachment
+        let pictures = parsed.parts.iter().filter(|p| p.content_type().is_some_and(|c| c.c_type == "image")).count();
+        assert_eq!(pictures, 1);
+        assert!(parsed.attachments().any(|p| p.attachment_name() == Some("notes.txt")));
+        // and the reader shows it in place, not as an attachment
+        let d = crate::mime::render(1, &raw, 1_700_000_000).unwrap();
+        assert!(d.html.unwrap().contains("data:image/png;base64"));
+        assert_eq!(d.attachments.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(), ["notes.txt"]);
     }
 
     #[test]

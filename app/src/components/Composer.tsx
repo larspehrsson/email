@@ -2,6 +2,7 @@ import { createEffect, createSelector, createSignal, For, onCleanup, onMount, Sh
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
+import Image from '@tiptap/extension-image';
 import type { Addr } from '../api';
 import { accounts } from '../state';
 import {
@@ -402,6 +403,16 @@ function Toolbar(props: {
 
 // ------------------------------------------------------------- composer
 
+/** A file as a `data:` address (null if it can't be read). */
+function dataUrl(f: Blob): Promise<string | null> {
+  return new Promise((resolve) => {
+    const r = new FileReader();
+    r.onload = () => resolve(typeof r.result === 'string' ? r.result : null);
+    r.onerror = () => resolve(null);
+    r.readAsDataURL(f);
+  });
+}
+
 export function Composer() {
   // Mounted per message (keyed in App): the editor starts from this state's HTML.
   const c0 = compose()!;
@@ -449,7 +460,24 @@ export function Composer() {
           link: { openOnClick: false, autolink: true, defaultProtocol: 'https' },
         }),
         Placeholder.configure({ placeholder: 'Write your message…' }),
+        // Pictures in the text (pasted): sent as parts of the message (`compose::build`).
+        Image.configure({ inline: true, allowBase64: true }),
       ],
+      editorProps: {
+        // A pasted picture (a screenshot, "Copy image") goes into the text where the cursor is.
+        handlePaste: (_view, event) => {
+          const files = Array.from(event.clipboardData?.files ?? []).filter((f) => f.type.startsWith('image/'));
+          if (files.length === 0) return false;
+          event.preventDefault();
+          void (async () => {
+            for (const f of files) {
+              const src = await dataUrl(f);
+              if (src) ed.chain().focus().setImage({ src, alt: '' }).run();
+            }
+          })();
+          return true;
+        },
+      },
       content: c0.html,
       onUpdate: ({ editor: e }) => updateCompose({ html: e.isEmpty ? '' : e.getHTML() }),
       onTransaction: () => setTick((t) => t + 1),

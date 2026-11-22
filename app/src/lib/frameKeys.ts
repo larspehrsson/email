@@ -7,6 +7,8 @@
  * script-src 'none' (see `buildSrcdoc`). Keys that act on the message itself stay with it.
  */
 
+import { watchFrameFocus } from './platform';
+
 /** Scrolling keys: inside the message they scroll it rather than move between messages. */
 const NATIVE = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End', ' ', 'Tab']);
 
@@ -20,6 +22,7 @@ function typing(t: EventTarget | null): boolean {
 export function forwardFrameKeys(frame: HTMLIFrameElement): void {
   const doc = frame.contentDocument;
   if (!doc) return;
+  watchFrameFocus(frame);
   doc.addEventListener('keydown', (e) => {
     if (NATIVE.has(e.key) || typing(e.target)) return;
     const copy = new KeyboardEvent('keydown', {

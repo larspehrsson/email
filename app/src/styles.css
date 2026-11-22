@@ -3113,7 +3113,10 @@ html.macos {
   --traffic-lights-end: 70px;
 }
 html.macos .app.rail-mode .pane-sidebar {
-  background: linear-gradient(var(--bg-list) 0 var(--search-bar-h), var(--bg-sidebar) 0);
+  /* the band as the list's search row paints it: --bg-band (translucent) over --bg-list */
+  background:
+    linear-gradient(var(--bg-band) 0 var(--search-bar-h), transparent 0),
+    linear-gradient(var(--bg-list) 0 var(--search-bar-h), var(--bg-sidebar) 0);
   /* the border keeps its width (no 1px content shift); ::after draws it below the band */
   border-right-color: transparent;
 }
@@ -4183,6 +4186,15 @@ html.macos .app.rail-mode .search-bar {
   line-height: 1.55;
   color: var(--text);
   overflow-wrap: anywhere;
+}
+.cmp-editor .ProseMirror img {
+  max-width: 100%;
+  height: auto;
+  vertical-align: bottom;
+}
+.cmp-editor .ProseMirror img.ProseMirror-selectednode {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .cmp-editor .ProseMirror p {
   margin: 0 0 0.7em;
