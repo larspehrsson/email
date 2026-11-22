@@ -154,9 +154,11 @@ jobs:
 
       # macOS signing and notarization (https://v2.tauri.app/distribute/sign/macos/): with the
       # APPLE_* secrets set, the Tauri build imports the Developer ID certificate into a
-      # temporary keychain, signs, notarizes and staples. Without them (pull requests from
-      # forks) the build is unsigned: Tauri takes an empty variable as set, so they're only
-      # exported when there.
+      # temporary keychain, signs, notarizes and staples. Without them (forks) the build is
+      # signed ad-hoc ("-"): not notarized, but a signature that names the app by its bundle
+      # identifier. Left at the linker's bare signature, it's named "mail_app", and macOS
+      # refuses notifications to an app asking as dev.mailclient.desktop. Tauri takes an empty
+      # variable as set, so the rest are only exported when there.
       - name: Apple signing
         if: startsWith(matrix.os, 'macos')
         shell: bash
@@ -169,7 +171,8 @@ jobs:
           API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
         run: |
           if [ -z "$CERTIFICATE" ]; then
-            echo "No Apple secrets: unsigned build"
+            echo "No Apple secrets: signed ad-hoc"
+            echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
             exit 0
           fi
           key="$RUNNER_TEMP/AuthKey.p8"
@@ -224,7 +227,7 @@ jobs:
           # The first build creates the release (the platforms may try at once: one wins).
           gh release view latest >/dev/null 2>&1 \
             || gh release create latest --prerelease --target "$GITHUB_SHA" --title "Latest build" \
-                 --notes "The newest build of main. Unsigned on Linux and Windows; signed and notarized on macOS." \
+                 --notes "The newest build of main. Unsigned on Linux and Windows; on macOS signed and notarized when built with the Apple secrets, otherwise signed ad-hoc." \
             || gh release view latest >/dev/null
           for a in $(gh release view latest --json assets --jq '.assets[].name'); do
             case "$PLATFORM:$a" in
@@ -254,7 +257,7 @@ jobs:
           v="${base%.*}.$(git rev-list --count HEAD)"
           git push --force origin "$GITHUB_SHA:refs/tags/latest"
           gh release edit latest --prerelease --title "Latest build ($v)" \
-            --notes "Version $v, built from ${GITHUB_SHA:0:7}. Unsigned on Linux and Windows; signed and notarized on macOS."
+            --notes "Version $v, built from ${GITHUB_SHA:0:7}. Unsigned on Linux and Windows; on macOS signed and notarized when built with the Apple secrets, otherwise signed ad-hoc."
           echo "APP_VERSION=$v" >> "$GITHUB_ENV"
 
       # What the apps ask for to update themselves (app/src-tauri/src/updater.rs): this version,
