@@ -435,6 +435,9 @@ describe('selected row colours', () => {
       // the focus back on the page (the list: the same message stays open)
       await page.locator('.folder-layer .row.selected').first().click();
       await page.waitForFunction(() => document.activeElement?.tagName !== 'IFRAME');
+      // Leaving the frame checks, a moment later, whether the window still has the focus (it
+      // has: it's back on the page). That check runs first; then the other window takes it.
+      await page.evaluate(() => new Promise((r) => setTimeout(r, 50)));
       await page.evaluate(() => window.dispatchEvent(new Event('blur')));
       await page.waitForTimeout(150);
       assert.notEqual(await icon(), blue, 'grey in the background');
