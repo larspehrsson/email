@@ -18,6 +18,13 @@ import type {
   MessageDetail,
   MessageSummary,
   ConversationScope,
+  ListSort,
+  Signature,
+  SignatureDefaults,
+  Card,
+  UpdateStatus,
+  GoogleStatus,
+  ListFilter,
   TagDef,
   Action,
   ActionResult,
@@ -31,6 +38,7 @@ import type {
 } from './types';
 
 import { fieldMatches, norm, parseQuery, tokenize, type Term } from './lib/query';
+import { sizeRangeLabel } from './lib/listGroups';
 
 const MOCK_DRAFTS = 'mock.drafts';
 function loadMockDrafts(): Record<number, SendRequest> {
@@ -573,10 +581,44 @@ export function createMockBackend(): Backend {
   };
 
   const accounts: Account[] = [];
+  const aiCancelled = new Set<number>();
+  const mcpAnswers = new Map<number, (allow: boolean) => void>();
+  const googleLoad = (): GoogleStatus => {
+    try {
+      return JSON.parse(localStorage.getItem('mock.google') ?? 'null') ?? { clientId: null, links: [] };
+    } catch {
+      return { clientId: null, links: [] };
+    }
+  };
+  /** The made-up photo Google has of one contact (Olivia Hart): a coloured circle. */
+  const contactPhoto = (c: Card): string | null =>
+    c.google != null && c.name === 'Olivia Hart'
+      ? 'data:image/svg+xml;base64,' +
+        btoa('<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="96" height="96" fill="#c2410c"/><circle cx="48" cy="38" r="18" fill="#fde7d9"/><rect x="20" y="62" width="56" height="40" rx="28" fill="#fde7d9"/></svg>')
+      : null;
+  const cardsLoad = (): Card[] => {
+    try {
+      return JSON.parse(localStorage.getItem('mock.cards') ?? '[]') as Card[];
+    } catch {
+      return [];
+    }
+  };
+  // In localStorage, like drafts: compose popups (other pages) see what Settings saved.
+  type SigStore = { signatures: Signature[]; defaults: SignatureDefaults[]; seq: number };
+  const sigLoad = (): SigStore => {
+    try {
+      return JSON.parse(localStorage.getItem('mock.signatures') ?? '') as SigStore;
+    } catch {
+      return { signatures: [], defaults: [], seq: 0 };
+    }
+  };
+  const sigSave = (st: SigStore) => localStorage.setItem('mock.signatures', JSON.stringify(st));
   const folders = new Map<number, Folder>();
   const folderMsgs = new Map<number, MessageSummary[]>();
   const byId = new Map<number, MessageSummary>();
   const remoteAllowed = new Set<number>();
+  /** "Always from this sender": lowercase addresses */
+  const remoteSenders = new Set<string>();
   /** resolves a pending mock browser sign-in as cancelled */
   let signInCancel: (() => void) | null = null;
   /** accounts downloading whole messages (Settings › Accounts › Offline) */
@@ -668,6 +710,8 @@ export function createMockBackend(): Backend {
       sending: false,
       sendFailed: false,
       draftId: null,
+      // Ours went to someone (picked without rnd(): the rest of the data stays as it was).
+      to: [isSent ? PEOPLE[id % PEOPLE.length]! : me].map((p) => ({ name: p.name, addr: p.addr })),
     };
     const attachments: Attachment[] = [];
     if (hasAttachments) {
@@ -682,6 +726,8 @@ export function createMockBackend(): Backend {
       }
     }
     meta.set(id, { kind, seed: Math.floor(rnd() * 1e9), accountId: folder.accountId, attachments, cc: rnd() < 0.3, threadId: id });
+    // Size: the text (no rnd(): the rest of the data stays as it was) plus the attachments.
+    m.size = 1500 + ((id * 2654435761) % 90_000) + attachments.reduce((n, a) => n + Math.round(a.size * 1.37), 0);
     // Most bodies are already local; ~25% must be "downloaded" on demand.
     if (rnd() < 0.75) {
       downloaded.add(id);
@@ -868,6 +914,8 @@ export function createMockBackend(): Backend {
       folderId,
       subject: first?.subject ?? newestInFolder.subject,
       participants,
+      fromAddr: all[all.length - 1]?.fromAddr ?? newestInFolder.fromAddr,
+      to: (all[all.length - 1] ?? newestInFolder).to ?? [],
       messageCount: all.length,
       tags: [...new Set(all.flatMap((m) => m.tags))],
       unread: all.some((m) => m.unread),
@@ -1063,14 +1111,16 @@ export function createMockBackend(): Backend {
       // Meeting notes go to the whole team: a long To line (folded in the reader).
       to: /notes from today/i.test(m.subject)
         ? [{ name: me.name, addr: me.addr }, ...PEOPLE.slice(0, 11).map((p) => ({ name: p.name, addr: p.addr }))]
-        : [{ name: me.name, addr: me.addr }],
+        : m.to?.length
+          ? m.to.map((a) => ({ ...a }))
+          : [{ name: me.name, addr: me.addr }],
       cc: md?.cc ? [pick(rnd, PEOPLE), pick(rnd, PEOPLE)].map((p) => ({ name: p.name, addr: p.addr })) : [],
       date: m.date,
       html,
       text,
       attachments: (md?.attachments ?? []).map((a) => ({ ...a })),
       hasRemoteContent,
-      remoteAllowed: remoteAllowed.has(m.id),
+      remoteAllowed: remoteAllowed.has(m.id) || remoteSenders.has(m.fromAddr.toLowerCase()),
     };
   }
 
@@ -1089,7 +1139,14 @@ export function createMockBackend(): Backend {
       __stopBusySync: () => void;
       __newInboxMail: () => string;
       __askClose: (quit: boolean) => boolean;
+      __mcpAsk: (c: EventMap['mcp-confirm']) => Promise<boolean>;
     };
+    // An AI app asking (delete, send), as the core would: resolves with the user's answer.
+    w.__mcpAsk = (c) =>
+      new Promise((resolve) => {
+        mcpAnswers.set(c.id, resolve);
+        emit('mcp-confirm', c);
+      });
     // Closing the window (or quitting) while an export runs, as the desktop app asks.
     w.__askClose = (quit) => {
       if (!exporting) return false;
@@ -1142,6 +1199,13 @@ export function createMockBackend(): Backend {
   }
 
   const startEmpty = typeof location !== 'undefined' && new URLSearchParams(location.search).has('empty');
+  const mockUpdate: UpdateStatus = {
+    supported: typeof location !== 'undefined' && new URLSearchParams(location.search).has('updates'),
+    checking: false,
+    ready: null,
+    checked: null,
+    error: null,
+  };
   // `?demo`: for screenshots (scripts/screenshots.js): no test samples, sync already done,
   // nothing arriving or changing on its own.
   const demo = typeof location !== 'undefined' && new URLSearchParams(location.search).has('demo');
@@ -1227,6 +1291,8 @@ export function createMockBackend(): Backend {
       for (const m of folderMsgs.get(f.id) ?? []) {
         const fromT = tokenize(`${m.fromName} ${m.fromAddr}`);
         const subjT = tokenize(m.subject);
+        // The demo's bodies are made from the snippet.
+        const textT = tokenize(m.snippet ?? '');
         const ok = terms.every((t) => {
           const hit =
             t.field === 'tag'
@@ -1237,9 +1303,12 @@ export function createMockBackend(): Backend {
                 ? fieldMatches(toTokens, t.words)
                 : t.field === 'subject'
                   ? fieldMatches(subjT, t.words)
-                  : (inField('sender') && fieldMatches(fromT, t.words)) ||
-                    (inField('subject') && fieldMatches(subjT, t.words)) ||
-                    (inField('recipients') && fieldMatches(toTokens, t.words));
+                  : t.field === 'body'
+                    ? fieldMatches(textT, t.words)
+                    : (inField('sender') && fieldMatches(fromT, t.words)) ||
+                      (inField('subject') && fieldMatches(subjT, t.words)) ||
+                      (inField('recipients') && fieldMatches(toTokens, t.words)) ||
+                      (inField('body') && fieldMatches(textT, t.words));
           return t.neg ? !hit : hit;
         });
         if (ok) out.push(m);
@@ -1306,9 +1375,42 @@ export function createMockBackend(): Backend {
     }
     return undefined;
   }
-  /** A message's (or with `threaded`, a conversation's) row in the folder's list. */
-  function indexIn(folderId: number, id: number, threaded: boolean): number | null {
+  /** What a message sorts and groups by: its sender or (first) recipient as shown, case
+   *  aside; nobody last. (The core's `sort::key`, near enough.) */
+  function sortShown(m: MessageSummary, sort: ListSort): string {
+    if (sort === 'from') return (m.fromName || m.fromAddr).trim();
+    const me = accounts.find((a) => a.id === meta.get(m.id)?.accountId);
+    return me ? me.displayName || me.email : '';
+  }
+  const sortKey = (m: MessageSummary, sort: ListSort) => sortShown(m, sort).toLowerCase() || '\u{10FFFF}';
+  /** The folder's messages its list filter lets through (the core's ListFilter), newest first. */
+  function filteredIn(folderId: number, f: ListFilter | undefined, threaded: boolean): MessageSummary[] {
     const list = folderMsgs.get(folderId) ?? [];
+    if (!f || (f.read == null && !f.flagged && !f.attachments)) return list;
+    return list.filter(
+      (m) =>
+        (f.keep ?? []).includes(threaded ? threadOf(m) : m.id) ||
+        ((f.read == null || f.read === !m.unread) && (!f.flagged || m.flagged) && (!f.attachments || m.hasAttachments)),
+    );
+  }
+  /** The folder's messages in `sort`'s order (by date: as kept, newest first). */
+  function sortedIn(folderId: number, sort: ListSort, f?: ListFilter): MessageSummary[] {
+    const list = filteredIn(folderId, f, false);
+    if (sort === 'received') return list;
+    if (sort === 'size') {
+      return list
+        .map((m, i) => ({ m, i }))
+        .sort((a, b) => (b.m.size ?? 0) - (a.m.size ?? 0) || a.i - b.i)
+        .map((x) => x.m);
+    }
+    const keyed = list.map((m, i) => ({ m, i, k: sortKey(m, sort) }));
+    keyed.sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : a.i - b.i));
+    return keyed.map((x) => x.m);
+  }
+
+  /** A message's (or with `threaded`, a conversation's) row in the folder's list. */
+  function indexIn(folderId: number, id: number, threaded: boolean, sort: ListSort = 'received', f?: ListFilter): number | null {
+    const list = threaded ? filteredIn(folderId, f, true) : sortedIn(folderId, sort, f);
     if (!threaded) {
       const i = list.findIndex((m) => m.id === id);
       return i >= 0 ? i : null;
@@ -1550,13 +1652,102 @@ export function createMockBackend(): Backend {
       await latency();
       return [...folders.values()].filter((f) => f.accountId === accountId).map((f) => ({ ...f, path: [...f.path] }));
     },
+    async list_item_ids({ folderId, threaded, sort, filter, offset, limit }) {
+      await sleep(3);
+      if (!threaded) return sortedIn(folderId, sort ?? 'received', filter).slice(offset, offset + limit).map((m) => m.id);
+      const order: number[] = [];
+      const seen = new Set<number>();
+      for (const m of filteredIn(folderId, filter, true)) {
+        const tid = threadOf(m);
+        if (!seen.has(tid)) {
+          seen.add(tid);
+          order.push(tid);
+        }
+      }
+      return order.slice(offset, offset + limit);
+    },
+    async sender_icon({ addr }) {
+      await sleep(20);
+      // A Google contact's own photo comes first.
+      const a = addr.trim().toLowerCase();
+      for (const c of cardsLoad()) {
+        const photo = c.emails.some((e) => e.toLowerCase() === a) ? contactPhoto(c) : null;
+        if (photo) return photo;
+      }
+      // Companies in the demo have a logo (made up here); people and free mail don't.
+      const LOGOS: Record<string, [string, string]> = {
+        'github.com': ['#24292f', 'G'],
+        'linear.app': ['#5e6ad2', 'L'],
+        'invoicely.io': ['#0f9d58', 'I'],
+        'figma.com': ['#a259ff', 'F'],
+        'parcelco.shop': ['#ff5a36', 'P'],
+        'morningbrief.news': ['#111827', 'M'],
+        'lumengoods.com': ['#b45309', 'L'],
+        'northwind-air.com': ['#0369a1', 'N'],
+        'fieldnotes.email': ['#15803d', 'F'],
+      };
+      const domain = addr.split('@')[1]?.toLowerCase() ?? '';
+      const logo = LOGOS[domain];
+      if (!logo) return null;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="${logo[0]}"/><text x="16" y="22" text-anchor="middle" font-family="Helvetica,Arial" font-weight="700" font-size="18" fill="#fff">${logo[1]}</text></svg>`;
+      return `data:image/svg+xml;base64,${btoa(svg)}`;
+    },
+    async sender_folders({ messageIds }) {
+      await sleep(3);
+      const first = byId.get(messageIds[0] ?? -1);
+      if (!first) return [];
+      const acct = folders.get(first.folderId)?.accountId;
+      const senders = new Set(messageIds.map((id) => byId.get(id)?.fromAddr.toLowerCase()).filter(Boolean));
+      const out: { folderId: number; count: number }[] = [];
+      for (const [folderId, list] of folderMsgs) {
+        if (folders.get(folderId)?.accountId !== acct) continue;
+        const count = list.filter((m) => senders.has(m.fromAddr.toLowerCase())).length;
+        if (count) out.push({ folderId, count });
+      }
+      return out.sort((a, b) => b.count - a.count);
+    },
+    async selection_info({ folderId, items, threaded }) {
+      await sleep(3);
+      const want = new Set(items);
+      const ms = (folderMsgs.get(folderId) ?? []).filter((m) => want.has(threaded ? threadOf(m) : m.id));
+      const now = Date.now() / 1000;
+      const snoozes = ms.map((m) => m.snoozedUntil ?? 0).filter((t) => t > now);
+      return {
+        ids: ms.map((m) => m.id),
+        anyUnread: ms.some((m) => m.unread),
+        allFlagged: ms.length > 0 && ms.every((m) => m.flagged),
+        tagSets: ms.map((m) => m.tags ?? []),
+        snoozedUntil: snoozes.length ? Math.max(...snoozes) : null,
+        size: ms.reduce((n, m) => n + (m.size ?? 0), 0),
+        subjects: ms.map((m) => m.subject),
+        sizes: ms.map((m) => m.size ?? 0),
+      };
+    },
+    async mark_folder_read({ folderId }) {
+      await sleep(3);
+      const unread = (folderMsgs.get(folderId) ?? []).filter((m) => m.unread);
+      const touched = new Set<number>([folderId]);
+      for (const m of unread) {
+        m.unread = false;
+        // Every copy of it (a conversation's messages are one object per folder here).
+        for (const c of threads.get(threadOf(m)) ?? []) if (c.id === m.id) touched.add(c.folderId);
+      }
+      for (const id of touched) {
+        const f = folders.get(id);
+        if (f) recount(f);
+      }
+      emit('messages-changed', { folderIds: [...touched] });
+      const f = folders.get(folderId);
+      if (f) emit('folders-changed', { accountId: f.accountId });
+      return unread.length;
+    },
     async open_folder() {
       await latency();
     },
-    async list_messages({ folderId, offset, limit }) {
+    async list_messages({ folderId, offset, limit, sort, filter }) {
       await latency();
       if (listDelay) await sleep(listDelay);
-      const list = folderMsgs.get(folderId) ?? [];
+      const list = sortedIn(folderId, sort ?? 'received', filter);
       return {
         total: list.length,
         messages: list.slice(offset, offset + limit).map((m) => ({ ...m })),
@@ -1569,10 +1760,15 @@ export function createMockBackend(): Backend {
       const results = searchCache.results;
       return { total: results.length, messages: results.slice(offset, offset + limit).map((m) => ({ ...m })) };
     },
-    async list_threads({ folderId, offset, limit, scope, includeTrash }) {
+    async search_index_of({ accountId, folderId, query, fields, id }) {
+      await latency();
+      const i = runSearch(accountId, folderId, query, fields).findIndex((m) => m.id === id);
+      return i < 0 ? null : i;
+    },
+    async list_threads({ folderId, offset, limit, scope, includeTrash, filter }) {
       await latency();
       if (listDelay) await sleep(listDelay);
-      const list = folderMsgs.get(folderId) ?? [];
+      const list = filteredIn(folderId, filter, true);
       const order: number[] = [];
       const newest = new Map<number, MessageSummary>();
       for (const m of list) {
@@ -1640,6 +1836,166 @@ export function createMockBackend(): Backend {
         setTimeout(() => void simulateSync(acc, 6_000, 'mail.example.org'), 300);
       }
     },
+    async mcp_status() {
+      await sleep(3);
+      let settings = { enabled: false, drafts: false, organize: false, delete: false, send: false, accounts: null as number[] | null };
+      try {
+        settings = { ...settings, ...JSON.parse(localStorage.getItem('mock.mcp') ?? '{}') };
+      } catch {
+        /* defaults */
+      }
+      return { settings, command: '/Applications/Email.app/Contents/MacOS/mail-app' };
+    },
+    async set_mcp_settings({ settings }) {
+      await sleep(3);
+      localStorage.setItem('mock.mcp', JSON.stringify(settings));
+    },
+    async mcp_log() {
+      await sleep(3);
+      return [];
+    },
+    async mcp_answer({ id, allow }) {
+      await sleep(3);
+      mcpAnswers.get(id)?.(allow);
+      mcpAnswers.delete(id);
+    },
+    async message_source({ id }) {
+      await sleep(10);
+      const m = byId.get(id);
+      if (!m) throw 'This message is no longer here.';
+      const date = new Date(m.date * 1000).toUTCString();
+      return [
+        `Return-Path: <${m.fromAddr}>`,
+        `Received: from mail.${m.fromAddr.split('@')[1] ?? 'example.com'} (mail.example.net [203.0.113.7])`,
+        `\tby mx.example.com with ESMTPS id x1si2; ${date}`,
+        `Authentication-Results: mx.example.com; spf=pass smtp.mailfrom=${m.fromAddr}; dkim=pass header.d=${m.fromAddr.split('@')[1] ?? ''}`,
+        'X-Spam-Status: No, score=1.2',
+        `From: ${m.fromName ? `"${m.fromName}" ` : ''}<${m.fromAddr}>`,
+        `Subject: ${m.subject}`,
+        `Date: ${date}`,
+        `Message-ID: <${m.id}@demo.example>`,
+        'MIME-Version: 1.0',
+        'Content-Type: text/plain; charset=utf-8',
+        '',
+        m.snippet ?? '',
+      ].join('\r\n');
+    },
+    async google_status() {
+      await sleep(3);
+      return googleLoad();
+    },
+    async set_google_client({ id }) {
+      await sleep(3);
+      const st = googleLoad();
+      if (id && !id.trim().endsWith('.apps.googleusercontent.com')) throw "That isn't a Google client ID (it ends in .apps.googleusercontent.com).";
+      st.clientId = id ? id.trim() : null;
+      localStorage.setItem('mock.google', JSON.stringify(st));
+    },
+    async google_connect({ accountId }) {
+      await sleep(300); // the browser sign-in
+      const st = googleLoad();
+      if (!st.clientId) throw 'Add your Google client ID and secret first.';
+      const email = accounts.find((a) => a.id === accountId)?.email ?? 'me@gmail.com';
+      // Their contacts come in (made up): Google's, linked to this account.
+      const all = cardsLoad();
+      let next = Math.max(0, ...all.map((c) => c.id)) + 1;
+      // In groups there, as Google Contacts has them.
+      const g = (r: string) => `contactGroups/${r}`;
+      const groups = [
+        { resource: g('myContacts'), name: 'My Contacts' },
+        { resource: g('starred'), name: 'Starred' },
+        { resource: g('family1'), name: 'Familie' },
+        { resource: g('work1'), name: 'Kolleger' },
+      ];
+      const people: [string, string, string, string[]][] = [
+        ['Olivia Hart', 'olivia.hart@example.com', 'Fabrikam', [g('myContacts'), g('starred'), g('work1')]],
+        ['Noah Becker', 'noah@becker.example', '', [g('myContacts'), g('family1')]],
+        ['Emma Lindqvist', 'emma.lindqvist@example.se', 'Nordlys', [g('myContacts')]],
+      ];
+      const added = people.map(([name, email, company, groups]) => ({ id: next++, name, emails: [email], phones: [], company, notes: '', google: accountId, groups }));
+      localStorage.setItem('mock.cards', JSON.stringify([...all, ...added]));
+      st.links = [...st.links.filter((l) => l.accountId !== accountId), { accountId, googleEmail: email, synced: Math.floor(Date.now() / 1000), error: null, count: added.length, groups }];
+      localStorage.setItem('mock.google', JSON.stringify(st));
+      return email;
+    },
+    async google_disconnect({ accountId }) {
+      await sleep(3);
+      const st = googleLoad();
+      st.links = st.links.filter((l) => l.accountId !== accountId);
+      localStorage.setItem('mock.google', JSON.stringify(st));
+      localStorage.setItem('mock.cards', JSON.stringify(cardsLoad().filter((c) => c.google !== accountId)));
+    },
+    async contact_details({ cardId }) {
+      await sleep(10);
+      const c = cardsLoad().find((x) => x.id === cardId);
+      if (!c || c.google == null) return null;
+      const none = { photo: null, title: '', department: '', nicknames: [], emails: [], phones: [], addresses: [], birthday: null, events: [], websites: [], relations: [], chat: [], link: null };
+      if (c.name !== 'Olivia Hart') return { ...none, link: `https://contacts.google.com/person/c${cardId}` };
+      // A made-up photo, and the rest of what Google might have.
+      return {
+        ...none,
+        photo: contactPhoto(c),
+        title: 'Head of Design',
+        department: 'Studio',
+        nicknames: ['Liv'],
+        emails: c.emails.map((value) => ({ value, label: 'Work' })),
+        phones: [{ value: '+1 503 555 0142', label: 'Mobile' }],
+        addresses: [{ value: '12 Harbor St\nPortland, ME 04101\nUSA', label: 'Work' }],
+        birthday: { year: null, month: 5, day: 14 },
+        events: [[{ year: 2019, month: 9, day: 7 }, 'Anniversary']],
+        websites: [{ value: 'https://fabrikam.example/olivia', label: 'Work' }],
+        relations: [{ value: 'Sam Hart', label: 'Spouse' }],
+        chat: [{ value: 'olivia.hart', label: 'Skype' }],
+        link: `https://contacts.google.com/person/c${cardId}`,
+      };
+    },
+    async google_sync() {
+      await sleep(20);
+      const st = googleLoad();
+      for (const l of st.links) {
+        l.synced = Math.floor(Date.now() / 1000);
+        l.count = cardsLoad().filter((c) => c.google === l.accountId).length;
+      }
+      localStorage.setItem('mock.google', JSON.stringify(st));
+      return false;
+    },
+    async account_logos() {
+      await sleep(3);
+      try {
+        return JSON.parse(localStorage.getItem('mock.accountLogos') ?? '[]') as { accountId: number; dataUrl: string }[];
+      } catch {
+        return [];
+      }
+    },
+    async set_account_logo({ accountId, dataUrl }) {
+      await sleep(3);
+      if (dataUrl && !/^data:image\/(png|jpeg|gif|webp|svg\+xml);base64,/.test(dataUrl)) throw "That isn't a picture the app can show.";
+      let list: { accountId: number; dataUrl: string }[] = [];
+      try {
+        list = JSON.parse(localStorage.getItem('mock.accountLogos') ?? '[]');
+      } catch {
+        list = [];
+      }
+      list = list.filter((l) => l.accountId !== accountId);
+      if (dataUrl) list.push({ accountId, dataUrl });
+      localStorage.setItem('mock.accountLogos', JSON.stringify(list));
+    },
+    async allow_remote_sender({ id }) {
+      await sleep(3);
+      const m = byId.get(id);
+      if (!m) throw 'This message has no sender.';
+      remoteSenders.add(m.fromAddr.toLowerCase());
+      return m.fromAddr;
+    },
+    async remote_senders() {
+      await sleep(3);
+      return [...remoteSenders].sort();
+    },
+    async set_remote_sender({ addr, on }) {
+      await sleep(3);
+      if (on) remoteSenders.add(addr.toLowerCase());
+      else remoteSenders.delete(addr.toLowerCase());
+    },
     async set_allow_remote({ id, allow }) {
       await sleep(3);
       if (allow) remoteAllowed.add(id);
@@ -1676,6 +2032,21 @@ export function createMockBackend(): Backend {
     async app_version() {
       await sleep(3);
       return '0.1.0 (preview)';
+    },
+    // `?updates`: a copy that updates itself, with 0.1.999 waiting.
+    async update_status() {
+      await sleep(3);
+      return { ...mockUpdate };
+    },
+    async check_for_update() {
+      if (!mockUpdate.supported) return { ...mockUpdate };
+      await sleep(200);
+      Object.assign(mockUpdate, { ready: '0.1.999', checked: Math.floor(Date.now() / 1000), error: null });
+      return { ...mockUpdate };
+    },
+    async install_update() {
+      await sleep(10);
+      (window as unknown as { __updateInstalled?: string }).__updateInstalled = mockUpdate.ready ?? '';
     },
     async reveal_path() {
       await sleep(5);
@@ -1721,15 +2092,177 @@ export function createMockBackend(): Backend {
       pendingOps.delete(opId);
       op.rollback();
     },
-    async locate_message({ folderId, messageId, threaded }) {
+    async locate_message({ folderId, messageId, threaded, sort, filter }) {
       await sleep(3);
       const id = threaded ? (meta.get(messageId)?.threadId ?? messageId) : messageId;
-      const index = indexIn(folderId, id, threaded);
+      const index = indexIn(folderId, id, threaded, sort, filter);
       return index == null ? null : { id, index };
     },
-    async index_of({ folderId, id, threaded }) {
+    async index_of({ folderId, id, threaded, sort, filter }) {
       await sleep(3);
-      return indexIn(folderId, id, threaded);
+      return indexIn(folderId, id, threaded, sort, filter);
+    },
+    async sender_messages({ messageId, accountId, addr, offset, limit }) {
+      await latency();
+      let acct = accountId;
+      let from = addr;
+      let name = '';
+      if (messageId != null) {
+        const m = byId.get(messageId);
+        if (!m) return null;
+        acct = meta.get(m.id)?.accountId ?? null;
+        const me = accounts.find((a) => a.id === acct)?.email.toLowerCase();
+        ({ fromAddr: from, fromName: name } = m);
+        if (m.fromAddr.toLowerCase() === me) {
+          const other = [...byId.values()]
+            .filter((x) => threadOf(x) === threadOf(m) && x.fromAddr.toLowerCase() !== me)
+            .sort((a, b) => b.date - a.date)[0];
+          if (other) ({ fromAddr: from, fromName: name } = other);
+        }
+      }
+      if (acct == null || !from) return null;
+      const want = from.toLowerCase();
+      const all = [...byId.values()]
+        .filter((x) => {
+          const f = folders.get(x.folderId);
+          return meta.get(x.id)?.accountId === acct && x.fromAddr.toLowerCase() === want && f?.role !== 'trash' && f?.role !== 'junk';
+        })
+        .sort((a, b) => b.date - a.date || b.id - a.id);
+      return {
+        accountId: acct,
+        name: all.find((x) => x.fromName)?.fromName ?? name,
+        addr: from,
+        total: all.length,
+        messages: all.slice(offset, offset + limit).map((x) => ({ ...x })),
+      };
+    },
+    async list_cards() {
+      await sleep(3);
+      return cardsLoad().sort((a, b) => (a.name || a.company || a.emails[0] || '').localeCompare(b.name || b.company || b.emails[0] || ''));
+    },
+    async save_card({ card }) {
+      await sleep(3);
+      const c = {
+        ...card,
+        name: card.name.trim(),
+        company: card.company.trim(),
+        emails: card.emails.map((e) => e.trim()).filter(Boolean),
+        phones: card.phones.map((p) => p.trim()).filter(Boolean),
+      };
+      if (!c.name && !c.company && !c.emails.length) throw 'Give the contact a name, a company or an address.';
+      const all = cardsLoad();
+      if (c.id === 0) c.id = Math.max(0, ...all.map((x) => x.id)) + 1;
+      else if (!all.some((x) => x.id === c.id)) throw 'That contact no longer exists.';
+      localStorage.setItem('mock.cards', JSON.stringify([...all.filter((x) => x.id !== c.id), c]));
+      return c.id;
+    },
+    async delete_card({ id }) {
+      await sleep(3);
+      localStorage.setItem('mock.cards', JSON.stringify(cardsLoad().filter((x) => x.id !== id)));
+    },
+    async ai_status() {
+      await sleep(3);
+      return {
+        configured: !!localStorage.getItem('mock.aiKey'),
+        models: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'],
+        defaultModel: 'claude-opus-5-5',
+      };
+    },
+    async ai_set_key({ key }) {
+      await sleep(3);
+      if (key?.trim()) localStorage.setItem('mock.aiKey', key.trim());
+      else localStorage.removeItem('mock.aiKey');
+    },
+    async ai_run({ requestId, model, task, request }) {
+      // A canned answer, streamed in pieces like the real one (no key or network needed).
+      if (!localStorage.getItem('mock.aiKey')) throw 'Add your Anthropic API key in Settings › AI first.';
+      const said = request.instruction.trim();
+      const text =
+        task.kind === 'reply'
+          ? `Hi,\n\nThanks for your message. ${said ? said.charAt(0).toUpperCase() + said.slice(1) + '.' : 'I’ll get back to you on this shortly.'}\n\nBest regards`
+          : task.kind === 'compose'
+            ? said.includes('Works!')
+              ? 'Works!'
+              : `Hi,\n\n${said.charAt(0).toUpperCase() + said.slice(1)}?\n\nThanks`
+            : task.kind === 'translate'
+              ? `[${task.language}] ${request.draft}`
+              : task.kind === 'ask'
+                ? `Its headers show it passed SPF and DKIM for its domain, and the receiving server scored it low (X-Spam-Status: No). You asked: ${task.question}`
+                : `${request.draft} (${task.style})`;
+      aiCancelled.delete(requestId);
+      for (const piece of text.match(/.{1,6}/gs) ?? []) {
+        await sleep(15);
+        if (aiCancelled.has(requestId)) throw 'Stopped.';
+        emit('ai-text', { requestId, text: piece });
+      }
+      return { refused: false, truncated: false, model, text };
+    },
+    async ai_cancel({ requestId }) {
+      aiCancelled.add(requestId);
+    },
+    async list_signatures() {
+      await sleep(3);
+      const st = sigLoad();
+      return { signatures: st.signatures, defaults: st.defaults };
+    },
+    async save_signature({ id, name, html }) {
+      await sleep(3);
+      if (!name.trim()) throw 'A signature needs a name.';
+      const st = sigLoad();
+      if (id != null) {
+        const s = st.signatures.find((x) => x.id === id);
+        if (!s) throw 'That signature no longer exists.';
+        Object.assign(s, { name: name.trim(), html });
+      } else {
+        id = ++st.seq;
+        st.signatures.push({ id, name: name.trim(), html });
+      }
+      sigSave(st);
+      return id;
+    },
+    async delete_signature({ id }) {
+      await sleep(3);
+      const st = sigLoad();
+      st.signatures = st.signatures.filter((s) => s.id !== id);
+      for (const d of st.defaults) {
+        if (d.newId === id) d.newId = null;
+        if (d.replyId === id) d.replyId = null;
+      }
+      sigSave(st);
+    },
+    async set_signature_defaults({ accountId, newId, replyId }) {
+      await sleep(3);
+      const st = sigLoad();
+      st.defaults = [...st.defaults.filter((d) => d.accountId !== accountId), { accountId, newId, replyId }];
+      sigSave(st);
+    },
+    async list_groups({ folderId, threaded, sort, bounds, filter }) {
+      await sleep(3);
+      if (threaded || sort === 'received') {
+        const counts = new Array<number>(bounds.length + 1).fill(0);
+        const seen = new Set<number>();
+        for (const m of filteredIn(folderId, filter, threaded)) {
+          if (threaded) {
+            const tid = threadOf(m);
+            if (seen.has(tid)) continue; // newest first: the first is the conversation's newest
+            seen.add(tid);
+          }
+          const i = bounds.findIndex((b) => m.date >= b);
+          counts[i < 0 ? bounds.length : i]! += 1;
+        }
+        return counts.map((count) => ({ label: null, count }));
+      }
+      const out: { label: string | null; count: number }[] = [];
+      let last: string | null = null;
+      for (const m of sortedIn(folderId, sort, filter)) {
+        const k = sort === 'size' ? sizeRangeLabel(m.size ?? 0) : sortKey(m, sort);
+        if (k !== last) {
+          out.push({ label: sort === 'size' ? k : k === '\u{10FFFF}' ? '' : sortShown(m, sort), count: 0 });
+          last = k;
+        }
+        out[out.length - 1]!.count++;
+      }
+      return out;
     },
     async show_log() {
       await sleep(3);
@@ -1777,6 +2310,7 @@ export function createMockBackend(): Backend {
           sending: true,
           sendFailed: false,
           draftId: null,
+          to: [...request.to, ...request.cc],
         };
         const c = copy;
         meta.set(c.id, { kind: 'person', seed: c.id, accountId: acc.id, attachments: [], cc: false, threadId: c.id });
@@ -1880,6 +2414,10 @@ export function createMockBackend(): Backend {
       return { messages: kept, freedBytes: kept * 458_000 };
     },
     async set_notifications() {},
+    async test_notification() {
+      (window as unknown as { __testNotifications?: number }).__testNotifications =
+        ((window as unknown as { __testNotifications?: number }).__testNotifications ?? 0) + 1;
+    },
     async set_display_name({ accountId, name }) {
       await sleep(3);
       const acc = accounts.find((x) => x.id === accountId);
@@ -2002,11 +2540,18 @@ export function createMockBackend(): Backend {
         seen.set(k, e);
       }
       const words = (s: string) => s.toLowerCase().split(/[\s.@_-]+/);
-      return [...seen.values()]
+      // The address book first, under its names (as the core does).
+      const fromCards = cardsLoad().flatMap((c) =>
+        [c.name, c.company].some((f) => words(f).some((w) => w.startsWith(q)))
+          ? c.emails.map((addr) => ({ name: c.name || null, addr }))
+          : c.emails.filter((e) => words(e).some((w) => w.startsWith(q))).map((addr) => ({ name: c.name || null, addr })),
+      );
+      const rest = [...seen.values()]
+        .filter((e) => !fromCards.some((c) => c.addr.toLowerCase() === e.addr))
         .filter((e) => !/no-?reply|notifications/.test(e.addr) && (e.addr.startsWith(q) || words(e.name ?? '').some((w) => w.startsWith(q)) || words(e.addr.split('@')[0]!).some((w) => w.startsWith(q))))
         .sort((a, b) => b.n - a.n)
-        .slice(0, limit ?? 8)
         .map(({ name, addr }) => ({ name, addr }));
+      return [...fromCards, ...rest].slice(0, limit ?? 8);
     },
     async file_info({ paths }) {
       await sleep(3);
@@ -2075,12 +2620,13 @@ export function createMockBackend(): Backend {
       if (stored && Date.now() < stored.sendAt) return stored.draft ?? null;
       throw 'Too late to undo: the message was already sent.';
     },
-    async next_unread({ folderId, after, threaded, back }) {
+    async next_unread({ folderId, after, threaded, back, sort, filter }) {
       await sleep(3);
+      if (filter?.read === true) return null;
       // Rows in list order, as (id, unread): messages, or conversations by their newest message.
       const rows: { id: number; unread: boolean }[] = [];
       const at = new Map<number, number>();
-      for (const m of folderMsgs.get(folderId) ?? []) {
+      for (const m of threaded ? filteredIn(folderId, filter, true) : sortedIn(folderId, sort ?? 'received', filter)) {
         const id = threaded ? threadOf(m) : m.id;
         const k = at.get(id);
         if (k == null) {

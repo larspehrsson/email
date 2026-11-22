@@ -22,9 +22,15 @@ tauri-plugin-deep-link = "2.6.3"
 tauri-plugin-dialog = "2.8.3"
 tauri-plugin-opener = "2.7.2"
 tauri-plugin-single-instance = { version = "2.5.4", features = ["deep-link"] }
-tokio = { version = "1.53.3", features = ["time", "sync", "macros"] }
+tauri-plugin-updater = "2.14.1"
+tokio = { version = "1.53.3", features = ["time", "sync", "macros", "rt", "net", "io-util", "io-std"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10.1"
+# Notifications through UNUserNotificationCenter (notify.rs): the API macOS shows and lists.
+block2 = "0.6.2"
+objc2 = "0.6.5"
+objc2-foundation = { version = "0.3.2", features = ["NSBundle", "NSError", "NSObject", "NSString"] }
+objc2-user-notifications = { version = "0.3.2", features = ["block2", "UNNotification", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationSound", "UNNotificationTrigger", "UNUserNotificationCenter"] }

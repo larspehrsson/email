@@ -1,13 +1,17 @@
 import { batch, createEffect, createMemo, createSignal, For, Match, onCleanup, Show, Switch, untrack } from 'solid-js';
+import { folderMenu } from './ContextMenu';
 import { hint } from '../lib/shortcuts';
 import { createStore } from 'solid-js/store';
-import { api, type Account, type Folder, type FolderRole, type SyncStatus } from '../api';
-import { folderById, foldersByAccount, moveAccount, selectedFolderId, selectFolder, syncByAccount, accounts } from '../state';
+import { api, errorMessage, type Account, type Folder, type FolderRole, type SyncStatus } from '../api';
+import { folderById, foldersByAccount, moveAccount, selectedFolderId, selectFolder, syncByAccount, accounts, mainView, setMainView } from '../state';
 import { AccountDot } from './FolderSwitcher';
 import { cancelExport, exportLabel, exportNow } from '../lib/exports';
 import { fmtNum, loadPref, savePref } from '../lib/format';
-import { AlertIcon, CheckIcon, ChevronIcon, FolderIcon, LockIcon, PlusIcon, RoleIcon, SidebarIcon } from './Icons';
+import { AlertIcon, CheckIcon, ChevronIcon, FolderIcon, LockIcon, MailIcon, PeopleIcon, RoleIcon, SidebarIcon } from './Icons';
+import { ContactSources } from './ContactSources';
 import { PasswordDialog } from './PasswordPrompt';
+import { restartToUpdate, updateStatus } from '../lib/updates';
+import { showToast } from './Toast';
 import { toggleSidebar } from '../lib/layout';
 import { DRAG, platform } from '../lib/platform';
 
@@ -240,11 +244,12 @@ function SyncPopoverRow(props: { account: Account; status: SyncStatus | undefine
   return (
     <div class="sp-item">
       <div class="sf-row sp-row" classList={{ error: isAttention(phase()), warn: isWarning(phase()), active: active() }}>
-        <StatusGlyph phase={phase()} />
+        <AccountDot account={props.account} size={22} />
         <span class="sf-email" title={props.account.email}>
           {props.account.email}
         </span>
         <span class="sf-status sp-status">
+          <StatusGlyph phase={phase()} />
           <span class="sf-text">{props.status ? syncLabel(props.status) : 'Up to date'}</span>
           <Show when={phase() === 'auth'}>
             <button class="link-btn sf-fix" onClick={() => props.onFix()}>
@@ -371,6 +376,25 @@ export function SyncFooter(props: { compact?: boolean }) {
           <div class="sp-version">{appVersion() ? `Email ${appVersion()}` : '\u00a0'}</div>
         </div>
       </Show>
+      <Show when={updateStatus()?.ready}>
+        {(v) => (
+          <button
+            class="sf-row sf-update"
+            title={`Email ${v()} is downloaded: restart to use it`}
+            onClick={() => restartToUpdate().catch((e) => showToast({ kind: 'error', text: errorMessage(e) }))}
+          >
+            <span class="sf-icon" aria-hidden="true">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M13.5 8a5.5 5.5 0 1 1-1.7-4" />
+                <path d="M13.5 2.5v3h-3" />
+              </svg>
+            </span>
+            <Show when={!props.compact}>
+              <span class="sf-text">Restart to update</span>
+            </Show>
+          </button>
+        )}
+      </Show>
       <button
         ref={rowEl}
         class="sf-row sf-summary"
@@ -410,6 +434,7 @@ function FolderRow(props: { folder: Folder; depth: number; role?: boolean }) {
       classList={{ selected: selected(), role: !!props.role }}
       style={{ 'padding-left': `${12 + props.depth * 14 + 18}px` }}
       onClick={() => selectFolder(props.folder.id)}
+      onContextMenu={(e) => folderMenu(e, props.folder)}
       title={props.folder.path.join(' / ')}
     >
       <span class="folder-icon">
@@ -441,6 +466,10 @@ function TreeItem(props: { node: TreeNode }) {
           const f = n().folder;
           if (f && f.selectable) selectFolder(f.id);
           else if (hasKids()) toggleNode(n());
+        }}
+        onContextMenu={(e) => {
+          const f = n().folder;
+          if (f?.selectable) folderMenu(e, f);
         }}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -642,16 +671,35 @@ function AccountSection(props: { account: Account; index: number }) {
   );
 }
 
-export function Sidebar(props: { onAddAccount: () => void; flyout?: boolean }) {
+export function Sidebar(props: { flyout?: boolean }) {
+  // Mail or the address book: the sidebar lists the mailboxes' folders, or whose contacts.
+  const contacts = () => mainView() === 'contacts';
   return (
-    <nav class="sidebar" classList={{ flyout: !!props.flyout }} aria-label="Mailboxes">
+    <nav class="sidebar" classList={{ flyout: !!props.flyout }} aria-label={contacts() ? 'Contacts' : 'Mailboxes'}>
       <div class="sidebar-top" data-tauri-drag-region={DRAG}>
         <span class="sidebar-title" data-tauri-drag-region={DRAG}>
-          Mailboxes
+          {contacts() ? 'Contacts' : 'Mailboxes'}
         </span>
         <span class="sidebar-top-btns">
-          <button class="icon-btn" onClick={props.onAddAccount} title="Add account" aria-label="Add account">
-            <PlusIcon />
+          <button
+            class="icon-btn"
+            classList={{ on: !contacts() }}
+            onClick={() => setMainView('mail')}
+            title="Mail"
+            aria-label="Mail"
+            aria-pressed={!contacts()}
+          >
+            <MailIcon />
+          </button>
+          <button
+            class="icon-btn"
+            classList={{ on: contacts() }}
+            onClick={() => setMainView(contacts() ? 'mail' : 'contacts')}
+            title={`Address book (${hint('contacts')})`}
+            aria-label="Address book"
+            aria-pressed={contacts()}
+          >
+            <PeopleIcon />
           </button>
           <button
             class="icon-btn"
@@ -664,7 +712,9 @@ export function Sidebar(props: { onAddAccount: () => void; flyout?: boolean }) {
         </span>
       </div>
       <div class="sidebar-scroll">
-        <For each={accounts() ?? []}>{(a, i) => <AccountSection account={a} index={i()} />}</For>
+        <Show when={contacts()} fallback={<For each={accounts() ?? []}>{(a, i) => <AccountSection account={a} index={i()} />}</For>}>
+          <ContactSources class="ct-sources-sidebar" />
+        </Show>
       </div>
       <SyncFooter />
     </nav>

@@ -6,6 +6,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# One run at a time per branch: a newer push waits, so the "latest" release never mixes two
+# builds' files (and latest.json names the files beside it).
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   test:
     runs-on: ubuntu-22.04
@@ -61,6 +67,11 @@ jobs:
             platform: macos
             args: "--target universal-apple-darwin"
             bundle: target/universal-apple-darwin/release/bundle
+          # An NSIS installer (.exe) and an .msi; unsigned (SmartScreen asks once).
+          - os: windows-latest
+            platform: windows
+            args: ""
+            bundle: target/release/bundle
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -87,6 +98,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
+      # aws-lc-sys (rustls' crypto) assembles with NASM on x86_64 Windows.
+      - name: NASM
+        if: startsWith(matrix.os, 'windows')
+        uses: ilammy/setup-nasm@v1
+
       # Version = major.minor from tauri.conf.json + the number of commits as the patch: the
       # same for a commit on every platform and in local builds (see app/src-tauri/build.rs),
       # and higher with every commit (dnf/rpm and macOS see it as an update). Bump major.minor
@@ -101,11 +117,48 @@ jobs:
           echo "APP_VERSION=$v" >> "$GITHUB_ENV"
           echo "Building version $v"
 
+      # Updates (app/src-tauri/src/updater.rs): with the TAURI_SIGNING_PRIVATE_KEY secret (and
+      # its password) and the TAURI_UPDATER_PUBKEY variable set, the build signs its update
+      # files (.sig beside each) and the app gets the updater's configuration: the public key,
+      # and latest.json on this repository's "latest" release (written by the release job).
+      # Without them (pull requests from forks, other repositories) the app doesn't update itself.
+      - name: Updater
+        shell: bash
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ -z "$KEY" ] || [ -z "$PUBKEY" ]; then
+            echo "No updater key: this build doesn't update itself"
+            exit 0
+          fi
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY=$KEY"
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+          f=app/src-tauri/tauri.conf.json
+          node -e "
+            const fs = require('fs');
+            const c = JSON.parse(fs.readFileSync('$f'));
+            c.bundle.createUpdaterArtifacts = true;
+            c.plugins.updater = {
+              pubkey: process.env.PUBKEY,
+              endpoints: ['https://github.com/' + process.env.REPO + '/releases/download/latest/latest.json'],
+              windows: { installMode: 'passive' },
+            };
+            fs.writeFileSync('$f', JSON.stringify(c, null, 2) + '\n');
+          "
+          echo "Updates on, from $REPO"
+
       # macOS signing and notarization (https://v2.tauri.app/distribute/sign/macos/): with the
       # APPLE_* secrets set, the Tauri build imports the Developer ID certificate into a
-      # temporary keychain, signs, notarizes and staples. Without them (pull requests from
-      # forks) the build is unsigned: Tauri takes an empty variable as set, so they're only
-      # exported when there.
+      # temporary keychain, signs, notarizes and staples. Without them (forks) the build is
+      # signed ad-hoc ("-"): not notarized, but a signature that names the app by its bundle
+      # identifier. Left at the linker's bare signature, it's named "mail_app", and macOS
+      # refuses notifications to an app asking as dev.mailclient.desktop. Tauri takes an empty
+      # variable as set, so the rest are only exported when there.
       - name: Apple signing
         if: startsWith(matrix.os, 'macos')
         shell: bash
@@ -118,7 +171,8 @@ jobs:
           API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
         run: |
           if [ -z "$CERTIFICATE" ]; then
-            echo "No Apple secrets: unsigned build"
+            echo "No Apple secrets: signed ad-hoc"
+            echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
             exit 0
           fi
           key="$RUNNER_TEMP/AuthKey.p8"
@@ -148,11 +202,16 @@ jobs:
             ${{ matrix.bundle }}/rpm/*.rpm
             ${{ matrix.bundle }}/appimage/*.AppImage
             ${{ matrix.bundle }}/dmg/*.dmg
+            ${{ matrix.bundle }}/nsis/*.exe
+            ${{ matrix.bundle }}/msi/*.msi
+            ${{ matrix.bundle }}/*/*.sig
+            ${{ matrix.bundle }}/macos/*.app.tar.gz
           if-no-files-found: ignore
 
       # Every build of main: its files on the "latest" pre-release, as plain downloads with
       # stable links (artifacts come zipped, need a login, expire, and their download service
-      # fails at times). Each platform replaces only its own files there.
+      # fails at times). Each platform replaces only its own files there. With the updater key,
+      # also the update files: each installer's signature (.sig), and macOS's Email.app.tar.gz.
       - name: Publish to the latest release
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         shell: bash
@@ -162,16 +221,19 @@ jobs:
           BUNDLE: ${{ matrix.bundle }}
         run: |
           shopt -s nullglob
-          files=("$BUNDLE"/deb/*.deb "$BUNDLE"/rpm/*.rpm "$BUNDLE"/appimage/*.AppImage "$BUNDLE"/dmg/*.dmg)
+          files=("$BUNDLE"/deb/*.deb "$BUNDLE"/rpm/*.rpm "$BUNDLE"/appimage/*.AppImage "$BUNDLE"/dmg/*.dmg "$BUNDLE"/nsis/*.exe "$BUNDLE"/msi/*.msi
+                 "$BUNDLE"/*/*.sig "$BUNDLE"/macos/*.app.tar.gz)
           if [ ${#files[@]} -eq 0 ]; then echo "nothing to publish"; exit 0; fi
-          # The first build creates the release (both platforms may try at once: one wins).
+          # The first build creates the release (the platforms may try at once: one wins).
           gh release view latest >/dev/null 2>&1 \
             || gh release create latest --prerelease --target "$GITHUB_SHA" --title "Latest build" \
-                 --notes "The newest build of main. Unsigned on Linux; signed and notarized on macOS." \
+                 --notes "The newest build of main. Unsigned on Linux and Windows; on macOS signed and notarized when built with the Apple secrets, otherwise signed ad-hoc." \
             || gh release view latest >/dev/null
           for a in $(gh release view latest --json assets --jq '.assets[].name'); do
             case "$PLATFORM:$a" in
-              macos:*.dmg | linux:*.deb | linux:*.rpm | linux:*.AppImage) gh release delete-asset latest "$a" --yes ;;
+              macos:*.dmg | macos:*.app.tar.gz | macos:*.app.tar.gz.sig \
+              | linux:*.deb | linux:*.deb.sig | linux:*.rpm | linux:*.rpm.sig | linux:*.AppImage | linux:*.AppImage.sig \
+              | windows:*.exe | windows:*.exe.sig | windows:*.msi | windows:*.msi.sig) gh release delete-asset latest "$a" --yes ;;
             esac
           done
           gh release upload latest "${files[@]}" --clobber
@@ -195,4 +257,24 @@ jobs:
           v="${base%.*}.$(git rev-list --count HEAD)"
           git push --force origin "$GITHUB_SHA:refs/tags/latest"
           gh release edit latest --prerelease --title "Latest build ($v)" \
-            --notes "Version $v, built from ${GITHUB_SHA:0:7}. Unsigned on Linux; signed and notarized on macOS."
+            --notes "Version $v, built from ${GITHUB_SHA:0:7}. Unsigned on Linux and Windows; on macOS signed and notarized when built with the Apple secrets, otherwise signed ad-hoc."
+          echo "APP_VERSION=$v" >> "$GITHUB_ENV"
+
+      # What the apps ask for to update themselves (app/src-tauri/src/updater.rs): this version,
+      # and for each platform and kind of install the file and its signature, all on this
+      # release. Only when the build signed its files (the updater key is set).
+      - name: Publish latest.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          dir="$RUNNER_TEMP/sigs"
+          mkdir -p "$dir"
+          gh release download latest --pattern '*.sig' --dir "$dir" --clobber || true
+          if ! ls "$dir"/*.sig >/dev/null 2>&1; then
+            echo "No signatures: no update files"
+            exit 0
+          fi
+          node .github/latest-json.js "$dir" "$APP_VERSION" "${GITHUB_SHA:0:7}" "https://github.com/$REPO/releases/download/latest" > "$RUNNER_TEMP/latest.json"
+          cat "$RUNNER_TEMP/latest.json"
+          gh release upload latest "$RUNNER_TEMP/latest.json" --clobber

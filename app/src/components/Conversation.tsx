@@ -22,6 +22,7 @@ import { pendingSnooze } from './Snooze';
 import { searchTag, TagChips, TagDots } from './Tags';
 import { runAction } from '../lib/actions';
 import { forwardFrameKeys } from '../lib/frameKeys';
+import { watchFrameLinks } from './LinkPeek';
 import { zoomableImages } from '../lib/images';
 import { SendState } from './MessageList';
 import { editDraft } from '../lib/compose';
@@ -95,6 +96,7 @@ export function AutoHeightFrame(props: { doc: string }) {
       const doc = f.contentDocument;
       if (!doc) return;
       forwardFrameKeys(f);
+      watchFrameLinks(f);
       zoomableImages(doc, () => measure());
       last = -1;
       measure();
@@ -282,6 +284,10 @@ function ExpandedCard(props: { m: MessageSummary; me: Me; folderTag?: string; ac
           <span class="dot-sep">·</span>
           <button class="link-btn" onClick={() => body.loadImages()}>
             Load images
+          </button>
+          <span class="dot-sep">·</span>
+          <button class="link-btn" title={`Always load images in mail from ${props.m.fromAddr}`} onClick={() => body.alwaysFromSender()}>
+            Always from this sender
           </button>
         </div>
       </Show>

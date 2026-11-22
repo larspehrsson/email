@@ -1,8 +1,10 @@
-//! Quick-search query parsing: user syntax -> SQLite FTS5 MATCH expression.
+//! Quick-search query parsing: user syntax -> SQLite FTS5 MATCH expressions, per term, for
+//! the header index (msg_fts) and the text of the messages (body_fts).
 //!
-//! Syntax: words are ANDed and prefix-matched across sender, recipients and subject;
-//! `"quoted phrases"`; `from:`, `to:`, `subject:` restrict a term to one field; `-term`
-//! excludes. Anything FTS5 would treat as an operator is quoted, so arbitrary input is safe.
+//! Syntax: words are ANDed and prefix-matched across sender, recipients, subject and the
+//! message's text; `"quoted phrases"`; `from:`, `to:`, `subject:`, `body:` restrict a term to
+//! one field; `-term` excludes. Anything FTS5 would treat as an operator is quoted, so
+//! arbitrary input is safe.
 
 #[derive(Debug, PartialEq)]
 struct Term {
@@ -16,6 +18,7 @@ fn field_column(name: &str) -> Option<&'static str> {
         "from" => "sender",
         "to" | "cc" => "recipients",
         "subject" | "subj" => "subject",
+        "body" | "text" => "body",
         _ => return None,
     })
 }
@@ -97,56 +100,86 @@ pub fn split_tags(query: &str) -> (String, Vec<String>) {
     (rest, tags)
 }
 
-/// Columns a plain (unprefixed) term may match.
-pub const ALL_FIELDS: &[&str] = &["sender", "recipients", "subject"];
+/// Fields a plain (unprefixed) term may match.
+pub const ALL_FIELDS: &[&str] = &["sender", "recipients", "subject", "body"];
+/// The ones in the header index (msg_fts); `body` is body_fts, a table of its own.
+const HEAD_FIELDS: &[&str] = &["sender", "recipients", "subject"];
 
-fn phrase(t: &Term, plain_fields: &[&str]) -> String {
-    let p = format!("\"{}\"*", t.text.replace('"', "\"\""));
-    match t.field {
-        Some(col) => format!("{col} : {p}"),
-        None if plain_fields.len() < ALL_FIELDS.len() => format!("{{{}}} : {p}", plain_fields.join(" ")),
-        None => p,
-    }
+/// One term of a query as FTS5 expressions, one per index: `head` for msg_fts (sender,
+/// recipients, subject) and `body` for body_fts; None where it isn't looked for. A message
+/// matches a term when either matches; it matches the query when it matches every positive
+/// term and no negated one.
+#[derive(Debug, PartialEq)]
+pub struct TermMatch {
+    pub head: Option<String>,
+    pub body: Option<String>,
+    pub negated: bool,
 }
 
-/// Build an FTS5 expression, or None if the query has no searchable (positive) terms.
-/// `fields` limits plain terms to those columns (unknown names ignored; empty = all).
-pub fn to_fts5(query: &str, fields: &[&str]) -> Option<String> {
+fn term_match(t: &Term, plain: &[&str]) -> TermMatch {
+    let p = format!("\"{}\"*", t.text.replace('"', "\"\""));
+    let (head, body) = match t.field {
+        Some("body") => (None, Some(p)),
+        Some(col) => (Some(format!("{col} : {p}")), None),
+        None => {
+            let cols: Vec<&str> = HEAD_FIELDS.iter().copied().filter(|f| plain.contains(f)).collect();
+            let head = match cols.len() {
+                0 => None,
+                n if n < HEAD_FIELDS.len() => Some(format!("{{{}}} : {p}", cols.join(" "))),
+                _ => Some(p.clone()),
+            };
+            (head, plain.contains(&"body").then_some(p))
+        }
+    };
+    TermMatch { head, body, negated: t.negated }
+}
+
+/// A query's terms, or None if it has no searchable (positive) ones. `fields` limits plain
+/// terms to those fields (unknown names ignored; empty = all).
+pub fn terms(query: &str, fields: &[&str]) -> Option<Vec<TermMatch>> {
     let mut plain: Vec<&str> = ALL_FIELDS.iter().copied().filter(|f| fields.contains(f)).collect();
     if plain.is_empty() {
         plain = ALL_FIELDS.to_vec();
     }
-    let terms = parse(query);
-    let positive: Vec<String> = terms.iter().filter(|t| !t.negated).map(|t| phrase(t, &plain)).collect();
-    if positive.is_empty() {
-        return None;
-    }
-    let mut expr = positive.join(" AND ");
-    for t in terms.iter().filter(|t| t.negated) {
-        expr = format!("({expr}) NOT {}", phrase(t, &plain));
-    }
-    Some(expr)
+    let terms: Vec<TermMatch> = parse(query).iter().map(|t| term_match(t, &plain)).collect();
+    terms.iter().any(|t| !t.negated).then_some(terms)
 }
 
 #[cfg(test)]
 mod tests {
-    fn to_fts5(q: &str) -> Option<String> {
-        super::to_fts5(q, &[])
+    use super::TermMatch;
+
+    /// Each term as (head expression, body expression, negated).
+    fn terms_in(q: &str, fields: &[&str]) -> Option<Vec<(Option<String>, Option<String>, bool)>> {
+        super::terms(q, fields).map(|ts| ts.into_iter().map(|TermMatch { head, body, negated }| (head, body, negated)).collect())
+    }
+    fn terms(q: &str) -> Option<Vec<(Option<String>, Option<String>, bool)>> {
+        terms_in(q, &[])
+    }
+    /// A plain term: everywhere.
+    fn both(p: &str) -> (Option<String>, Option<String>, bool) {
+        (Some(p.to_string()), Some(p.to_string()), false)
+    }
+    fn head(e: &str) -> (Option<String>, Option<String>, bool) {
+        (Some(e.to_string()), None, false)
     }
 
     #[test]
     fn builds_expressions() {
-        assert_eq!(to_fts5("invoice").unwrap(), r#""invoice"*"#);
-        assert_eq!(to_fts5("  ada  bob ").unwrap(), r#""ada"* AND "bob"*"#);
-        assert_eq!(to_fts5(r#""weekly report""#).unwrap(), r#""weekly report"*"#);
-        assert_eq!(to_fts5(r#"from:"Ada L" subject:q3"#).unwrap(), r#"sender : "Ada L"* AND subject : "q3"*"#);
-        assert_eq!(to_fts5("to:ada@example.com").unwrap(), r#"recipients : "ada@example.com"*"#);
-        assert_eq!(to_fts5("report -draft").unwrap(), r#"("report"*) NOT "draft"*"#);
+        assert_eq!(terms("invoice").unwrap(), [both(r#""invoice"*"#)]);
+        assert_eq!(terms("  ada  bob ").unwrap(), [both(r#""ada"*"#), both(r#""bob"*"#)]);
+        assert_eq!(terms(r#""weekly report""#).unwrap(), [both(r#""weekly report"*"#)]);
+        assert_eq!(terms(r#"from:"Ada L" subject:q3"#).unwrap(), [head(r#"sender : "Ada L"*"#), head(r#"subject : "q3"*"#)]);
+        assert_eq!(terms("to:ada@example.com").unwrap(), [head(r#"recipients : "ada@example.com"*"#)]);
+        assert_eq!(terms("body:refund").unwrap(), [(None, Some(r#""refund"*"#.to_string()), false)]);
+        let mut not_draft = both(r#""draft"*"#);
+        not_draft.2 = true;
+        assert_eq!(terms("report -draft").unwrap(), [both(r#""report"*"#), not_draft]);
         // Unknown "field" is just text; operator words and stray punctuation are harmless.
-        assert_eq!(to_fts5("re:meeting").unwrap(), r#""re:meeting"*"#);
-        assert_eq!(to_fts5("AND OR NOT").unwrap(), r#""AND"* AND "OR"* AND "NOT"*"#);
-        assert_eq!(to_fts5("-draft"), None);
-        assert_eq!(to_fts5(" @ \" "), None);
+        assert_eq!(terms("re:meeting").unwrap(), [both(r#""re:meeting"*"#)]);
+        assert_eq!(terms("AND OR NOT").unwrap(), [both(r#""AND"*"#), both(r#""OR"*"#), both(r#""NOT"*"#)]);
+        assert_eq!(terms("-draft"), None);
+        assert_eq!(terms(" @ \" "), None);
     }
 
     #[test]
@@ -158,12 +191,14 @@ mod tests {
 
     #[test]
     fn limits_plain_terms_to_fields() {
-        let f = |q, fields: &[&str]| super::to_fts5(q, fields).unwrap();
-        assert_eq!(f("ada", &["sender"]), r#"{sender} : "ada"*"#);
-        assert_eq!(f("ada", &["subject", "sender"]), r#"{sender subject} : "ada"*"#);
-        assert_eq!(f("ada", &["sender", "recipients", "subject"]), r#""ada"*"#);
-        assert_eq!(f("ada", &["bogus"]), r#""ada"*"#);
+        let f = |q, fields: &[&str]| terms_in(q, fields).unwrap();
+        assert_eq!(f("ada", &["sender"]), [head(r#"{sender} : "ada"*"#)]);
+        assert_eq!(f("ada", &["subject", "sender"]), [head(r#"{sender subject} : "ada"*"#)]);
+        assert_eq!(f("ada", &["sender", "recipients", "subject"]), [head(r#""ada"*"#)]);
+        assert_eq!(f("ada", &["sender", "body"]), [(Some(r#"{sender} : "ada"*"#.into()), Some(r#""ada"*"#.into()), false)]);
+        assert_eq!(f("ada", &["body"]), [(None, Some(r#""ada"*"#.into()), false)]);
+        assert_eq!(f("ada", &["bogus"]), [both(r#""ada"*"#)]);
         // Explicit prefixes win over the field limit.
-        assert_eq!(f("to:bob ada", &["subject"]), r#"recipients : "bob"* AND {subject} : "ada"*"#);
+        assert_eq!(f("to:bob ada", &["subject"]), [head(r#"recipients : "bob"*"#), head(r#"{subject} : "ada"*"#)]);
     }
 }

@@ -41,6 +41,7 @@ const EXAMPLES: [string, string][] = [
   ['from:ada', 'sender only'],
   ['to:bob@corp', 'recipients only'],
   ['subject:invoice', 'subject only'],
+  ['body:refund', 'the message\'s text only'],
   ['tag:work', 'tagged Work'],
   ['tag:"to do"', 'tag with spaces'],
 ];
@@ -86,7 +87,7 @@ function SearchHelp(props: { anchor: HTMLElement; onPick: (q: string) => void; o
           </For>
         </div>
         <p class="sh-note">Words match prefixes as you type (inv → invoice).</p>
-        <p class="sh-note">The Sender / Recipients / Subject chips limit plain words; All folders / the folder name sets the scope.</p>
+        <p class="sh-note">The Sender / Recipients / Subject / Text chips limit plain words (Text: messages downloaded to this computer, and their attachments' names); All folders / the folder name sets the scope.</p>
         <div class="sh-foot">
           <button
             class="link-btn"
@@ -153,7 +154,7 @@ export function SearchBar() {
           spellcheck={false}
           autocomplete="off"
           autocapitalize="off"
-          placeholder="Search sender, recipients, subject"
+          placeholder="Search senders, recipients, subjects, text"
           aria-label="Search messages"
           value={searchQuery()}
           onInput={(e) => {

@@ -211,6 +211,42 @@ pub fn parse_header_block(raw: &[u8]) -> ParsedHeader {
     }
 }
 
+/// How much of a message's text search looks through (a long newsletter's tail isn't worth the
+/// index's space).
+pub const SEARCH_TEXT_MAX: usize = 100_000;
+
+/// What search finds a message by in its body: its text (HTML as text), then its attachments'
+/// names; at most `SEARCH_TEXT_MAX` bytes. None: not a message the parser can read.
+pub fn search_text(raw: &[u8]) -> Option<String> {
+    let msg = MessageParser::default().parse(raw)?;
+    let mut text = String::new();
+    let mut i = 0;
+    while let Some(t) = msg.body_text(i) {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(&t);
+        i += 1;
+        if text.len() >= SEARCH_TEXT_MAX {
+            break;
+        }
+    }
+    for a in msg.attachments() {
+        if let Some(name) = a.attachment_name() {
+            text.push('\n');
+            text.push_str(name);
+        }
+    }
+    if text.len() > SEARCH_TEXT_MAX {
+        let mut end = SEARCH_TEXT_MAX;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+    }
+    Some(text)
+}
+
 /// Snippet and real attachment presence, computed once a body is downloaded.
 pub fn body_summary(raw: &[u8]) -> (Option<String>, bool) {
     let Some(msg) = MessageParser::default().parse(raw) else {
@@ -467,13 +503,52 @@ pub fn sanitize_html(html: &str, cid_map: &HashMap<String, String>) -> String {
 
     ammonia::Builder::default()
         .tags(tags)
-        .clean_content_tags(["script", "noscript", "iframe", "object", "embed", "form"].into())
+        // Removed with what's inside. A <title> (in the HTML's <head>) is the page's name, which
+        // a browser shows in the tab, never on the page.
+        .clean_content_tags(["script", "noscript", "iframe", "object", "embed", "form", "title"].into())
         .generic_attributes(generic)
         .tag_attributes(HashMap::new())
         .url_schemes(schemes)
         .link_rel(Some("noopener noreferrer"))
         .strip_comments(true)
         .clean(&html)
+        .to_string()
+}
+
+/// A signature as kept: shown in the composer itself (not a sandboxed frame), so only plain
+/// formatting stays (ammonia's defaults: no styles, scripts or handlers; links open safely).
+pub fn sanitize_signature(html: &str) -> String {
+    ammonia::Builder::default()
+        .link_rel(Some("noopener noreferrer"))
+        // A signature saved from a web page: its <title> isn't part of it.
+        .add_clean_content_tags(["title"])
+        // Signatures made elsewhere and pasted in as HTML: colours, fonts and table layouts kept
+        // (inline styles and the old attributes); scripts, handlers and the like still go.
+        .add_generic_attributes(["style", "align", "valign", "width", "height", "bgcolor"])
+        .add_tags(["font", "center"])
+        .add_tag_attributes("font", ["color", "face", "size"])
+        .add_tag_attributes("table", ["border", "cellpadding", "cellspacing"])
+        .add_tag_attributes("img", ["border"])
+        // Pictures pasted in come as data: URLs (sent as inline parts, see compose::inline_images):
+        // allowed on an <img>'s src, as an image, and nowhere else.
+        .add_url_schemes(["data"])
+        .attribute_filter(|element, attribute, value| {
+            if attribute == "style" {
+                // CSS that runs or loads code: the whole style goes.
+                let lower = value.to_ascii_lowercase();
+                let bad = ["expression", "javascript:", "behavior", "-moz-binding", "@import", "vbscript:"];
+                return (!bad.iter().any(|b| lower.contains(b))).then(|| value.into());
+            }
+            let data = value.trim_start().get(..5).is_some_and(|p| p.eq_ignore_ascii_case("data:"));
+            if !data {
+                return Some(value.into());
+            }
+            let image = ["data:image/png;", "data:image/jpeg;", "data:image/gif;", "data:image/webp;"]
+                .iter()
+                .any(|p| value.trim_start().get(..p.len()).is_some_and(|v| v.eq_ignore_ascii_case(p)));
+            (element == "img" && attribute == "src" && image).then(|| value.into())
+        })
+        .clean(html)
         .to_string()
 }
 
@@ -506,6 +581,24 @@ mod tests {
     }
 
     #[test]
+    fn signatures_keep_formatting_only() {
+        let out = sanitize_signature(r#"<p><b>Lars</b> <a href="https://x.se" onclick="x()">x.se</a></p><style>body{display:none}</style><script>1</script>"#);
+        assert!(out.contains("<b>Lars</b>") && out.contains(r#"href="https://x.se""#));
+        assert!(!out.contains("onclick") && !out.contains("<style") && !out.contains("script"));
+        // A pasted picture stays; data: anywhere else (or not an image) goes.
+        let img = sanitize_signature(r#"<p><img src="data:image/png;base64,iVBORw0KGgo=" width="120" height="40"><a href="data:text/html;base64,PHNjcmlwdD4=">x</a><img src="data:image/svg+xml;base64,PHN2Zz4="></p>"#);
+        assert!(img.contains(r#"src="data:image/png;base64,iVBORw0KGgo=""#) && img.contains(r#"width="120""#), "{img}");
+        assert!(!img.contains("data:text/html") && !img.contains("svg+xml"), "{img}");
+        // Pasted HTML: colours, fonts, tables kept; scripted CSS not.
+        let pasted = sanitize_signature(
+            r#"<table cellpadding="0" style="border-collapse:collapse"><tr><td valign="top" style="color:#c00;font-family:Georgia"><font color="navy" face="Arial">Lars</font></td><td style="background:url(javascript:alert(1))">x</td></tr></table>"#,
+        );
+        assert!(pasted.contains(r#"style="color:#c00;font-family:Georgia""#) && pasted.contains(r#"<font color="navy" face="Arial">"#), "{pasted}");
+        assert!(pasted.contains(r#"cellpadding="0""#) && pasted.contains(r#"valign="top""#), "{pasted}");
+        assert!(!pasted.contains("javascript"), "{pasted}");
+    }
+
+    #[test]
     fn strips_active_content_keeps_layout() {
         let out = sanitize_html(
             r#"<style>.a{color:red}</style><table width="100%"><tr><td style="padding:4px" onclick="x()">hi</td></tr></table><script>alert(1)</script><img src="http://t.co/p.gif">"#,
@@ -531,6 +624,17 @@ mod tests {
         for bad in ["javascript", "onload", "onerror", "<svg", "<meta", "<iframe", "<base", "<object", "alert"] {
             assert!(!lower.contains(bad), "{bad} survived: {out}");
         }
+    }
+
+    /// A newsletter's `<head><title>` isn't shown above it (only its `<style>` is kept).
+    #[test]
+    fn title_is_not_shown() {
+        let html = "<!DOCTYPE html><html lang=\"en\"><head><title>bp Australia</title><meta charset=\"utf-8\"><style>p{color:red}</style></head><body><p>Hi Lars,</p></body></html>";
+        let out = sanitize_html(html, &HashMap::new());
+        assert!(!out.contains("bp Australia"), "{out}");
+        assert!(out.contains("Hi Lars,") && out.contains("p{color:red}"), "{out}");
+        let sig = sanitize_signature("<html><head><title>Signature</title></head><body><b>Lars</b></body></html>");
+        assert!(!sig.contains("Signature") && sig.contains("<b>Lars</b>"), "{sig}");
     }
 
     /// FLOWED_IDS=1,2,3 BODIES_DB=/path/bodies.db cargo test -p mail-core real_flowed -- --ignored --nocapture

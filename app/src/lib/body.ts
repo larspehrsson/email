@@ -26,6 +26,11 @@ export function cachePut(d: MessageDetail, remote: boolean): void {
   }
 }
 
+/** Forget every cached body (images now load for a whole sender). */
+export function cacheClear(): void {
+  cache.clear();
+}
+
 /** Mark cached copies as "Load images" remembered. */
 export function cacheMarkRemoteAllowed(id: number): void {
   for (const r of [false, true]) {
@@ -138,6 +143,15 @@ export function createMessageBody(id: number) {
       api.setAllowRemote(id, true).catch(() => {});
       wantRemote = true;
       void load();
+    },
+    /** Always load images from this sender (this message's now too). */
+    alwaysFromSender() {
+      void api.allowRemoteSender(id).then(() => {
+        cacheClear();
+        cacheMarkRemoteAllowed(id);
+        wantRemote = true;
+        void load();
+      }, () => {});
     },
   };
 }

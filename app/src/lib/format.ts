@@ -24,6 +24,7 @@ function startOfToday(): number {
 
 /** Bumps at local midnight so rows re-render their relative dates. */
 const [dayStart, setDayStart] = createSignal(startOfToday());
+export { dayStart };
 let cache = new Map<number, string>();
 setInterval(() => {
   const s = startOfToday();

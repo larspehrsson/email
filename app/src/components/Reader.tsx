@@ -3,8 +3,8 @@ import { api, errorMessage, type Addr, type Attachment, type MessageDetail } fro
 import { AttachmentControl } from './Attachments';
 export { AttachmentControl };
 import { analyzePlain, collapseHtmlQuotes, QUOTE_FRAME_CSS, type QNode } from '../lib/quotes';
-import { cacheGet, cacheMarkRemoteAllowed, cachePut, onMessageReady, readyAt } from '../lib/body';
-import { avatarColor, initials, linkify, longDate } from '../lib/format';
+import { cacheClear, cacheGet, cacheMarkRemoteAllowed, cachePut, onMessageReady, readyAt } from '../lib/body';
+import { linkify, longDate } from '../lib/format';
 import { patchSelectedSummary, readerMessageId, restorePending, searchActive, selectedFolderId, selectedMessageId, selectedSummary } from '../state';
 import { HeaderActions, type ActionTarget } from './Actions';
 import { pendingSnooze } from './Snooze';
@@ -13,6 +13,7 @@ import { runAction } from '../lib/actions';
 import { ForwardIcon, ImageIcon, MailIcon, PaperclipIcon, ReplyIcon } from './Icons';
 import { DRAG } from '../lib/platform';
 import { forwardFrameKeys } from '../lib/frameKeys';
+import { peekHandlers, watchFrameLinks } from './LinkPeek';
 import { keepImageShapes, ZOOM_CSS, zoomableImages } from '../lib/images';
 import { editDraft } from '../lib/compose';
 import { allKeys, label, MOD } from '../lib/shortcuts';
@@ -68,6 +69,7 @@ function HtmlFrame(props: { doc: string }) {
     f.srcdoc = props.doc;
     f.addEventListener('load', () => {
       forwardFrameKeys(f);
+      watchFrameLinks(f);
       if (f.contentDocument) zoomableImages(f.contentDocument);
     });
     host.replaceChildren(f);
@@ -77,23 +79,8 @@ function HtmlFrame(props: { doc: string }) {
 
 // ------------------------------------------------------------- small pieces
 
-export function Avatar(props: { name: string | null; addr: string; size?: number }) {
-  const size = () => props.size ?? 40;
-  return (
-    <div
-      class="avatar"
-      style={{
-        background: avatarColor(props.addr),
-        width: `${size()}px`,
-        height: `${size()}px`,
-        'font-size': `${Math.round(size() * 0.38)}px`,
-      }}
-      aria-hidden="true"
-    >
-      {initials(props.name, props.addr)}
-    </div>
-  );
-}
+export { Avatar } from './Avatar';
+import { Avatar } from './Avatar';
 
 function addrLabel(a: Addr) {
   return a.name ? a.name : a.addr;
@@ -143,11 +130,13 @@ export function AddrList(props: { label: string; list: Addr[] }) {
 
 function LinkifiedText(props: { text: string }) {
   const parts = createMemo(() => linkify(props.text));
+  // The address shows while the pointer is over a link, at the bottom of the message's pane.
+  const peek = peekHandlers('.reader, .conv-scroll, .plain');
   return (
     <For each={parts()}>
       {(p) =>
         p.t === 'link' ? (
-          <a href={p.href} target="_blank" rel="noopener noreferrer">
+          <a href={p.href} target="_blank" rel="noopener noreferrer" {...peek}>
             {p.v}
           </a>
         ) : (
@@ -455,6 +444,21 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
                 <span class="dot-sep">·</span>
                 <button class="link-btn" onClick={() => allowRemoteFor(readerMessageId())}>
                   Load images
+                </button>
+                <span class="dot-sep">·</span>
+                <button
+                  class="link-btn"
+                  title={`Always load images in mail from ${h().from.addr}`}
+                  onClick={() => {
+                    const id = readerMessageId();
+                    if (id == null) return;
+                    void api.allowRemoteSender(id).then(() => {
+                      cacheClear();
+                      allowRemoteFor(id);
+                    }, () => {});
+                  }}
+                >
+                  Always from this sender
                 </button>
               </div>
             </Show>

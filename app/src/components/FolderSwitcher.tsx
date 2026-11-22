@@ -1,4 +1,5 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import { accountLogo } from '../lib/accountLogos';
 import { hint } from '../lib/shortcuts';
 import { Portal } from 'solid-js/web';
 import type { Account, Folder } from '../api';
@@ -18,15 +19,19 @@ export const folderPathLabel = (f: Folder) => (isRole(f) ? f.displayName : f.pat
 /** The account's marker: the same tinted letter as in the rail (colour from the address, so
  *  accounts sharing a display name still differ); the address is in the tooltip. */
 export function AccountDot(props: { account: Account; size?: number }) {
+  const logo = () => accountLogo(props.account.id);
   return (
     <span
       class="acct-dot"
-      style={{ background: accountMark(props.account).color, width: `${props.size ?? 18}px`, height: `${props.size ?? 18}px` }}
+      classList={{ 'has-logo': !!logo() }}
+      style={{ background: logo() ? '#fff' : accountMark(props.account).color, width: `${props.size ?? 18}px`, height: `${props.size ?? 18}px` }}
       title={props.account.email}
       aria-label={props.account.email}
       role="img"
     >
-      {accountMark(props.account).letter}
+      <Show when={logo()} fallback={accountMark(props.account).letter}>
+        {(src) => <img src={src()} alt="" draggable={false} />}
+      </Show>
     </span>
   );
 }

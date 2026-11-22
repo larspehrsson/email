@@ -76,6 +76,7 @@ export const COMMANDS: CommandSection[] = [
       c('star', 'Star / unstar'),
       c('snooze', 'Snooze (remind me later)…'),
       c('undo', 'Undo'),
+      c('mark-all-read', 'Mark everything in the folder read'),
     ],
   },
   {
@@ -90,6 +91,9 @@ export const COMMANDS: CommandSection[] = [
     title: 'View',
     items: [
       c('threaded', 'Group by conversation', ['Mod+T']),
+      c('sender', 'Messages from this sender (side panel)', ['Mod+2']),
+      c('contacts', 'Address book', ['Mod+Shift+B']),
+      c('source', 'Message source', ['Mod+Alt+U']),
       c('scope', 'Conversations: this folder / all mail', ['Mod+Shift+A']),
       c('shortcuts', 'Keyboard shortcuts', ['?']),
       c('settings', 'Settings', ['Mod+,']),
@@ -151,6 +155,9 @@ const PRESET_KEYS: Record<PresetId, Record<string, Key[]>> = {
     search: ['/'],
     // Gmail's "expand all" (here a toggle)
     'expand-all': [';'],
+    // Gmail has neither: Thunderbird's keys
+    source: ['Mod+U'],
+    'mark-all-read': ['C'],
   },
   thunderbird: {
     next: ['f'],
@@ -175,6 +182,8 @@ const PRESET_KEYS: Record<PresetId, Record<string, Key[]>> = {
     search: ['Mod+K', 'Mod+Shift+K'],
     // Thunderbird's "expand all threads" (here a toggle)
     'expand-all': ['*'],
+    source: ['Mod+U'],
+    'mark-all-read': ['C'],
   },
 };
 
@@ -321,7 +330,7 @@ export function commandFor(e: KeyboardEvent): string | null {
 
 const NAMES: Record<string, string> = {
   ArrowDown: '↓', ArrowUp: '↑', ArrowLeft: '←', ArrowRight: '→', Escape: 'Esc', ' ': 'Space',
-  Mod: MOD, Shift: SHIFT,
+  Mod: MOD, Shift: SHIFT, Alt: platform === 'macos' ? '⌥' : 'Alt',
 };
 
 /** A key as keycaps: "j" → ["J"], "U" → [⇧, "U"], "Mod+Shift+S" → [⌘, ⇧, "S"]. */

@@ -1,4 +1,7 @@
 import { createEffect, createResource, createSignal, For, Match, onCleanup, onMount, Show, Switch, type JSX } from 'solid-js';
+import { AiAppsSection } from './AiApps';
+import { GoogleClientNote, GoogleContactsField } from './GoogleContacts';
+import { accountLogo, logoFromFile, setAccountLogo } from '../lib/accountLogos';
 import {
   bindKey,
   COMMANDS,
@@ -17,19 +20,25 @@ import {
 } from '../lib/shortcuts';
 import { ChevronIcon, CloseIcon } from './Icons';
 import { api, errorMessage, events, type Account, type AccountDetails, type AccountStorage, type AttachmentCounts } from '../api';
-import { accountMark, accounts, notifyNewMail, reloadAccounts, setNotifyNewMail } from '../state';
+import { accountMark, accounts, notifyInUse, notifyNewMail, reloadAccounts, setAddingAccount, setNotifyInUse, setNotifyNewMail } from '../state';
 import { MARK_COLORS } from '../lib/accountMarks';
 import { AccountTools } from './AccountTools';
-import { fmtNum, fmtSize, loadPref, savePref } from '../lib/format';
+import { fmtNum, fmtSize, loadPref, savePref, smartDate } from '../lib/format';
 import { AccountDot } from './FolderSwitcher';
+import { SignaturesSection } from './SignatureSettings';
+import { autoUpdates, checkForUpdate, restartToUpdate, setAutoUpdates, updateStatus } from '../lib/updates';
+import { AiSection } from './AiSettings';
 
 // Settings: sections on the left, the chosen one on the right (each with its own heading,
 // scrolling and buttons). Fixed size, so switching sections never moves the dialog.
 
-export type SettingsSection = 'general' | 'accounts' | 'notifications' | 'keyboard' | 'troubleshooting';
+export type SettingsSection = 'general' | 'accounts' | 'signatures' | 'ai' | 'aiapps' | 'notifications' | 'keyboard' | 'troubleshooting';
 const SECTIONS: { id: SettingsSection; title: string }[] = [
   { id: 'general', title: 'General' },
   { id: 'accounts', title: 'Accounts' },
+  { id: 'signatures', title: 'Signatures' },
+  { id: 'ai', title: 'AI' },
+  { id: 'aiapps', title: 'AI apps' },
   { id: 'notifications', title: 'Notifications' },
   { id: 'keyboard', title: 'Keyboard' },
   { id: 'troubleshooting', title: 'Troubleshooting' },
@@ -268,7 +277,9 @@ function MarkField(props: { account: Account; onError: (text: string) => void })
     }
   };
   const pick = (color: string | null) => void save(props.account.markLetter, color);
+  let picInput!: HTMLInputElement;
   return (
+    <>
     <Field label="Marker">
       <input
         class="st-input st-mark-letter"
@@ -312,6 +323,35 @@ function MarkField(props: { account: Account; onError: (text: string) => void })
         </For>
       </span>
     </Field>
+    <Field label="Picture">
+      <span class="st-mark-pic">
+        <AccountDot account={props.account} size={22} />
+        <button class="link-btn" onClick={() => picInput.click()}>
+          {accountLogo(props.account.id) ? 'Change picture…' : 'Use a picture…'}
+        </button>
+        <Show when={accountLogo(props.account.id)}>
+          <button class="link-btn" onClick={() => void setAccountLogo(props.account.id, null).catch((e) => props.onError(errorMessage(e)))}>
+            Remove
+          </button>
+        </Show>
+        <input
+          ref={picInput}
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
+          hidden
+          aria-label={`Picture for ${props.account.email}`}
+          onChange={(e) => {
+            const f = e.currentTarget.files?.[0];
+            e.currentTarget.value = '';
+            if (!f) return;
+            void logoFromFile(f)
+              .then((url) => setAccountLogo(props.account.id, url))
+              .catch((err) => props.onError(errorMessage(err)));
+          }}
+        />
+      </span>
+    </Field>
+    </>
   );
 }
 
@@ -526,6 +566,13 @@ function AccountCard(props: { d: AccountDetails }) {
         </Show>
       </Field>
       <Show when={account()}>{(a) => <MarkField account={a()} onError={(text) => setMsg({ text, error: true })} />}</Show>
+      <Show when={account()?.provider === 'gmail' ? account() : undefined}>
+        {(a) => (
+          <Field label="Google Contacts">
+            <GoogleContactsField account={a()} />
+          </Field>
+        )}
+      </Show>
       <Show when={account()?.auth === 'microsoft' ? account() : undefined}>
         {(a) => <GraphField account={a()} onMessage={setMsg} />}
       </Show>
@@ -642,6 +689,18 @@ function AccountsSection() {
       <Show when={details.error}>
         <p class="st-acct-msg error">{errorMessage(details.error)}</p>
       </Show>
+      <GoogleClientNote />
+      <div class="st-add-account">
+        <button
+          class="btn secondary"
+          onClick={() => {
+            close();
+            setAddingAccount(true);
+          }}
+        >
+          + Add account
+        </button>
+      </div>
     </div>
   );
 }
@@ -688,11 +747,36 @@ function GeneralSection() {
           <span class="st-status error">{msg()}</span>
         </Field>
       </Show>
+      <RemoteSenders />
     </div>
   );
 }
 
+/** Senders whose remote images always load ("Always from this sender" in the reader). */
+function RemoteSenders() {
+  const [list, { refetch }] = createResource(() => api.remoteSenders().catch(() => [] as string[]));
+  return (
+    <Field label="Images always load from">
+      <Show when={(list() ?? []).length > 0} fallback={<span class="st-muted">No one yet. “Always from this sender” over a message’s blocked images adds them.</span>}>
+        <ul class="st-remote-senders">
+          <For each={list()}>
+            {(addr) => (
+              <li>
+                <span>{addr}</span>
+                <button class="link-btn" aria-label={`Stop loading images from ${addr}`} onClick={() => void api.setRemoteSender(addr, false).then(refetch)}>
+                  Remove
+                </button>
+              </li>
+            )}
+          </For>
+        </ul>
+      </Show>
+    </Field>
+  );
+}
+
 function NotificationsSection() {
+  const [testSent, setTestSent] = createSignal(false);
   return (
     <div class="st-body">
       <Field label="New mail">
@@ -702,10 +786,40 @@ function NotificationsSection() {
         </label>
       </Field>
       <Field label="">
-        <span class="st-muted">Only while Email isn’t the window you’re using. Click one to open the message.</span>
+        <label class="st-check">
+          <input
+            type="checkbox"
+            checked={notifyInUse()}
+            disabled={!notifyNewMail()}
+            onChange={(e) => setNotifyInUse(e.currentTarget.checked)}
+          />
+          Also while Email is the window you’re using
+        </label>
+      </Field>
+      <Field label="">
+        <span class="st-muted">Click one to open the message.</span>
+      </Field>
+      <Field label="">
+        <span class="st-muted">{testSent() ? 'Sent. Nothing showed? Look for Email in your system’s notification settings.' : 'See that they come through.'}</span>
+        <button
+          class="link-btn st-field-action"
+          onClick={() => api.testNotification().then(() => setTestSent(true), () => setTestSent(true))}
+        >
+          Send a test notification
+        </button>
       </Field>
     </div>
   );
+}
+
+function updateText(): string {
+  const s = updateStatus();
+  if (!s) return '';
+  if (s.checking) return 'Looking for a new version…';
+  if (s.ready) return `Version ${s.ready} is downloaded. It’s used once Email restarts.`;
+  if (s.error) return `Couldn’t look for a new version: ${s.error}`;
+  if (s.checked) return `Up to date (looked ${smartDate(s.checked)}).`;
+  return 'Looks shortly after Email starts, then every six hours.';
 }
 
 function TroubleshootingSection() {
@@ -715,6 +829,34 @@ function TroubleshootingSection() {
   return (
     <div class="st-body">
       <Field label="Version">{version() ?? ''}</Field>
+      <Field label="Updates">
+        <Show
+          when={updateStatus()?.supported}
+          fallback={<span class="st-muted">This copy was built on this computer and doesn’t update itself; copies installed from the GitHub releases do.</span>}
+        >
+          <label class="st-check">
+            <input type="checkbox" checked={autoUpdates()} onChange={(e) => setAutoUpdates(e.currentTarget.checked)} />
+            Look for new versions and download them
+          </label>
+        </Show>
+      </Field>
+      <Show when={updateStatus()?.supported}>
+        <Field label="">
+          <span class="st-muted st-update-state">{updateText()}</span>
+          <Show
+            when={updateStatus()?.ready}
+            fallback={
+              <button class="link-btn st-field-action" disabled={!!updateStatus()?.checking} onClick={() => void checkForUpdate()}>
+                Check now
+              </button>
+            }
+          >
+            <button class="link-btn st-field-action" onClick={act(() => restartToUpdate())}>
+              Restart to update
+            </button>
+          </Show>
+        </Field>
+      </Show>
       <Field label="App log">
         <span class="st-muted">Connections, sync, sending: what to look at when something misbehaves.</span>
         <button class="link-btn st-field-action" onClick={act(() => api.showLog())}>
@@ -746,16 +888,13 @@ function Panel() {
   let card!: HTMLDivElement;
   onMount(() => {
     card.focus();
-    const onBlur = () => close();
-    window.addEventListener('blur', onBlur);
+    // (Not closed when the window loses focus: a file dialog — a picture for a marker or a
+    // signature — takes it, and Settings must be there when it's chosen.)
     // Capture on the window: while a shortcut is being recorded the key is the shortcut (and
     // reaches nothing else, even with focus fallen out of the dialog); Esc closes. Other keys
     // go where they're typed (the password field…).
     window.addEventListener('keydown', onKey, true);
-    onCleanup(() => {
-      window.removeEventListener('blur', onBlur);
-      window.removeEventListener('keydown', onKey, true);
-    });
+    onCleanup(() => window.removeEventListener('keydown', onKey, true));
   });
 
   function onKey(e: KeyboardEvent) {
@@ -809,6 +948,15 @@ function Panel() {
             </Match>
             <Match when={section() === 'accounts'}>
               <AccountsSection />
+            </Match>
+            <Match when={section() === 'signatures'}>
+              <SignaturesSection />
+            </Match>
+            <Match when={section() === 'ai'}>
+              <AiSection />
+            </Match>
+            <Match when={section() === 'aiapps'}>
+              <AiAppsSection />
             </Match>
             <Match when={section() === 'notifications'}>
               <NotificationsSection />

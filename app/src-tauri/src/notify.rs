@@ -1,6 +1,11 @@
-//! Desktop notifications for new mail in an Inbox, shown while the window isn't the one in use,
-//! and for snoozed mail whose time came.
+//! Desktop notifications for new mail in an Inbox (also while the window is the one in use,
+//! unless turned off in Settings), and for snoozed mail whose time came.
 //! Clicking one brings the window up on the message (or, for several, on the Inbox).
+//!
+//! On macOS through UNUserNotificationCenter (`mac`): what macOS shows, lists under System
+//! Settings › Notifications, and asks permission for the first time. (notify-rust's macOS
+//! path, the old NSUserNotification, is dropped by macOS without a word.) A build that isn't an
+//! app bundle (`tauri dev`) has no bundle identifier for it, and falls back to notify-rust.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -9,8 +14,10 @@ use mail_core::model::{FolderRole, NewMessage};
 use serde::Serialize;
 use tauri::{Emitter, Manager};
 
-/// The UI's setting (Settings › Notifications), pushed at startup and on every change.
+/// The UI's settings (Settings › Notifications), pushed at startup and on every change: new
+/// mail notifies at all; and also while the window is the one in use.
 static ENABLED: AtomicBool = AtomicBool::new(true);
+static WHILE_IN_USE: AtomicBool = AtomicBool::new(true);
 
 /// Notifications whose click is still awaited, each on a thread of its own. Unattended ones
 /// pile up (GNOME keeps them until dismissed), so past this many new ones aren't clickable.
@@ -18,8 +25,9 @@ static WAITING: AtomicUsize = AtomicUsize::new(0);
 const MAX_WAITING: usize = 32;
 
 #[tauri::command]
-pub fn set_notifications(enabled: bool) {
+pub fn set_notifications(enabled: bool, while_in_use: Option<bool>) {
     ENABLED.store(enabled, Ordering::Relaxed);
+    WHILE_IN_USE.store(while_in_use.unwrap_or(true), Ordering::Relaxed);
 }
 
 #[derive(Clone, Serialize)]
@@ -29,10 +37,14 @@ struct OpenPayload {
     id: Option<i64>,
 }
 
-pub fn init() {
-    // Without this, macOS attributes the notifications (and their clicks) to another app.
+pub fn init(app: &tauri::AppHandle) {
     #[cfg(target_os = "macos")]
-    let _ = notify_rust::set_application("dev.mailclient.desktop");
+    if !mac::init(app) {
+        // Without this, macOS attributes the notifications (and their clicks) to another app.
+        let _ = notify_rust::set_application("dev.mailclient.desktop");
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
 }
 
 pub fn new_mail(app: &tauri::AppHandle, core: &Core, account_id: i64, folder_id: i64, messages: Vec<NewMessage>) {
@@ -44,7 +56,11 @@ pub fn new_mail(app: &tauri::AppHandle, core: &Core, account_id: i64, folder_id:
         .ok()
         .and_then(|fs| fs.into_iter().find(|f| f.id == folder_id))
         .is_some_and(|f| f.role == Some(FolderRole::Inbox));
-    if !is_inbox || in_use(app) {
+    if !is_inbox {
+        return;
+    }
+    if !WHILE_IN_USE.load(Ordering::Relaxed) && in_use(app) {
+        tracing::info!(folder_id, count = messages.len(), "new mail while the window is in use: no notification");
         return;
     }
     let accounts = core.accounts().unwrap_or_default();
@@ -64,6 +80,14 @@ pub fn new_mail(app: &tauri::AppHandle, core: &Core, account_id: i64, folder_id:
     }
     tracing::info!(account = account.email, count = messages.len(), "new mail notification");
     show(app, summary, body, folder_id, target, "email.arrived");
+}
+
+/// Settings › Notifications › Send a test notification: one now, whatever the window. A click
+/// only brings the window up.
+#[tauri::command]
+pub fn test_notification(app: tauri::AppHandle) {
+    tracing::info!("test notification");
+    show(&app, "Email".into(), "Notifications work: new mail shows like this while you're in another app.".into(), 0, None, "email");
 }
 
 /// Snoozed mail whose time came: a reminder you asked for, so shown even while the window is in
@@ -89,6 +113,10 @@ pub fn snooze_due(app: &tauri::AppHandle, core: &Core, account_id: i64, folder_i
 
 /// Show a notification on a thread of its own; a click opens `target` (or the folder).
 fn show(app: &tauri::AppHandle, summary: String, body: String, folder_id: i64, target: Option<i64>, category: &'static str) {
+    #[cfg(target_os = "macos")]
+    if mac::show(&summary, &body, folder_id, target) {
+        return;
+    }
     let app = app.clone();
     std::thread::spawn(move || {
         let mut n = notify_rust::Notification::new();
@@ -101,6 +129,10 @@ fn show(app: &tauri::AppHandle, summary: String, body: String, folder_id: i64, t
         }
         #[cfg(not(all(unix, not(target_os = "macos"))))]
         let _ = category;
+        // Windows names a toast by its app's AppUserModelID: the installer gives the Start menu
+        // shortcut the bundle identifier, so this says "Email" (otherwise PowerShell's).
+        #[cfg(target_os = "windows")]
+        n.app_id("dev.mailclient.desktop");
         let clickable = WAITING.fetch_add(1, Ordering::SeqCst) < MAX_WAITING;
         if clickable {
             n.action("default", "Open");
@@ -159,7 +191,130 @@ fn open(app: &tauri::AppHandle, folder_id: i64, id: Option<i64>) {
         let _ = w.show();
         let _ = w.set_focus();
     }
-    let _ = app.emit("open-message", OpenPayload { folder_id, id });
+    // 0: a test notification, nothing to open.
+    if folder_id != 0 {
+        let _ = app.emit("open-message", OpenPayload { folder_id, id });
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod mac {
+    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use block2::RcBlock;
+    use objc2::rc::Retained;
+    use objc2::runtime::{Bool, NSObject, NSObjectProtocol, ProtocolObject};
+    use objc2::{AnyThread, define_class, msg_send};
+    use objc2_foundation::{NSBundle, NSError, NSString};
+    use objc2_user_notifications::{
+        UNAuthorizationOptions, UNMutableNotificationContent, UNNotification, UNNotificationPresentationOptions,
+        UNNotificationRequest, UNNotificationResponse, UNNotificationSound, UNUserNotificationCenter,
+        UNUserNotificationCenterDelegate,
+    };
+
+    /// Set when the notification center is in use (an app bundle); clicks go to this app.
+    static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
+
+    define_class!(
+        // SAFETY: NSObject has no subclassing requirements; no Drop.
+        #[unsafe(super(NSObject))]
+        #[name = "EmailNotificationDelegate"]
+        struct Delegate;
+
+        unsafe impl NSObjectProtocol for Delegate {}
+
+        unsafe impl UNUserNotificationCenterDelegate for Delegate {
+            // Shown even while Email is the active app (a snooze coming back).
+            #[unsafe(method(userNotificationCenter:willPresentNotification:withCompletionHandler:))]
+            fn will_present(
+                &self,
+                _center: &UNUserNotificationCenter,
+                _notification: &UNNotification,
+                handler: &block2::DynBlock<dyn Fn(UNNotificationPresentationOptions)>,
+            ) {
+                handler.call((UNNotificationPresentationOptions::Banner
+                    | UNNotificationPresentationOptions::List
+                    | UNNotificationPresentationOptions::Sound,));
+            }
+
+            #[unsafe(method(userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler:))]
+            fn did_receive(
+                &self,
+                _center: &UNUserNotificationCenter,
+                response: &UNNotificationResponse,
+                handler: &block2::DynBlock<dyn Fn()>,
+            ) {
+                let id = response.notification().request().identifier().to_string();
+                if let (Some(app), Some((folder_id, target))) = (APP.get(), parse_id(&id)) {
+                    super::open(app, folder_id, target);
+                }
+                handler.call(());
+            }
+        }
+    );
+
+    /// Use the notification center, and ask for permission (macOS asks the user once). False:
+    /// not an app bundle, use notify-rust.
+    pub fn init(app: &tauri::AppHandle) -> bool {
+        if NSBundle::mainBundle().bundleIdentifier().is_none() {
+            return false;
+        }
+        let _ = APP.set(app.clone());
+        let center = UNUserNotificationCenter::currentNotificationCenter();
+        let delegate: Retained<Delegate> = unsafe { msg_send![super(Delegate::alloc().set_ivars(())), init] };
+        center.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+        // The center holds its delegate weakly: keep it for the app's life.
+        std::mem::forget(delegate);
+        let answered = RcBlock::new(|granted: Bool, error: *mut NSError| {
+            if let Some(e) = unsafe { error.as_ref() } {
+                tracing::warn!("notification permission: {}", e.localizedDescription());
+            } else if !granted.as_bool() {
+                tracing::info!("notifications are turned off for Email in System Settings");
+            }
+        });
+        center.requestAuthorizationWithOptions_completionHandler(
+            UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound,
+            &answered,
+        );
+        true
+    }
+
+    /// Post one; false when the center isn't in use (then notify-rust shows it).
+    pub fn show(summary: &str, body: &str, folder_id: i64, target: Option<i64>) -> bool {
+        if APP.get().is_none() {
+            return false;
+        }
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let content = UNMutableNotificationContent::new();
+        content.setTitle(&NSString::from_str(summary));
+        content.setBody(&NSString::from_str(body));
+        content.setSound(Some(&UNNotificationSound::defaultSound()));
+        let id = make_id(folder_id, target, SEQ.fetch_add(1, Ordering::Relaxed));
+        let request = UNNotificationRequest::requestWithIdentifier_content_trigger(&NSString::from_str(&id), &content, None);
+        let done = RcBlock::new(|error: *mut NSError| {
+            if let Some(e) = unsafe { error.as_ref() } {
+                tracing::warn!("showing a notification: {}", e.localizedDescription());
+            }
+        });
+        UNUserNotificationCenter::currentNotificationCenter().addNotificationRequest_withCompletionHandler(&request, Some(&done));
+        true
+    }
+
+    /// A notification's identifier says what a click opens: "mail.<folder>.<message or ->.<n>".
+    pub(super) fn make_id(folder_id: i64, target: Option<i64>, n: u64) -> String {
+        format!("mail.{folder_id}.{}.{n}", target.map_or("-".to_string(), |t| t.to_string()))
+    }
+
+    pub(super) fn parse_id(id: &str) -> Option<(i64, Option<i64>)> {
+        let mut parts = id.strip_prefix("mail.")?.split('.');
+        let folder_id = parts.next()?.parse().ok()?;
+        let target = match parts.next()? {
+            "-" => None,
+            t => Some(t.parse().ok()?),
+        };
+        Some((folder_id, target))
+    }
 }
 
 #[cfg(test)]
@@ -177,5 +332,14 @@ mod tests {
         assert_eq!(senders(&[msg("Ann"), msg("Bob"), msg("Cy")]), "From Ann, Bob and Cy");
         assert_eq!(senders(&[msg("Ann"), msg("Bob"), msg("Cy"), msg("Di")]), "From Ann, Bob and 2 others");
         assert_eq!(sender(&msg("")), "@example.com");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_click_finds_its_message() {
+        use super::mac::{make_id, parse_id};
+        assert_eq!(parse_id(&make_id(7, Some(1234), 3)), Some((7, Some(1234))));
+        assert_eq!(parse_id(&make_id(7, None, 4)), Some((7, None)));
+        assert_eq!(parse_id("something else"), None);
     }
 }

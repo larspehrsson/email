@@ -1,6 +1,6 @@
 # Email
 
-A fast desktop email app for Linux and macOS. All your accounts in one window, your mail kept
+A fast desktop email app for Linux, macOS and Windows. All your accounts in one window, your mail kept
 on your computer so everything opens instantly, and a keyboard for everything.
 
 <picture>
@@ -17,8 +17,18 @@ page:
 - **Fedora and other RPM-based Linux:** the `.rpm`, installed with `sudo dnf install ./Email-*.rpm`.
 - **Debian, Ubuntu:** the `.deb`, installed with `sudo apt install ./Email_*.deb`.
 - **Any other Linux:** the `.AppImage`. Make it executable and run it.
+- **Windows:** the `-setup.exe` (or the `.msi`). It isn't signed, so Windows SmartScreen asks
+  once: More info › Run anyway. To open email links with it, choose Email for "mailto" in
+  Settings › Apps › Default apps.
 
 Installing a newer build over an older one upgrades it; your mail and settings stay.
+
+**Updates come by themselves** when the build you installed has them (builds of a repository
+with the update signing key, see [DEVELOPING](docs/DEVELOPING.md#updates)): shortly after
+Email starts and every six hours it looks for a newer build, downloads it in the background,
+and **Restart to update** appears at the bottom of the sidebar. Settings › Troubleshooting ›
+Updates turns the looking off, or looks now. (The `.deb` and `.rpm` get updated too, asking for
+your password; a copy built on your own computer doesn't update itself.)
 
 ## Adding your accounts
 
@@ -42,13 +52,24 @@ arrives as it's delivered. Conversations are grouped together, even across folde
 
 **Writing mail** happens in its own window: rich text, pictures pasted into the text,
 attachments by drag and drop, replies quoted below your text, and a switch between Reply and
-Reply all. Addresses are suggested from the people you write to most. Sending waits 10 seconds
-so you can undo it.
+Reply all. Addresses are suggested from the people you write to most. Signatures (Settings ›
+Signatures, with pictures pasted in) go under your text, a default per account for new messages
+and for replies, switchable in the message. Sending waits 10 seconds so you can undo it.
 
 <img src="docs/screenshots/compose.png" alt="A compose window with address suggestions" width="600">
 
-**Search** as you type, over senders, recipients and subjects, in every folder or just the
-current one. It understands `from:`, `to:`, `subject:`, `"exact phrases"` and `-exclusions`.
+**Sort and group** the list from the View options: by date received (grouped into Today,
+Yesterday, this week's days, last weeks and months), or by sender or recipient, A to Z, with
+each person's messages together under their name, or by size, largest first, to find what
+takes the space. **Filter** it to unread or read mail, starred, or messages with attachments.
+Clicking the unread count above the list shows only unread mail (again: all of it); clicking the
+message count shows everything. In Sent and Drafts each message shows who it went to
+("To: …"), not you.
+
+![The Newsletters folder sorted by sender](docs/screenshots/sorted.png)
+
+**Search** as you type, over senders, recipients, subjects and the text of your mail (and attachment names), in every folder or just the
+current one. It understands `from:`, `to:`, `subject:`, `body:`, `"exact phrases"` and `-exclusions`.
 
 ![Search results for "from:sarah roadmap"](docs/screenshots/search.png)
 
@@ -61,6 +82,37 @@ so Outlook shows them too.
 **Snooze** reminds you of a message later: pick a time, or a day on the calendar. The message
 stays where it is and comes back to the top of your Inbox, unread, when it's due, on every
 computer you use Email on.
+
+**Help writing (AI)**, without a subscription: add your own Anthropic API key in Settings › AI,
+then ✨ AI in a message (Ctrl/⌘+J) drafts a reply or a new message from a few words, or makes
+what you wrote better, shorter, more formal or friendlier, fixes the spelling, or translates it.
+You see it first and choose whether to use it.
+
+<img src="docs/screenshots/writing-help.png" alt="Writing help drafting a reply" width="600">
+
+**An address book** (Ctrl/⌘+Shift+B): the people you keep, with their addresses, phone
+numbers, company and notes, synced both ways with Google Contacts if you like ([setup](docs/GOOGLE_CONTACTS.md)). With Google Contacts, the sidebar (switched between Mail and Contacts at its top) shows each account's contacts and its groups (Starred, Family…), and every contact's groups are on its row. Add someone from the sender panel in one click; they come first when
+you type an address.
+
+![The address book](docs/screenshots/contacts.png)
+
+**Everything from a sender** at a glance: Ctrl/⌘+2 opens a panel beside the message with all
+the mail from whoever sent it, in every folder. Select them all (Ctrl/⌘+A) and delete or archive
+at once — the quickest way to clear out a newsletter.
+
+![The sender panel beside a message, three messages picked](docs/screenshots/sender.png)
+
+**Message source** (Ctrl/⌘+U or ⌥⌘U, or right-click a message), with questions to Claude about it: why wasn't this marked as spam, is it genuine, who really sent it.
+
+**AI apps:** let Claude Desktop, Claude Code or another MCP app read, search, draft and tidy your mail (Settings › AI apps; off until you turn it on; deleting and sending always ask you first).
+
+**Sender pictures** beside each message (View options; off until you turn them on): the person's
+own photo when they're one of your Google contacts with one, else their company's logo or
+website icon, or initials. Logos are only looked up for companies you correspond with, never
+for mail in Spam.
+
+**Several at once:** Ctrl/⌘-click or Shift-click messages in the list (or Ctrl/⌘+A for all of
+them) to delete, move, mark or tag them together, or forward them as attachments.
 
 **Getting around:** fold the sidebar into a slim rail (Ctrl/⌘+1), or jump to any folder in any
 account by typing its name (Ctrl/⌘+G).
@@ -83,9 +135,17 @@ also teaches your provider's spam filter.
 
 ## Good to know
 
-- **Your mail stays on your computer.** Nothing goes anywhere but your mail servers. It's
-  stored in `~/.local/share/dev.mailclient.desktop/` on Linux and
-  `~/Library/Application Support/dev.mailclient.desktop/` on macOS.
+- **Your mail stays on your computer.** It goes nowhere but your mail servers, except what you
+  ask for: writing help and questions about a message (to Anthropic, with your own key) and
+  Google Contacts sync. Sender pictures, if you turn them on, are looked up from the sender's
+  own domain, once, and only for domains where you've written to someone or have someone in
+  your address book: a stranger's mail never makes your computer contact them. It's stored in `~/.local/share/dev.mailclient.desktop/`
+  on Linux, `~/Library/Application Support/dev.mailclient.desktop/` on macOS and
+  `%APPDATA%\dev.mailclient.desktop\` on Windows.
+- **Check a link before you click it:** point at it and the address it really opens shows at
+  the bottom of the message, with the site in bold. If the link's text is an address for one
+  site but the link goes to another, or the site's name uses look-alike international letters,
+  it says so in red.
 - **Tags and Snooze on Outlook and Microsoft 365** go through Microsoft Graph, which needs
   your permission once: Settings › Accounts › Tags & snooze › Turn on…. A work or school
   account may need your administrator to allow it first.
@@ -96,4 +156,83 @@ also teaches your provider's spam filter.
 
 ## For developers
 
-Building, testing and how it works inside: [docs/DEVELOPING.md](docs/DEVELOPING.md).
+The app is [Tauri 2](https://v2.tauri.app): a Rust core (`crates/mail-core`: sync, storage,
+search) and a SolidJS interface (`app/src`), with the desktop shell in `app/src-tauri`. How it
+works inside: [docs/DEVELOPING.md](docs/DEVELOPING.md).
+
+### What you need
+
+- **Rust**, stable, through [rustup](https://rustup.rs).
+- **Node.js** 24 (with npm).
+- **macOS:** Xcode's command line tools (`xcode-select --install`).
+- **Linux** (Debian/Ubuntu): `sudo apt install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf build-essential`.
+- **Windows:** Visual Studio's C++ build tools, WebView2 (part of Windows 11), and
+  [NASM](https://www.nasm.us) on the `PATH`.
+
+Then, once:
+
+```sh
+cd app
+npm install
+```
+
+### Run
+
+```sh
+cd app
+npm run tauri dev    # the desktop app, rebuilt as you change the code
+npm run dev          # the interface alone, in a browser (http://localhost:1420), on made-up mail
+```
+
+`npm run tauri dev` uses the same accounts and mail as an installed copy (the same data
+folder and keychain item), so quit the installed app first. `npm run dev` needs no Rust and
+touches nothing real: it runs against an in-memory mock backend (`app/src/mock.ts`), with flags
+in the URL for other situations, such as `?empty` (first start) or `?many` (six accounts).
+
+### Build
+
+```sh
+cd app
+npm run tauri build                     # installers for this system, in target/release/bundle/
+npm run tauri build -- --bundles app    # macOS: just Email.app
+```
+
+To sign a macOS build with a certificate of your own, set `APPLE_SIGNING_IDENTITY` to its name
+first. Without one the app gets no proper signature, and macOS won't show its notifications.
+The GitHub workflow (`.github/workflows/build.yml`) builds every system's installers on each push.
+
+With an Apple Developer ID, `scripts/build-mac.sh` does the whole thing on a Mac: builds
+Email.app, signs it with your Developer ID Application certificate, has Apple notarize it,
+staples the ticket and zips it (`--install` puts it in ~/Applications, `--no-notarize` only
+signs). Your certificate's name and notarization credentials (a `notarytool` keychain profile)
+go in `scripts/mac-signing.env`, which isn't committed; `scripts/build-mac.sh --help` says how.
+
+### Test
+
+```sh
+cargo test --workspace            # the Rust core
+cd app && npm run test:unit       # interface logic
+cd app && npm run test:ui         # the interface, driven in a browser against the mock
+```
+
+### Debug
+
+- **The interface:** Developer Tools are in the View menu (⌥⌘I, or Ctrl+Alt+I), in dev and
+  release builds alike.
+- **The core:** it logs to the terminal under `npm run tauri dev`, and always to `email.log`
+  (`~/Library/Logs/dev.mailclient.desktop/` on macOS, `~/.local/share/dev.mailclient.desktop/logs/`
+  on Linux). Set `RUST_LOG` for more, for example `RUST_LOG=debug npm run tauri dev`, or
+  `RUST_LOG=mail_core=debug` for the core alone.
+- **The data:** `mail.db` and `bodies.db` (SQLite) are in
+  `~/Library/Application Support/dev.mailclient.desktop/` on macOS,
+  `~/.local/share/dev.mailclient.desktop/` on Linux and `%APPDATA%\dev.mailclient.desktop\` on
+  Windows. With the app quit, deleting them makes it start over with no accounts (their
+  passwords stay in the keychain until removed there).
+
+### Clean
+
+```sh
+cargo clean                  # Rust's build output (target/, which grows to many GB)
+rm -rf app/dist              # the interface's built files
+rm -rf app/node_modules      # npm's packages (npm install brings them back)
+```

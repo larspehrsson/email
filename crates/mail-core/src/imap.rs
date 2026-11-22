@@ -708,6 +708,19 @@ impl Connection {
                 self.ensure_selected(folder).await?;
                 store(self, *uid, format!("{}FLAGS.SILENT ({flag})", if *on { "+" } else { "-" })).await?;
             }
+            ServerOp::FlagsMany { folder, uids, flag, on } => {
+                self.ensure_selected(folder).await?;
+                // A few hundred at a time keeps the command line short when UIDs are scattered.
+                for part in uids.chunks(500) {
+                    let r: Vec<_> = self
+                        .session
+                        .uid_store(uid_set(part), format!("{}FLAGS.SILENT ({flag})", if *on { "+" } else { "-" }))
+                        .await?
+                        .try_collect()
+                        .await?;
+                    drop(r);
+                }
+            }
             ServerOp::Expunge { folder, uid } => {
                 self.ensure_selected(folder).await?;
                 store(self, *uid, "+FLAGS.SILENT (\\Deleted)".into()).await?;
@@ -875,6 +888,39 @@ fn parse_header_fetch(f: &Fetch) -> Option<HeaderRecord> {
         flags: flag_bits(f),
         has_attachments: parsed.likely_attachments,
     })
+}
+
+/// An error as one readable line for the log: the IMAP parser's errors carry the server's
+/// answer as a list of byte values ("input: [42, 32, 49, …]"), which becomes the text itself,
+/// cut short; so does the copy it adds ("during parsing of …").
+pub fn readable(e: &anyhow::Error) -> String {
+    let full = format!("{e:#}");
+    let mut out = String::with_capacity(full.len().min(2000));
+    let mut rest = full.as_str();
+    while let Some(i) = rest.find("input: [") {
+        out.push_str(&rest[..i]);
+        let after = &rest[i + 8..];
+        let Some(end) = after.find(']') else {
+            rest = &rest[i..];
+            break;
+        };
+        let bytes: Vec<u8> = after[..end].split(',').filter_map(|n| n.trim().parse().ok()).collect();
+        out.push_str(&format!("input: {:?}", clip(&String::from_utf8_lossy(&bytes), 160)));
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    match out.find(" during parsing of \"") {
+        Some(i) => {
+            let quoted = &out[i + 20..];
+            format!("{} during parsing of {:?}", &out[..i], clip(quoted.trim_end_matches('"'), 160))
+        }
+        None => out,
+    }
+}
+
+fn clip(s: &str, n: usize) -> String {
+    let one: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one.chars().count() <= n { one } else { format!("{}…", one.chars().take(n).collect::<String>()) }
 }
 
 /// Compress a list of UIDs into an IMAP sequence set, e.g. `1:4,7,9:10`.
@@ -1055,6 +1101,17 @@ mod tests {
         assert_eq!(normalize_label(r"\Inbox"), r"\Inbox");
         assert_eq!(normalize_label(r#"Work/Q\"1\""#), r#"Work/Q"1""#);
         assert_eq!(normalize_label("Plain"), "Plain");
+    }
+
+    #[test]
+    fn parse_errors_read_as_text() {
+        let raw: Vec<String> = b"* 141 FETCH (UID 3081 BODYSTRUCTURE ((\"MIXED\"".iter().map(|b| b.to_string()).collect();
+        let e = anyhow::anyhow!("io: Error(Error {{ input: [{}], code: TakeWhile1 }}) during parsing of \"* 141 FETCH (UID 3081 BODYSTRUCTURE ((\\\"MIXED\\\" {}\"", raw.join(", "), "x".repeat(400));
+        let r = readable(&e);
+        assert!(r.contains(r#"input: "* 141 FETCH (UID 3081 BODYSTRUCTURE ((\"MIXED\"""#), "{r}");
+        assert!(!r.contains("42, 32"), "{r}");
+        assert!(r.len() < 500, "cut short: {r}");
+        assert_eq!(readable(&anyhow::anyhow!("plain")), "plain");
     }
 
     #[test]

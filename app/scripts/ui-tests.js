@@ -36,6 +36,13 @@ async function open({ threaded, query = '' }) {
   const context = await browser.newContext({ viewport: { width: 1400, height: 850 }, locale: 'en-US', timezoneId: 'America/New_York' });
   await context.clock.setFixedTime(NOW);
   await context.addInitScript((t) => localStorage.setItem('ui.threaded', JSON.stringify(t)), threaded);
+  // The app's window refuses blob: pictures (its CSP allows data:); a browser tab wouldn't, so
+  // make them fail here too.
+  await context.addInitScript(() => {
+    URL.createObjectURL = () => {
+      throw new Error('blob: URLs are refused in the app window (CSP img-src)');
+    };
+  });
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -113,6 +120,29 @@ for (const threaded of [false, true]) {
         await page.fill('.search-field input', '');
         await hasText(selected(page), before, 'the earlier selection');
         await hasText(reader(page), before, 'the earlier message open');
+        assert.deepEqual(errors, []);
+      } finally {
+        await close();
+      }
+    });
+
+    test('Sent names who it went to; the Inbox who it came from', async () => {
+      const { page, errors, close } = await open({ threaded });
+      try {
+        const from = page.locator('.folder-layer .row .row-from').first();
+        const matches = async (re, what) => {
+          const end = Date.now() + 3000;
+          let got = null;
+          while (Date.now() < end) {
+            got = (await from.textContent({ timeout: 200 }).catch(() => null))?.trim();
+            if (got && re.test(got)) return got;
+            await new Promise((r) => setTimeout(r, 50));
+          }
+          assert.fail(`${what}: got "${got}"`);
+        };
+        await matches(/^(?!To:)\S/, 'the Inbox shows senders');
+        await page.locator('.sidebar button.folder', { hasText: /^Sent$/ }).first().click();
+        await matches(/^To: \S/, 'Sent shows the recipient');
         assert.deepEqual(errors, []);
       } finally {
         await close();
@@ -229,6 +259,41 @@ describe('compose', () => {
 });
 
 describe('reader', () => {
+  test('pointing at a link shows where it goes, and text that pretends to be another site is called out', async () => {
+    const { page, errors, close } = await open({ threaded: false, query: '&picture' });
+    try {
+      await page.locator('.folder-layer .row', { hasText: 'picture as the body' }).first().click();
+      const frame = page.frameLocator('.reader iframe').first();
+      await frame.locator('img').waitFor();
+      await frame.locator('body').evaluate((b) => {
+        b.insertAdjacentHTML(
+          'afterbegin',
+          '<p><a id="fake" href="https://fb-login.example/verify?u=1">https://www.facebook.com/security</a></p>' +
+            '<p><a id="fine" href="https://www.facebook.com/help/">Help Centre</a></p>',
+        );
+      });
+      const peek = page.locator('.link-peek');
+      await frame.locator('#fine').hover();
+      await peek.waitFor();
+      assert.equal(await peek.locator('.lp-host').textContent(), 'www.facebook.com');
+      assert.equal(await peek.locator('.lp-warn').count(), 0, 'a link in words has nothing to compare');
+
+      await frame.locator('#fake').hover();
+      await hasText(peek.locator('.lp-host'), 'fb-login.example', 'the real site, in bold');
+      assert.match(await peek.locator('.lp-url').textContent(), /^https:\/\/fb-login\.example\/verify\?u=1$/);
+      assert.match(await peek.locator('.lp-warn').textContent(), /says facebook\.com, but the link goes to fb-login\.example/);
+      // It stays inside the reader.
+      const [box, pane] = await Promise.all([peek.boundingBox(), page.locator('.reader iframe').first().boundingBox()]);
+      assert.ok(box.x >= pane.x && box.x + box.width <= pane.x + pane.width + 1, `inside the message (${JSON.stringify(box)} in ${JSON.stringify(pane)})`);
+
+      await page.locator('.reader-subject').hover();
+      await peek.waitFor({ state: 'detached' });
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('a picture wider than the reader shrinks and keeps its shape', async () => {
     const { page, errors, close } = await open({ threaded: false, query: '&picture' });
     try {
@@ -367,8 +432,9 @@ describe('selected row colours', () => {
       assert.equal(await page.evaluate(() => document.activeElement?.tagName), 'IFRAME');
       assert.equal(await icon(), blue, 'still blue with the focus in the message');
       // another window in front, then back by a click into the body: only the frame is focused
-      await page.locator('.reader h1').first().click();
-      assert.notEqual(await page.evaluate(() => document.activeElement?.tagName), 'IFRAME');
+      // the focus back on the page (the list: the same message stays open)
+      await page.locator('.folder-layer .row.selected').first().click();
+      await page.waitForFunction(() => document.activeElement?.tagName !== 'IFRAME');
       await page.evaluate(() => window.dispatchEvent(new Event('blur')));
       await page.waitForTimeout(150);
       assert.notEqual(await icon(), blue, 'grey in the background');
@@ -565,6 +631,33 @@ describe('snooze', () => {
 });
 
 describe('search', () => {
+  test('the open message stays when the search finds it beyond the first page of results', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.locator('.folder-layer .row').first().click();
+      await page.keyboard.press('End');
+      const row = page.locator('.folder-layer .row.selected');
+      await row.waitFor();
+      const subject = (await row.locator('.row-subject').textContent()).trim();
+      const sender = (await row.locator('.row-from, .row-sender').first().textContent()).trim();
+      await hasText(reader(page), subject, 'the oldest message open');
+      await page.fill('.search-field input', sender);
+      await page.waitForSelector('.search-layer .row');
+      const count = page.locator('.search-count span').first();
+      await page.waitForFunction(() => /\d+ results?$/.test(document.querySelector('.search-count span')?.textContent?.trim() ?? ''));
+      const total = Number((await count.textContent()).replace(/[^\d]/g, ''));
+      assert.ok(total > 200, `beyond the first page of 200 (${total} results)`);
+      await page.waitForTimeout(800);
+      assert.equal((await reader(page).textContent()).trim(), subject, 'still open: the search found it');
+      // and one the search doesn't find goes
+      await page.fill('.search-field input', 'zzz-nothing-like-this');
+      await page.waitForFunction((s) => ![...document.querySelectorAll('h1')].some((h) => h.textContent?.trim() === s), subject);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('deleting a result moves on to the next one', async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {
@@ -579,6 +672,48 @@ describe('search', () => {
       const sel = page.locator('.search-layer .row.selected .row-subject').first();
       await hasText(sel, subjects[1].trim(), 'the next result is selected');
       await hasText(reader(page), subjects[1].trim(), 'and open');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('words in the text find mail; the Text chip and body: limit it', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const count = async (q) => {
+        await page.fill('.search-field input', q);
+        await page.waitForTimeout(400);
+        return page.locator('.search-layer .row').count();
+      };
+      // "package" is only in the text of the order mails ("your package is on its way").
+      assert.ok((await count('package')) > 0, 'found by its text');
+      const subjects = await page.locator('.search-layer .row .row-subject').allTextContents();
+      assert.ok(subjects.every((s) => !/package/i.test(s)), `none by its subject: ${subjects.join(' | ')}`);
+      assert.ok((await count('body:package')) > 0, 'body: finds it');
+      assert.equal(await count('subject:package'), 0, 'not in a subject');
+      // Text off: plain words skip it (the choice is kept, so it's put back).
+      await count('package');
+      const chip = page.locator('.field-chip', { hasText: 'Text' });
+      assert.equal(await chip.getAttribute('aria-pressed'), 'true', 'on by default');
+      await chip.click();
+      await page.waitForTimeout(400);
+      assert.equal(await page.locator('.search-layer .row').count(), 0, 'Text off: not found');
+      await chip.click();
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('a saved choice of every field from before includes the text', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.evaluate(() => localStorage.setItem('ui.searchFields', JSON.stringify(['sender', 'recipients', 'subject'])));
+      await page.reload();
+      await page.fill('.search-field input', 'package');
+      await page.locator('.field-chip', { hasText: 'Text' }).waitFor();
+      assert.equal(await page.locator('.field-chip', { hasText: 'Text' }).getAttribute('aria-pressed'), 'true');
       assert.deepEqual(errors, []);
     } finally {
       await close();
@@ -631,7 +766,7 @@ describe('compose', () => {
       });
       const img = editor.locator('img[src^="data:image/png;base64,"]');
       await img.waitFor();
-      assert.match(await editor.innerHTML(), /Look:\s*(&nbsp;)?\s*<img/);
+      assert.match(await editor.innerHTML(), /Look:[\s\S]*?<img[^>]*src="data:image\/png/);
       assert.deepEqual(errors, []);
     } finally {
       await close();
@@ -743,7 +878,12 @@ describe('accounts', () => {
   test('a Microsoft account can turn on tags and snooze', async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {
-      await page.locator('[aria-label="Add account"]').first().click();
+      // From Settings › Accounts (the sidebar has no + any more).
+      assert.equal(await page.locator('.sidebar [aria-label="Add account"]').count(), 0);
+      await page.keyboard.press('Control+,');
+      await page.locator('.settings .st-nav-item', { hasText: 'Accounts' }).click().catch(() => {});
+      await page.getByRole('button', { name: '+ Add account' }).click();
+      assert.equal(await page.locator('.settings').count(), 0, 'Settings makes way for the form');
       await page.fill('input[placeholder="you@example.com"]', 'jane@outlook.com');
       await page.getByRole('button', { name: 'Continue with Microsoft' }).click();
       await page.waitForSelector('.sidebar .account-name:has-text("jane@outlook.com")', { timeout: 15000 });
@@ -785,6 +925,1119 @@ describe('accounts', () => {
       await hasText(dot, 'W', 'the marker letter');
       assert.equal(await dot.evaluate((e) => getComputedStyle(e).backgroundColor), 'rgb(65, 200, 182)');
       assert.deepEqual(await names(), moved);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('sorting', () => {
+  /** The list's canvas in DOM order: headers ({ head, count }) and rows ({ from, unread }). */
+  const listed = (page) =>
+    page.locator('.folder-layer .list-canvas').evaluate((c) =>
+      [...c.children].map((el) =>
+        el.classList.contains('group-head')
+          ? { head: el.querySelector('.group-label')?.textContent ?? '', count: el.querySelector('.group-count')?.textContent ?? null }
+          : { from: el.querySelector('.row-from')?.textContent ?? '', unread: el.classList.contains('unread') },
+      ),
+    );
+  async function sortBy(page, label) {
+    await page.click('.view-menu-btn');
+    await page.locator('.view-menu .vm-item', { hasText: label }).click();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+  }
+
+  test('by date, the list is grouped into periods, newest first', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const items = await listed(page);
+      const heads = items.filter((x) => x.head != null).map((x) => x.head);
+      assert.ok(items[0].head != null, 'a header comes first');
+      const order = ['Today', 'Yesterday', 'Sunday', 'Saturday', 'Friday', 'Thursday', 'Wednesday', 'Tuesday', 'Monday', 'Last week', 'Two weeks ago', 'Three weeks ago', 'September', 'August'];
+      const ranks = heads.map((h) => order.indexOf(h)).filter((r) => r >= 0);
+      assert.ok(ranks.length >= 2, `known periods among ${heads}`);
+      assert.deepEqual(ranks, [...ranks].sort((a, b) => a - b), `periods in order: ${heads}`);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('by sender: one header per sender over their messages; conversations are off; N follows the order', async () => {
+    const { page, errors, close } = await open({ threaded: true });
+    try {
+      await sortBy(page, 'From');
+      // Down to where the first sender's messages end and the next one's begin.
+      const firstCount = Number(await page.locator('.folder-layer .group-head .group-count').first().textContent());
+      await page.locator('.folder-layer .list-scroll').evaluate((el, n) => (el.scrollTop = (n - 4) * 72), firstCount);
+      await page.waitForTimeout(300);
+      await page.click('.view-menu-btn');
+      assert.equal(await page.locator('.view-menu .vm-item', { hasText: 'Group by conversation' }).getAttribute('aria-disabled'), 'true');
+      await page.keyboard.press('Escape');
+      const items = await listed(page);
+      let head = null;
+      const heads = [];
+      for (const x of items) {
+        if (x.head != null) {
+          head = x.head;
+          heads.push(head.toLowerCase());
+        } else if (x.from && head != null) assert.equal(x.from.toLowerCase(), head.toLowerCase(), 'each row under its sender');
+      }
+      // A boundary: the rows above the header are someone else's.
+      const k = items.findIndex((x) => x.head != null);
+      assert.ok(k > 0, 'a header with rows above it');
+      assert.notEqual(items[k - 1].from.toLowerCase(), items[k].head.toLowerCase(), 'the sender changes at the header');
+      assert.ok(Number(items[k].count) > 0, 'with a count');
+      assert.deepEqual(heads, [...heads].sort(), 'senders A to Z');
+      // N goes to the first unread one in this order.
+      await page.locator('.folder-layer .list-scroll').evaluate((el) => (el.scrollTop = 0));
+      await page.waitForTimeout(300);
+      const top = (await listed(page)).filter((x) => x.head == null);
+      const firstUnread = top.findIndex((x) => x.unread);
+      assert.ok(firstUnread >= 0, 'an unread one near the top');
+      await page.locator('.folder-layer .list-scroll').focus();
+      await page.keyboard.press('n');
+      await page.waitForTimeout(400);
+      assert.equal(await page.locator('.folder-layer .row.selected').getAttribute('id'), `row-${firstUnread}`);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('archiving in a group takes one off its count; undo puts it back', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await sortBy(page, 'From');
+      const first = page.locator('.folder-layer .group-head').first();
+      const before = Number(await first.locator('.group-count').textContent());
+      await page.locator('.folder-layer .row').first().click();
+      await page.waitForTimeout(300);
+      await page.locator('.reader [aria-label="Archive"]').first().click();
+      await hasText(first.locator('.group-count'), String(before - 1), 'one fewer in the group');
+      await page.locator('.toast button', { hasText: 'Undo' }).click();
+      await page.waitForTimeout(400);
+      await hasText(page.locator('.folder-layer .group-head').first().locator('.group-count'), String(before), 'back again');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('group headers', () => {
+  test("a header's click picks its group; its trash deletes them all after asking", async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.click('.view-menu-btn');
+      await page.locator('.view-menu .vm-item', { hasText: 'From' }).click();
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(400);
+      // A sender with several messages.
+      const heads = page.locator('.folder-layer .group-head');
+      const counts = await heads.locator('.group-count').allTextContents();
+      const k = counts.findIndex((c) => Number(c) >= 2);
+      assert.ok(k >= 0, `a group of two or more: ${counts}`);
+      const head = heads.nth(k);
+      const n = Number(counts[k]);
+      const label = (await head.locator('.group-label').textContent()).trim();
+      await head.click();
+      await hasText(page.locator('.multi-pane .reader-subject'), `${n} messages selected`, 'the group picked');
+      await page.keyboard.press('Escape');
+      await head.hover();
+      await head.locator('.group-del').click();
+      assert.match(await page.locator('.confirm-backdrop .confirm-text').textContent(), new RegExp(`Delete ${n} messages in`));
+      await page.locator('.confirm-backdrop .btn.danger').click();
+      await page.locator('.toast', { hasText: `Deleted ${n} messages` }).waitFor();
+      await page.waitForTimeout(300);
+      const left = await page.locator('.folder-layer .group-head .group-label').allTextContents();
+      assert.ok(!left.map((x) => x.trim()).includes(label), 'the group is gone');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('size and filters', () => {
+  const sizeOf = (t) => {
+    const [n, u] = t.trim().split(' ');
+    return Number(n) * ({ B: 1, KB: 1024, MB: 2 ** 20, GB: 2 ** 30 }[u] ?? 1);
+  };
+  async function menu(page, label) {
+    await page.click('.view-menu-btn');
+    await page.locator('.view-menu .vm-item', { hasText: label }).click();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+  }
+
+  test('by size: largest first, under size ranges, sizes shown', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await menu(page, 'Size');
+      const sizes = await page.locator('.folder-layer .row .row-size').allTextContents();
+      assert.ok(sizes.length > 5, 'sizes on the rows');
+      const bytes = sizes.map(sizeOf);
+      assert.deepEqual(bytes, [...bytes].sort((a, b) => b - a), `largest first: ${sizes.slice(0, 8)}`);
+      const head = await page.locator('.folder-layer .group-head .group-label').first().textContent();
+      assert.match(head, /^(Huge|Very large|Large|Medium|Small|Tiny) \(/);
+      assert.ok(Number(await page.locator('.folder-layer .group-head .group-count').first().textContent()) > 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('unread only: the list shows just those, says so, and the one opened stays', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const all = await page.locator('.folder-layer .list-sub').textContent();
+      await menu(page, 'Unread only');
+      await page.waitForSelector('.folder-layer .filter-bar');
+      assert.match(await page.locator('.folder-layer .filter-what').textContent(), /Unread/);
+      const rows = page.locator('.folder-layer .row');
+      const n = await rows.count();
+      assert.ok(n > 0);
+      assert.equal(await page.locator('.folder-layer .row:not(.unread)').count(), 0, 'only unread rows');
+      assert.notEqual(await page.locator('.folder-layer .list-sub').textContent(), all, 'fewer messages');
+      // Opening one reads it; it stays (with the others) until something else is opened.
+      await rows.first().click();
+      await page.waitForTimeout(1200);
+      const subject = await selected(page).textContent();
+      assert.equal(await page.locator('.folder-layer .row', { hasText: subject }).count(), 1, 'the opened one stays');
+      // Show all again.
+      await page.locator('.folder-layer .filter-clear').click();
+      await page.waitForTimeout(400);
+      assert.equal(await page.locator('.folder-layer .filter-bar').count(), 0);
+      assert.ok((await page.locator('.folder-layer .row:not(.unread)').count()) > 0, 'read ones back');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('the header counts: unread shows only unread (again: all), the message count shows all', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const unread = page.locator('.folder-layer .list-sub .count-unread');
+      const bar = page.locator('.folder-layer .filter-bar');
+      await unread.click();
+      await bar.waitFor();
+      assert.match(await page.locator('.folder-layer .filter-what').textContent(), /Unread/);
+      assert.equal(await unread.getAttribute('aria-pressed'), 'true');
+      // The list reloads after the bar shows: wait for it.
+      const readRows = page.locator('.folder-layer .row:not(.unread)');
+      const settles = async (ok, what) => {
+        const end = Date.now() + 3000;
+        while (!ok(await readRows.count())) {
+          if (Date.now() > end) assert.fail(`${what}: ${await readRows.count()} read rows`);
+          await page.waitForTimeout(50);
+        }
+      };
+      await settles((n) => n === 0, 'only unread rows');
+      await unread.click();
+      await bar.waitFor({ state: 'detached' });
+      assert.equal(await unread.getAttribute('aria-pressed'), 'false');
+      await settles((n) => n > 0, 'read ones back');
+      // The message count shows all, from any filter.
+      await unread.click();
+      await bar.waitFor();
+      await page.locator('.folder-layer .list-sub .count-btn', { hasText: 'messages' }).click();
+      await bar.waitFor({ state: 'detached' });
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('with attachments, in conversations too', async () => {
+    const { page, errors, close } = await open({ threaded: true });
+    try {
+      await menu(page, 'With attachments only');
+      await page.waitForSelector('.folder-layer .filter-bar');
+      const rows = await page.locator('.folder-layer .row').count();
+      assert.ok(rows > 0, 'some conversations with attachments');
+      assert.equal(await page.locator('.folder-layer .row').filter({ hasNot: page.locator('.clip') }).count(), 0, 'each shows a paperclip');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('folder menu', () => {
+  test('right-click a folder: Mark all as read', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const inbox = page.locator('.sidebar .folder', { hasText: 'Inbox' }).first();
+      const badge = inbox.locator('.badge');
+      assert.ok(Number((await badge.textContent()).replace(/\D/g, '')) > 0, 'unread to begin with');
+      await inbox.click({ button: 'right' });
+      await page.locator('.ctx-menu .vm-item', { hasText: 'Mark all as read' }).click();
+      await page.waitForSelector('.toast:has-text("as read")');
+      await page.waitForTimeout(300);
+      assert.equal(await badge.count(), 0, 'no unread badge');
+      assert.equal(await page.locator('.folder-layer .row.unread').count(), 0, 'no unread rows');
+      // Nothing left: the item is greyed out.
+      await inbox.click({ button: 'right' });
+      assert.equal(await page.locator('.ctx-menu .vm-item', { hasText: 'Mark all as read' }).isDisabled(), true);
+      await page.keyboard.press('Escape');
+      assert.equal(await page.locator('.ctx-menu').count(), 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('signatures', () => {
+  test('made in Settings, a new message gets the account default; it can be switched or taken off', async () => {
+    const { page, errors, context, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+,' : 'Control+,');
+      await page.locator('.st-nav-item', { hasText: 'Signatures' }).click();
+      await page.locator('.sig-add').click();
+      await page.waitForFunction(() => document.querySelector('.sig-name')?.value === 'Signature');
+      await page.locator('.sig-name').fill('Work');
+      await page.locator('.sig-editor .ProseMirror').click();
+      await page.keyboard.type('Lars Pehrsson, Example AB');
+      await page.waitForTimeout(700);
+      await page.locator('.sig-add').click();
+      await page.waitForFunction(() => document.querySelector('.sig-name')?.value === 'Signature 2');
+      await page.locator('.sig-name').fill('Short');
+      await page.locator('.sig-editor .ProseMirror').click();
+      await page.keyboard.type('/L');
+      await page.waitForTimeout(700);
+      assert.deepEqual(await page.locator('.sig-item').allTextContents(), ['Work', 'Short']);
+      await page.locator('select.sig-default').first().selectOption({ label: 'Work' });
+      await page.waitForTimeout(200);
+      await page.keyboard.press('Escape');
+      const popup = context.waitForEvent('page');
+      await page.keyboard.press('c');
+      const w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      await w.locator('.cmp-sig-body').waitFor();
+      assert.equal((await w.locator('.cmp-sig-body').textContent()).trim(), 'Lars Pehrsson, Example AB');
+      // The picker shows the one in use (not "No signature").
+      await w.waitForTimeout(300);
+      assert.equal(await w.locator('select.cmp-sig-select').evaluate((e) => e.options[e.selectedIndex]?.text), 'Work');
+      await w.locator('select.cmp-sig-select').selectOption({ label: 'Short' });
+      await hasText(w.locator('.cmp-sig-body'), '/L', 'switched');
+      await w.locator('select.cmp-sig-select').selectOption({ label: 'No signature' });
+      await w.waitForTimeout(100);
+      assert.equal(await w.locator('.cmp-sig-body').count(), 0, 'taken off');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('signature defaults', () => {
+  test("choosing one account's default leaves the others' as they were", async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+,' : 'Control+,');
+      await page.locator('.st-nav-item', { hasText: 'Signatures' }).click();
+      for (const name of ['Work', 'Home', 'Short']) {
+        await page.locator('.sig-add').click();
+        await page.waitForTimeout(150);
+        await page.locator('.sig-name').fill(name);
+        await page.waitForTimeout(650);
+      }
+      const selects = page.locator('select.sig-default');
+      assert.ok((await selects.count()) >= 4, 'two accounts, two choices each');
+      const shown = () => selects.evaluateAll((els) => els.map((e) => e.options[e.selectedIndex]?.text));
+      await selects.nth(0).selectOption({ label: 'Home' });
+      await page.waitForTimeout(250);
+      await selects.nth(1).selectOption({ label: 'Short' });
+      await page.waitForTimeout(250);
+      await selects.nth(2).selectOption({ label: 'Work' });
+      await page.waitForTimeout(250);
+      await selects.nth(3).selectOption({ label: 'Home' });
+      await page.waitForTimeout(400);
+      assert.deepEqual((await shown()).slice(0, 4), ['Home', 'Short', 'Work', 'Home']);
+      // Renaming a signature (the list reloads) changes no one's choice either.
+      await page.locator('.sig-item', { hasText: 'Work' }).click();
+      await page.locator('.sig-name').fill('Work 2');
+      await page.waitForTimeout(800);
+      assert.deepEqual((await shown()).slice(0, 4), ['Home', 'Short', 'Work 2', 'Home']);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('signature html', () => {
+  test('a signature pasted as HTML keeps its colours, opens as HTML again, and goes into the message', async () => {
+    const { page, errors, context, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+,' : 'Control+,');
+      await page.locator('.st-nav-item', { hasText: 'Signatures' }).click();
+      await page.locator('.sig-add').click();
+      await page.waitForFunction(() => document.querySelector('.sig-name')?.value === 'Signature');
+      await page.locator('.sig-html-btn').click();
+      assert.equal(await page.locator('.sig-editor').isVisible(), false);
+      await page.locator('textarea.sig-html').fill('<p style="color:#c00">Lars</p><table><tr><td style="color:navy">PaperCut</td></tr></table>');
+      await page.waitForTimeout(800);
+      await page.locator('.sig-preview p[style*="color"]').waitFor();
+      assert.equal(await page.locator('.sig-html-btn').getAttribute('aria-pressed'), 'true');
+      // Going back to the simple editor would lose the colours: asked first.
+      await page.locator('.sig-html-btn').click();
+      await page.locator('.confirm-backdrop').waitFor();
+      await page.locator('.confirm-backdrop .btn', { hasText: 'Cancel' }).click();
+      assert.equal(await page.locator('textarea.sig-html').count(), 1, 'still HTML');
+      await page.locator('select.sig-default').first().selectOption({ label: 'Signature' });
+      await page.waitForTimeout(200);
+      await page.keyboard.press('Escape');
+      const popup = context.waitForEvent('page');
+      await page.keyboard.press('c');
+      const w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      await w.locator('.cmp-sig-body p[style*="color"]').waitFor();
+      assert.match(await w.locator('.cmp-sig-body').textContent(), /PaperCut/);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('pictures in a message', () => {
+  test('a picture pasted into the message goes in where the cursor is, not attached', async () => {
+    const { page, errors, context, close } = await open({ threaded: false });
+    try {
+      const popup = context.waitForEvent('page');
+      await page.keyboard.press('c');
+      const w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      const body = w.locator('.cmp-editor .ProseMirror');
+      await body.waitFor();
+      await body.click();
+      await w.keyboard.type('Here it is: ');
+      await body.evaluate(async (el) => {
+        const c = document.createElement('canvas');
+        c.width = 3000;
+        c.height = 1500;
+        const g = c.getContext('2d');
+        g.fillStyle = '#3a7';
+        g.fillRect(0, 0, 3000, 1500);
+        const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+        const dt = new DataTransfer();
+        dt.items.add(new File([blob], 'shot.png', { type: 'image/png' }));
+        el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      });
+      const img = w.locator('.cmp-editor img[src^="data:image/"]');
+      await img.waitFor();
+      assert.equal(await img.evaluate((i) => i.decode().then(() => i.naturalWidth)), 1600, 'scaled down');
+      assert.ok(Number(await img.getAttribute('width')) <= 640);
+      assert.equal(await w.locator('.cmp-att').count(), 0, 'not an attachment');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('signature pictures', () => {
+  test('a picture pasted or chosen goes in, scaled, and shows in the composer', async () => {
+    const { page, errors, context, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+,' : 'Control+,');
+      await page.locator('.st-nav-item', { hasText: 'Signatures' }).click();
+      await page.locator('.sig-add').click();
+      await page.waitForFunction(() => document.querySelector('.sig-name')?.value === 'Signature');
+      await page.locator('.sig-editor .ProseMirror').click();
+      await page.keyboard.type('Lars ');
+      // Paste a 2000×1000 picture (a big screenshot): it comes in scaled down to 800 wide.
+      await page.locator('.sig-editor .ProseMirror').evaluate(async (el) => {
+        const c = document.createElement('canvas');
+        c.width = 2000;
+        c.height = 1000;
+        const g = c.getContext('2d');
+        g.fillStyle = '#e33';
+        g.fillRect(0, 0, 2000, 1000);
+        const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+        const dt = new DataTransfer();
+        dt.items.add(new File([blob], 'logo.png', { type: 'image/png' }));
+        el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      });
+      const img = page.locator('.sig-editor img[src^="data:image/png"]');
+      await img.waitFor();
+      const natural = await img.evaluate((i) => (i.decode ? i.decode().then(() => i.naturalWidth) : i.naturalWidth));
+      assert.equal(natural, 800, 'scaled down');
+      assert.ok(Number(await img.getAttribute('width')) <= 300, 'shown at most 300 wide');
+      // And one chosen with the button.
+      const png = await page.evaluate(() => {
+        const c = document.createElement('canvas');
+        c.width = c.height = 40;
+        c.getContext('2d').fillRect(0, 0, 40, 40);
+        return c.toDataURL('image/png').split(',')[1];
+      });
+      await page.locator('.sig-edit input[type="file"]').setInputFiles({ name: 'dot.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
+      // (ProseMirror puts spacer <img>s of its own around inline nodes: count pictures.)
+      await page.waitForFunction(() => document.querySelectorAll('.sig-editor img[src^="data:"]').length === 2);
+      await page.waitForTimeout(800);
+      await page.locator('select.sig-default').first().selectOption({ label: 'Signature' });
+      await page.waitForTimeout(200);
+      await page.keyboard.press('Escape');
+      const popup = context.waitForEvent('page');
+      await page.keyboard.press('c');
+      const w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      await w.locator('.cmp-sig-body img').first().waitFor();
+      assert.equal(await w.locator('.cmp-sig-body img[src^="data:image/png"]').count(), 2, 'both in the preview');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('sender pane', () => {
+  test('shows everything from the sender; select all, delete, undo', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.locator('.folder-layer .row').first().click();
+      const from = (await page.locator('.folder-layer .row.selected .row-from').textContent()).trim();
+      await page.keyboard.press('ControlOrMeta+2');
+      await hasText(page.locator('.sp-name'), from, 'the sender of the message on screen');
+      /** The sender's total ("12 messages", "3 of 12 selected"). */
+      const count = async () => {
+        const t = await page.locator('.sp-all').textContent();
+        return Number((t.includes(' of ') ? t.split(' of ')[1] : t).replace(/[^\d]/g, ''));
+      };
+      const before = await count();
+      assert.ok(before >= 1);
+      assert.equal(await page.locator('.sp-row.current').count(), 1, 'the open one is marked');
+      assert.equal(await page.locator('.sp-row input[type="checkbox"]').count(), 0, 'no tick boxes');
+      // A click picks one; ⌘/Ctrl+A in the panel all of them.
+      await page.locator('.sp-row').first().click();
+      assert.equal(await page.locator('.sp-row.on').count(), 1);
+      await page.keyboard.press('ControlOrMeta+a');
+      // (Everything from the sender comes in first, then it's all picked.)
+      await page.waitForFunction(() => document.querySelectorAll('.sp-row.on').length > 1);
+      const picked = await page.locator('.sp-row.on').count();
+      assert.equal(picked, await page.locator('.sp-row').count(), 'all shown are picked');
+      assert.equal(await page.locator('.folder-layer .multi-pane').count(), 0, "the list's selection is its own");
+      await page.keyboard.press('Delete');
+      if (picked > 1) await page.locator('.confirm-backdrop .btn.danger').click();
+      await page.locator('.toast', { hasText: 'Deleted' }).waitFor();
+      await page.waitForFunction(
+        (n) => {
+          const t = document.querySelector('.sp-all')?.textContent ?? '';
+          return Number((t.includes(' of ') ? t.split(' of ')[1] : t).replace(/[^\d]/g, '')) === n;
+        },
+        before - picked,
+      );
+      await page.locator('.toast button', { hasText: 'Undo' }).click();
+      await page.waitForFunction((n) => {
+        const t = document.querySelector('.sp-all')?.textContent ?? '';
+        return Number((t.includes(' of ') ? t.split(' of ')[1] : t).replace(/[^\d]/g, '')) === n;
+      }, before);
+      // Off again, remembered.
+      await page.keyboard.press('ControlOrMeta+2');
+      assert.equal(await page.locator('.sender-pane').count(), 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('images', () => {
+  test('always from this sender: its other mail loads images too; Settings lists it', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.fill('.search-field input', 'from:lumengoods');
+      await page.waitForSelector('.search-layer .row');
+      await page.waitForTimeout(400);
+      const fromSender = page.locator('.search-layer .row');
+      assert.ok((await fromSender.count()) >= 2, 'two from the sender');
+      await fromSender.nth(0).click();
+      const banner = page.locator('.reader .remote-banner');
+      await banner.waitFor();
+      await banner.getByRole('button', { name: 'Always from this sender' }).click();
+      await page.waitForTimeout(500);
+      assert.equal(await banner.count(), 0, 'loaded');
+      await fromSender.nth(1).click();
+      await page.waitForTimeout(800);
+      assert.equal(await page.locator('.reader .remote-banner').count(), 0, 'the next one too');
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'General' }).click();
+      await page.locator('.st-remote-senders li').first().waitFor();
+      assert.match(await page.locator('.st-remote-senders').textContent(), /lumen/i);
+      await page.locator('.st-remote-senders .link-btn').first().click();
+      await page.waitForTimeout(200);
+      assert.equal(await page.locator('.st-remote-senders li').count(), 0, 'removed');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('account picture', () => {
+  test('a picture of your own for an account shows in the sidebar and the sync status', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'Accounts' }).click();
+      const png = await page.evaluate(() => {
+        const c = document.createElement('canvas');
+        c.width = c.height = 300;
+        const g = c.getContext('2d');
+        g.fillStyle = '#e33';
+        g.fillRect(0, 0, 300, 300);
+        return c.toDataURL('image/png').split(',')[1];
+      });
+      // The file dialog takes the window's focus: Settings stays.
+      await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+      assert.equal(await page.locator('.settings').count(), 1, 'still open');
+      await page.locator('.st-mark-pic input[type="file"]').first().setInputFiles({ name: 'me.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
+      await page.locator('.st-mark-pic .acct-dot img').first().waitFor();
+      const natural = await page.locator('.st-mark-pic .acct-dot img').first().evaluate((i) => i.naturalWidth);
+      assert.equal(natural, 128, 'scaled down');
+      await page.keyboard.press('Escape');
+      await page.locator('.sidebar .account-head .acct-dot img').first().waitFor();
+      await page.click('.sf-summary');
+      assert.equal(await page.locator('.sync-popover .acct-dot img').count(), 1, 'in the sync status too');
+      // Taken away again: the letter.
+      await page.keyboard.press('Escape');
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-mark-pic .link-btn', { hasText: 'Remove' }).first().click();
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(200);
+      assert.equal(await page.locator('.sidebar .account-head .acct-dot img').count(), 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('google contacts', () => {
+  test('connect (asking for the OAuth client first), contacts arrive marked, new ones can go there, disconnect', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'Accounts' }).click();
+      const field = page.locator('.st-acct').first().locator('.gc');
+      await field.getByRole('button', { name: 'Connect Google Contacts…' }).click();
+      // No client yet: asked for it.
+      await field.locator('input[aria-label="Google client ID"]').fill('not-a-client');
+      await field.getByRole('button', { name: 'Save' }).click();
+      await field.locator('.st-status.error').waitFor();
+      await field.locator('input[aria-label="Google client ID"]').fill('123-abc.apps.googleusercontent.com');
+      await field.locator('input[aria-label="Google client secret"]').fill('GOCSPX-x');
+      await field.getByRole('button', { name: 'Save' }).click();
+      await field.locator('.gc-linked').waitFor();
+      assert.match(await field.locator('.gc-linked').textContent(), /3 contacts/);
+      assert.match(await page.locator('.gc-client-note').textContent(), /123…/);
+      await page.keyboard.press('Escape');
+      // In the address book: theirs marked; a new one can be saved in Google.
+      await page.keyboard.press('ControlOrMeta+Shift+b').catch(() => {});
+      if ((await page.locator('.contacts').count()) === 0) await page.locator('.sidebar [aria-label="Address book"]').click();
+      await page.locator('.ct-row', { hasText: 'Olivia Hart' }).waitFor();
+      assert.equal(await page.locator('.ct-row', { hasText: 'Olivia Hart' }).locator('.ct-google').count(), 1);
+      await page.locator('.ct-row', { hasText: 'Olivia Hart' }).click();
+      assert.match(await page.locator('.ct-where-text').textContent(), /Google Contacts/);
+      // What Google has beyond the fields here: photo, title, kinds, address, birthday…
+      await page.locator('.ct-photo').waitFor();
+      assert.match(await page.locator('.ct-photo').getAttribute('src'), /^data:image\//);
+      assert.equal(await page.locator('.ct-role').textContent(), 'Head of Design · Studio · “Liv”');
+      assert.equal(await page.locator('.ct-line .ct-kind').first().textContent(), 'Work', 'the address\'s kind');
+      const more = page.locator('.ct-google-more');
+      assert.match(await more.textContent(), /12 Harbor St/);
+      assert.match(await more.locator('.ct-field', { hasText: 'Birthday' }).textContent(), /14/);
+      assert.match(await more.locator('.ct-field', { hasText: 'Spouse' }).textContent(), /Sam Hart/);
+      assert.match(await page.locator('.ct-google-link').getAttribute('href'), /^https:\/\/contacts\.google\.com\/person\//);
+      // One with nothing more: no photo, no block, still the link to edit there.
+      await page.locator('.ct-row', { hasText: 'Noah Becker' }).click();
+      await page.locator('.ct-photo').waitFor({ state: 'detached' });
+      assert.equal(await page.locator('.ct-google-more').count(), 0);
+      await page.locator('.ct-google-link').waitFor();
+      await page.locator('[aria-label="New contact"]').click();
+      const saveIn = page.locator('select.ct-save-in');
+      await saveIn.waitFor();
+      assert.equal(await saveIn.locator('option').count(), 2, 'this computer, or the Google account');
+      await page.keyboard.press('Escape');
+      // Disconnect: its contacts leave the address book.
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'Accounts' }).click();
+      await page.locator('.st-acct').first().locator('.gc').getByRole('button', { name: 'Disconnect' }).click();
+      // (The question comes over Settings.)
+      await page.locator('.confirm-backdrop .btn', { hasText: 'Disconnect' }).click();
+      await page.locator('.st-acct').first().getByRole('button', { name: 'Connect Google Contacts…' }).waitFor();
+      const cards = await page.evaluate(() => JSON.parse(localStorage.getItem('mock.cards') ?? '[]'));
+      assert.ok(!cards.some((c) => c.google != null), 'their cards went');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('contact groups', () => {
+  test('the address book by Google account and group, with each contact\'s groups on its row', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const g = (r) => `contactGroups/${r}`;
+      await page.evaluate((groups) => {
+        localStorage.setItem(
+          'mock.google',
+          JSON.stringify({ clientId: 'x.apps.googleusercontent.com', links: [{ accountId: 1, googleEmail: 'me@gmail.com', synced: 1, error: null, count: 3, groups }] }),
+        );
+        const card = (id, name, google, groups) => ({ id, name, emails: [`${name.split(' ')[0].toLowerCase()}@x.com`], phones: [], company: '', notes: '', google, groups });
+        localStorage.setItem(
+          'mock.cards',
+          JSON.stringify([
+            card(1, 'Olivia Hart', 1, [groups[0].resource, groups[1].resource, groups[3].resource]),
+            card(2, 'Noah Becker', 1, [groups[0].resource, groups[2].resource]),
+            card(3, 'Emma Lindqvist', 1, [groups[0].resource]),
+            card(4, 'Local Person', null, []),
+          ]),
+        );
+        localStorage.removeItem('contacts.source');
+      }, [
+        { resource: g('myContacts'), name: 'My Contacts' },
+        { resource: g('starred'), name: 'Starred' },
+        { resource: g('family1'), name: 'Familie' },
+        { resource: g('work1'), name: 'Kolleger' },
+      ]);
+      // (One way in: the shortcut and the button both toggle it.)
+      const openContacts = async () => {
+        await page.locator('.sidebar [aria-label="Address book"]').click();
+        await page.locator('.contacts').waitFor();
+      };
+      await page.reload();
+      await openContacts();
+      // The sidebar lists whose contacts, in place of the folders.
+      const sources = page.locator('.sidebar .ct-sources');
+      await sources.waitFor();
+      assert.equal(await page.locator('.sidebar .acct-section, .sidebar [role="tree"]').count(), 0, 'no folders');
+      assert.equal(await page.locator('.sidebar-title').textContent(), 'Contacts');
+      assert.equal(await page.locator('.contacts .ct-sources').count(), 0, 'not twice');
+      const rows = async () => (await page.locator('.ct-row .ct-name').allTextContents()).map((t) => t.replace(/G$/, '').trim());
+      const source = (name) => sources.locator('.ct-source', { hasText: name });
+      // Everyone, each with their groups (Starred first; My Contacts not shown).
+      await page.locator('.ct-row', { hasText: 'Olivia Hart' }).waitFor();
+      assert.deepEqual(await rows(), ['Emma Lindqvist', 'Local Person', 'Noah Becker', 'Olivia Hart']);
+      assert.match(await source('All contacts').textContent(), /4$/);
+      assert.deepEqual(await page.locator('.ct-row', { hasText: 'Olivia Hart' }).locator('.ct-chip').allTextContents(), ['Starred', 'Kolleger']);
+      assert.equal(await page.locator('.ct-row', { hasText: 'Emma Lindqvist' }).locator('.ct-chip').count(), 0);
+      // One group; the account; this computer's.
+      await source('Familie').click();
+      assert.deepEqual(await rows(), ['Noah Becker']);
+      assert.equal(await page.locator('.ct-row.on .ct-name').count(), 1, 'one of them chosen');
+      await source('Starred').click();
+      assert.deepEqual(await rows(), ['Olivia Hart']);
+      await source('me@gmail.com').click();
+      assert.deepEqual(await rows(), ['Emma Lindqvist', 'Noah Becker', 'Olivia Hart']);
+      await source('This computer').click();
+      assert.deepEqual(await rows(), ['Local Person']);
+      // A new contact goes where you're looking.
+      await source('Kolleger').click();
+      await page.locator('[aria-label="New contact"]').click();
+      assert.equal(await page.locator('select.ct-save-in').inputValue(), '1');
+      await page.keyboard.press('Escape');
+      // Kept for next time.
+      await page.reload();
+      await openContacts();
+      await page.locator('.ct-source.on', { hasText: 'Kolleger' }).waitFor();
+      await page.locator('.ct-row', { hasText: 'Olivia Hart' }).waitFor();
+      assert.deepEqual(await rows(), ['Olivia Hart']);
+      // Back to mail with the Mail button: the folders again.
+      await page.locator('.sidebar [aria-label="Mail"]').click();
+      await page.locator('.contacts').waitFor({ state: 'detached' });
+      assert.equal(await page.locator('.sidebar .ct-sources').count(), 0);
+      assert.equal(await page.locator('.sidebar-title').textContent(), 'Mailboxes');
+      // With the sidebar as a rail, the address book has the column itself.
+      await page.locator('.sidebar [aria-label="Collapse sidebar"]').click();
+      await page.locator('[aria-label="Address book"]').first().click();
+      await page.locator('.contacts .ct-sources').waitFor();
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('Thunderbird keys for new commands', () => {
+  test('Ctrl/⌘+U shows the source, Shift+C marks the folder read', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.locator('.folder-layer .row').first().click();
+      await page.keyboard.press('ControlOrMeta+U');
+      const source = page.locator('[aria-label="Message source"]');
+      await source.waitFor();
+      await page.keyboard.press('Escape');
+      await source.waitFor({ state: 'detached' });
+      await page.keyboard.press('Shift+C');
+      await page.locator('.toast', { hasText: /Marked [\d,]+ messages? as read|Nothing unread/ }).waitFor();
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('sender pictures', () => {
+  test('a Google contact\'s own photo, in place of their company\'s logo', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      // The colour inside a row's picture (the demo's pictures are SVGs of one colour each).
+      const pictureOf = async (who) => {
+        await page.fill('.search-field input', who);
+        const img = page.locator('.search-layer .row', { hasText: who }).first().locator('.row-avatar img');
+        await img.waitFor({ timeout: 3000 });
+        const src = await img.getAttribute('src');
+        return /fill="(#[0-9a-f]{6})"/.exec(Buffer.from(src.split(',')[1], 'base64').toString())?.[1];
+      };
+      // Off until turned on (looking a domain up contacts it).
+      await page.fill('.search-field input', 'GitHub');
+      await page.locator('.search-layer .row', { hasText: 'GitHub' }).first().waitFor();
+      assert.equal(await page.locator('.search-layer .row-avatar').count(), 0, 'no pictures by default');
+      await page.evaluate(() => localStorage.setItem('ui.senderPictures', 'true'));
+      await page.reload();
+      assert.equal(await pictureOf('GitHub'), '#24292f', 'the company\'s logo');
+      // Their address on a Google contact with a photo (pictures are asked for once a run).
+      await page.evaluate(() =>
+        localStorage.setItem(
+          'mock.cards',
+          JSON.stringify([{ id: 1, name: 'Olivia Hart', emails: ['Notifications@GitHub.com'], phones: [], company: '', notes: '', google: 1 }]),
+        ),
+      );
+      await page.reload();
+      assert.equal(await pictureOf('GitHub'), '#c2410c', 'their own photo');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('notifications', () => {
+  test('Settings: also while in use (on), and a test notification', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'Notifications' }).click();
+      const inUse = page.locator('.st-field', { hasText: 'Also while Email is the window' }).locator('input[type=checkbox]');
+      assert.equal(await inUse.isChecked(), true, 'also while in use, by default');
+      await page.getByRole('button', { name: 'Send a test notification' }).click();
+      await page.waitForFunction(() => window.__testNotifications === 1);
+      await page.getByText(/^Sent\. Nothing showed\?/).waitFor();
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('updates', () => {
+  test('a copy built here says it doesn\'t update itself', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'Troubleshooting' }).click();
+      await page.locator('.st-field', { hasText: 'Updates' }).getByText(/doesn’t update itself/).waitFor();
+      assert.equal(await page.locator('.sf-update').count(), 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('one from the releases: Check now downloads it, Restart to update installs it', async () => {
+    const { page, errors, close } = await open({ threaded: false, query: '&updates' });
+    try {
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'Troubleshooting' }).click();
+      const box = page.locator('.st-field', { hasText: 'Look for new versions' }).locator('input[type=checkbox]');
+      assert.equal(await box.isChecked(), true, 'on by default');
+      await page.getByRole('button', { name: 'Check now' }).click();
+      await page.locator('.st-update-state', { hasText: '0.1.999 is downloaded' }).waitFor();
+      await page.keyboard.press('Escape');
+      // The sidebar offers the restart too.
+      await page.locator('.sf-update').click();
+      await page.waitForFunction(() => window.__updateInstalled === '0.1.999');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('message source', () => {
+  test('right-click › Show source; a question about it is answered; ⌥⌘U opens it too', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.evaluate(() => localStorage.setItem('mock.aiKey', 'sk-ant-demo'));
+      const row = page.locator('.folder-layer .row').first();
+      const subject = (await row.locator('.row-subject').textContent()).trim();
+      await row.click({ button: 'right' });
+      await page.locator('.ctx-menu .vm-item', { hasText: 'Show source' }).click();
+      const src = page.locator('.source-view .src-text');
+      await page.waitForFunction(() => document.querySelector('.source-view .src-text')?.textContent?.includes('Subject:'));
+      assert.ok((await src.textContent()).includes(`Subject: ${subject}`));
+      await page.locator('.source-view .chip-toggle', { hasText: 'spam' }).click();
+      await page.waitForFunction(() => document.querySelector('.source-view .src-answer')?.textContent?.includes('X-Spam-Status'));
+      // (Esc while it's answering stops the answer; once done, it closes.)
+      await page.locator('.source-view .src-form button', { hasText: 'Ask' }).waitFor();
+      await page.keyboard.press('Escape');
+      assert.equal(await page.locator('.source-view').count(), 0);
+      await row.click();
+      await page.keyboard.press('ControlOrMeta+Alt+u');
+      await page.locator('.source-view').waitFor();
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('ai apps', () => {
+  test('off by default; turned on with chosen permissions; shows how to connect; asks before sending', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'AI apps' }).click();
+      const master = page.locator('.mcp-master input');
+      assert.equal(await master.isChecked(), false, 'off by default');
+      assert.equal(await page.locator('.mcp-perms input').first().isDisabled(), true);
+      await master.check();
+      await page.locator('.mcp-row', { hasText: 'Write drafts' }).locator('input').check();
+      await page.waitForTimeout(100);
+      const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('mock.mcp')));
+      assert.equal(saved.enabled, true);
+      assert.equal(saved.drafts, true);
+      assert.equal(saved.send, false);
+      // Leaving out an account lists the rest.
+      await page.locator('.mcp-accounts input').first().uncheck();
+      await page.waitForTimeout(100);
+      assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('mock.mcp')))).accounts.length, 1);
+      assert.match(await page.locator('.mcp-code pre').first().textContent(), /"--mcp"/);
+      await page.keyboard.press('Escape');
+      // An AI app asks to send: the user sees it and declines.
+      const answer = page.evaluate(() => window.__mcpAsk({ id: 7, client: 'Claude', title: 'Send this message?', lines: ['To: bob@x.com', 'Subject: Hi'], body: 'Hello Bob', ok: 'Send' }));
+      await page.locator('.mcp-ask').waitFor();
+      assert.match(await page.locator('.mcp-ask').textContent(), /Claude asks:.*Send this message\?.*To: bob@x.com.*Hello Bob/s);
+      await page.locator('.mcp-ask .btn', { hasText: "Don't" }).click();
+      assert.equal(await answer, false);
+      assert.equal(await page.locator('.mcp-ask').count(), 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('move list', () => {
+  test("the folders with most of the sender's mail come first", async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.locator('.folder-layer .row', { hasText: 'Invoicely' }).first().click();
+      await page.locator('.reader [aria-label^="Move to"]').first().click();
+      await page.locator('.move-picker .mp-row').first().waitFor();
+      await page.waitForTimeout(200);
+      const rows = await page.locator('.move-picker .mp-row').evaluateAll((els) =>
+        els.map((e) => ({ name: e.querySelector('.mp-name')?.textContent, n: Number(e.querySelector('.mp-count')?.textContent?.replace(/\D/g, '') || 0) })),
+      );
+      const counted = rows.filter((r) => r.n > 0);
+      assert.ok(counted.length >= 1, `some folders hold the sender's mail: ${JSON.stringify(rows.slice(0, 5))}`);
+      assert.deepEqual(rows.slice(0, counted.length), counted, 'those first');
+      assert.deepEqual(counted.map((r) => r.n), [...counted.map((r) => r.n)].sort((a, b) => b - a), 'most first');
+      assert.ok(!counted.some((r) => /All Mail|Inbox|Sent|Trash|Spam/.test(r.name)), 'not the folders everything is in');
+      await page.keyboard.press('Escape');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('several messages', () => {
+  const rows = (page) => page.locator('.folder-layer .row');
+  const title = (page) => page.locator('.multi-pane .reader-subject');
+
+  test('⌘/Ctrl-click and ⇧-click pick rows; one Delete for all; Undo picks them again', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const ids = async () => page.locator('.folder-layer .row').evaluateAll((els) => els.map((e) => e.dataset.id));
+      const before = await ids();
+      const gone = before.slice(2, 6);
+      await rows(page).nth(0).click();
+      await rows(page).nth(2).click({ modifiers: ['ControlOrMeta'] });
+      await hasText(title(page), '2 messages selected', 'two picked');
+      assert.equal(await page.locator('.folder-layer .row.selected').count(), 2);
+      await rows(page).nth(5).click({ modifiers: ['Shift'] });
+      await hasText(title(page), '4 messages selected', 'rows 2 to 5');
+      await page.locator('.multi-pane [aria-label="Delete"]').click();
+      // More than one: asked first.
+      assert.match(await page.locator('.confirm-backdrop .confirm-text').textContent(), /Delete 4 messages\?/);
+      await page.locator('.confirm-backdrop .btn.danger').click();
+      await page.locator('.toast', { hasText: 'Deleted 4 messages' }).waitFor();
+      await page.waitForTimeout(300);
+      assert.equal(await page.locator('.multi-pane').count(), 0, 'back to one');
+      const after = await ids();
+      assert.ok(gone.every((id) => !after.includes(id)), 'the four are gone');
+      assert.ok(after.includes(before[6]), 'the rows below moved up');
+      await page.locator('.toast button', { hasText: 'Undo' }).click();
+      await hasText(title(page), '4 messages selected', 'picked again');
+      await page.waitForFunction((g) => {
+        const shown = [...document.querySelectorAll('.folder-layer .row')].map((e) => e.dataset.id);
+        return g.every((id) => shown.includes(id));
+      }, gone);
+      // Esc: just the open one again.
+      await page.keyboard.press('Escape');
+      assert.equal(await page.locator('.multi-pane').count(), 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('⌘/Ctrl+A picks the whole folder, conversations too; ⇧-arrows extend', async () => {
+    const { page, errors, close } = await open({ threaded: true });
+    try {
+      const total = Number((await page.locator('.folder-layer .list-sub .count-btn').nth(1).textContent()).replace(/[^\d]/g, ''));
+      await rows(page).nth(1).click();
+      await page.keyboard.press('Shift+ArrowDown');
+      await page.keyboard.press('Shift+ArrowDown');
+      await hasText(title(page), '3 conversations selected', 'extended down');
+      await page.keyboard.press('ControlOrMeta+a');
+      await hasText(title(page), `${total.toLocaleString('en-US')} conversations selected`, 'all of them');
+      assert.match(await page.locator('.multi-pane .band-meta').textContent(), /messages/);
+      await page.keyboard.press('ArrowDown');
+      assert.equal(await page.locator('.multi-pane').count(), 0, 'moving on picks one again');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('forward several as attachments', async () => {
+    const { page, errors, context, close } = await open({ threaded: false });
+    try {
+      await rows(page).nth(0).click();
+      await rows(page).nth(1).click({ modifiers: ['ControlOrMeta'] });
+      await hasText(title(page), '2 messages selected', 'two picked');
+      const popup = context.waitForEvent('page');
+      await page.locator('.multi-pane [aria-label="Forward as attachments"]').click();
+      const w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      await w.locator('.cmp-att-msg').first().waitFor();
+      assert.equal(await w.locator('.cmp-att-msg').count(), 2);
+      assert.match(await w.locator('.cmp-att-msg .cmp-att-name').first().textContent(), /\.eml$/);
+      assert.equal(await w.locator('#cmp-subject').inputValue(), 'Fwd: 2 messages');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('writing help', () => {
+  test('without a key it says where to add one; with one, a reply is written and used', async () => {
+    const { page, errors, context, close } = await open({ threaded: false });
+    try {
+      await page.locator('.folder-layer .row').first().click();
+      await page.waitForTimeout(300);
+      let popup = context.waitForEvent('page');
+      await page.locator('.reader [aria-label="Reply"]').first().click();
+      let w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      await w.locator('.fmt-ai').click();
+      await w.locator('.ai-note').waitFor();
+      await w.close();
+      await page.bringToFront();
+
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: /^AI$/ }).click();
+      await page.locator('input.ai-key').fill('sk-ant-test');
+      await page.locator('.st-pane button', { hasText: 'Save' }).click();
+      await page.locator('.st-pane button', { hasText: 'Try it' }).click();
+      await hasText(page.locator('.st-status'), 'Works! — Claude Opus 5.5', 'the key works');
+      await page.keyboard.press('Escape');
+
+      popup = context.waitForEvent('page');
+      await page.locator('.reader [aria-label="Reply"]').first().click();
+      w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      await w.locator('.cmp-editor .ProseMirror').waitFor();
+      await w.keyboard.press('ControlOrMeta+j');
+      await w.locator('.ai-input').fill('yes, Thursday works');
+      await w.keyboard.press('Enter');
+      await w.locator('.ai-panel button', { hasText: 'Use this' }).click();
+      const body = await w.locator('.cmp-editor .ProseMirror').innerText();
+      assert.ok(body.includes('Yes, Thursday works.'), body);
+      assert.equal(await w.locator('.ai-panel').count(), 0, 'the panel closes');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('address book', () => {
+  test('a contact with no mail: the search finds none and the reader empties; a folder goes back to mail', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.locator('.folder-layer .row').first().click();
+      await page.locator('.pane-reader .reader-subject').waitFor();
+      await page.locator('button[aria-label="Address book"]').click();
+      await page.locator('.contacts').waitFor();
+      await page.locator('button[aria-label="New contact"]').click();
+      await page.locator('.ct-big').fill('Nobody Atall');
+      await page.locator('input[aria-label="Email 1"]').fill('nobody@nowhere.example');
+      await page.locator('.contacts button', { hasText: 'Show mail' }).click();
+      await page.locator('.contacts').waitFor({ state: 'detached' });
+      await hasText(page.locator('.search-layer .list-empty-title'), 'No results', 'no results');
+      await page.locator('.reader-empty').waitFor();
+      assert.equal(await page.locator('.pane-reader .reader-subject, .pane-reader .conv-view').count(), 0, 'nothing from before the search');
+
+      // From the address book, Mail brings back the folders, and a folder its mail.
+      await page.keyboard.press('Escape');
+      await page.locator('button[aria-label="Address book"]').click();
+      await page.locator('.contacts').waitFor();
+      assert.equal(await page.locator('.sidebar button.folder').count(), 0, 'the sidebar lists contacts');
+      await page.locator('.sidebar button[aria-label="Mail"]').click();
+      await page.locator('.contacts').waitFor({ state: 'detached' });
+      await page.locator('.sidebar button.folder').nth(1).click();
+      assert.equal(await page.locator('button[aria-label="Address book"]').getAttribute('aria-pressed'), 'false');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('a sender added from the panel is kept, suggested first, and can be written to', async () => {
+    const { page, errors, context, close } = await open({ threaded: false });
+    try {
+      await page.locator('.folder-layer .row').first().click();
+      const from = (await page.locator('.folder-layer .row.selected .row-from').textContent()).trim();
+      await page.keyboard.press('ControlOrMeta+2');
+      await page.locator('.sp-card', { hasText: 'Add to contacts' }).click();
+      await page.locator('.contacts').waitFor();
+      assert.equal(await page.locator('.ct-big').inputValue(), from, 'prefilled with the sender');
+      await page.locator('.ct-big').fill(`${from} (work)`);
+      await page.locator('.ct-field', { hasText: 'Company' }).locator('input').fill('Acme');
+      await page.locator('.ct-actions button', { hasText: 'Save' }).click();
+      await hasText(page.locator('.ct-row .ct-name').first(), `${from} (work)`, 'listed');
+      await page.keyboard.press('Escape');
+      await page.locator('.contacts').waitFor({ state: 'detached' });
+      await hasText(page.locator('.sp-card'), 'In contacts', 'the panel knows them now');
+
+      const popup = context.waitForEvent('page');
+      await page.keyboard.press('c');
+      const w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      await w.locator('input[aria-label="To"]').fill('acm');
+      await hasText(w.locator('.addr-sugg-row .sugg-name').first(), `${from} (work)`, 'found by company, first, under its own name');
       assert.deepEqual(errors, []);
     } finally {
       await close();

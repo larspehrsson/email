@@ -120,6 +120,73 @@ const SCENES = [
       await shot(page);
     },
   },
+  {
+    // View options › Sort by From: each sender's messages together under their name.
+    name: 'sorted',
+    async run({ page, shot }) {
+      // A smaller folder: several senders on screen.
+      await page.click('.sidebar .folder-row:has-text("Newsletters"), .sidebar :text("Newsletters")');
+      await page.waitForTimeout(500);
+      await page.click('.view-menu-btn');
+      await page.click('.view-menu .vm-item:has-text("From")');
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(500);
+      await openRow(page, '.folder-layer .row >> nth=1');
+      await shot(page);
+    },
+  },
+  {
+    // Ctrl/⌘+2: everything from the sender beside the message, three picked to delete.
+    name: 'sender',
+    async run({ page, shot }) {
+      await openRow(page, '.row:has-text("Invoicely") >> nth=0');
+      await page.keyboard.press('Control+2');
+      await page.waitForSelector('.sp-row');
+      await page.click('.sp-row >> nth=1');
+      await page.click('.sp-row >> nth=3', { modifiers: ['Shift'] });
+      await page.waitForTimeout(300);
+      await shot(page);
+    },
+  },
+  {
+    // ✨ AI in a reply: a few words, and the reply written.
+    name: 'writing-help',
+    async run({ page, context, shot }) {
+      await page.evaluate(() => localStorage.setItem('mock.aiKey', 'sk-ant-demo'));
+      await openRow(page, '.row:has-text("Morning Brief")');
+      const popup = context.waitForEvent('page');
+      await page.click('.reader [aria-label="Reply"] >> nth=0');
+      const w = await popup;
+      await w.setViewportSize({ width: 760, height: 560 });
+      await w.waitForSelector('.ProseMirror');
+      await w.click('.fmt-ai');
+      await w.fill('.ai-input', 'yes, Thursday works — ask if I should bring anything');
+      await w.keyboard.press('Enter');
+      await w.waitForSelector('.ai-panel button:has-text("Use this")');
+      await shot(w);
+    },
+  },
+  {
+    // The address book (the people icon, or Ctrl/⌘+Shift+B).
+    name: 'contacts',
+    async run({ page, shot }) {
+      await page.evaluate(() =>
+        localStorage.setItem(
+          'mock.cards',
+          JSON.stringify([
+            { id: 1, name: 'Hannah Müller', emails: ['hannah@example.com'], phones: ['+49 30 1234 5678'], company: 'Northwind', notes: 'Hiking group. Prefers Signal.' },
+            { id: 2, name: 'Sarah Chen', emails: ['sarah@example.com', 'sarah.chen@gmail.com'], phones: [], company: 'Northwind', notes: '' },
+            { id: 3, name: 'Priya Raman', emails: ['priya@example.com'], phones: ['+44 20 7946 0000'], company: 'Fabrikam', notes: '' },
+            { id: 4, name: 'Ben Carter', emails: ['ben@example.com'], phones: [], company: '', notes: '' },
+          ]),
+        ),
+      );
+      await page.click('[aria-label="Address book"]');
+      await page.waitForSelector('.ct-row');
+      await page.click('.ct-row:has-text("Hannah")');
+      await shot(page);
+    },
+  },
 ];
 
 // ------------------------------------------------------------- harness

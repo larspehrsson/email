@@ -1,7 +1,8 @@
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import { createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { hint } from '../lib/shortcuts';
 import { Portal } from 'solid-js/web';
-import { type Folder, type FolderRole } from '../api';
+import { api, type Folder, type FolderRole } from '../api';
+import { fmtNum } from '../lib/format';
 import { definedTags, TagMenu } from './Tags';
 import { SnoozeMenu } from './Snooze';
 import { showToast } from './Toast';
@@ -71,7 +72,7 @@ export function ConfirmHost() {
     <Show when={confirmReq()}>
       {(r) => (
         <div
-          class="modal-backdrop"
+          class="modal-backdrop confirm-backdrop"
           onMouseDown={(e) => e.target === e.currentTarget && done(false)}
           onKeyDown={(e) => {
             e.stopPropagation();
@@ -111,7 +112,19 @@ function moveTargets(accountId: number, excludeId: number): Folder[] {
 const PICK_W = 280;
 const PICK_H = 340;
 
-export function MovePicker(props: { accountId: number; excludeFolderId: number; anchor: HTMLElement; onPick: (f: Folder) => void; onClose: (refocus: boolean) => void }) {
+/** Folders a sender's mail being there says nothing about (it's in them anyway, or there by
+ *  accident): not put first in the Move list. */
+const NOT_SUGGESTED = new Set(['all', 'sent', 'drafts', 'flagged', 'important', 'trash', 'junk', 'inbox']);
+
+export function MovePicker(props: {
+  accountId: number;
+  excludeFolderId: number;
+  /** the messages being moved: the folders their senders' other mail is in come first */
+  messageIds?: number[];
+  anchor: HTMLElement;
+  onPick: (f: Folder) => void;
+  onClose: (refocus: boolean) => void;
+}) {
   let el: HTMLDivElement | undefined;
   let input!: HTMLInputElement;
   const [q, setQ] = createSignal('');
@@ -120,7 +133,23 @@ export function MovePicker(props: { accountId: number; excludeFolderId: number; 
   const reposition = () => setPos(placeNear(props.anchor, PICK_W, el?.offsetHeight || PICK_H));
   useDismiss(() => el, props.anchor, () => props.onClose(false), reposition);
 
-  const all = createMemo(() => moveTargets(props.accountId, props.excludeFolderId));
+  const [counts] = createResource(
+    () => props.messageIds,
+    (ids) => (ids.length ? api.senderFolders(ids).catch(() => []) : []),
+  );
+  /** Folders with mail from the sender, with how much: first, most first. */
+  const suggested = createMemo(() => {
+    const m = new Map<number, number>();
+    for (const c of counts() ?? []) m.set(c.folderId, c.count);
+    return m;
+  });
+  const fromSender = (f: Folder) => (NOT_SUGGESTED.has(f.role ?? '') || isInbox(f) ? 0 : (suggested().get(f.id) ?? 0));
+  const all = createMemo(() => {
+    const targets = moveTargets(props.accountId, props.excludeFolderId);
+    const n = (f: Folder) => (NOT_SUGGESTED.has(f.role ?? '') || isInbox(f) ? 0 : (suggested().get(f.id) ?? 0));
+    const top = targets.filter((f) => n(f) > 0).sort((a, b) => n(b) - n(a));
+    return [...top, ...targets.filter((f) => n(f) === 0)];
+  });
   const shown = createMemo(() => {
     const needle = q().trim().toLowerCase();
     return needle ? all().filter((f) => folderLabel(f).toLowerCase().includes(needle)) : all();
@@ -191,6 +220,11 @@ export function MovePicker(props: { accountId: number; excludeFolderId: number; 
                   <RoleIcon role={f.role ?? (isInbox(f) ? 'inbox' : null)} size={14} />
                 </span>
                 <span class="mp-name">{folderLabel(f)}</span>
+                <Show when={fromSender(f) > 0}>
+                  <span class="mp-count" title={`${fmtNum(fromSender(f))} from this sender here`}>
+                    {fmtNum(fromSender(f))}
+                  </span>
+                </Show>
               </div>
             )}
           </For>
@@ -218,6 +252,13 @@ export interface ActionTarget {
   tagSets: string[][];
   /** the latest snooze still to go off among them (Unix seconds), for the Snooze menu */
   snoozedUntil: number | null;
+  /** several rows picked together: the list rows (message or conversation ids) an action
+   *  that removes them takes out of the list */
+  items?: number[];
+  /** several: Star stars them all (else just `starId`) */
+  starIds?: number[];
+  /** several: Forward sends them along as attachments */
+  forwardAll?: () => void;
 }
 
 function useActions(t: () => ActionTarget | null) {
@@ -239,11 +280,16 @@ function useActions(t: () => ActionTarget | null) {
   async function command(c: BarCommand, anchor?: HTMLElement) {
     const x = t();
     if (!x || x.ids.length === 0) return;
-    const base = { ids: x.ids, folderId: x.folderId, advance: x.advance };
+    const base = { ids: x.ids, folderId: x.folderId, advance: x.advance, items: x.items };
     switch (c) {
       case 'archive':
         return runAction({ kind: 'archive' }, base);
       case 'delete':
+        if (!inTrash() && x.items && x.ids.length > 1) {
+          // Several picked together: say how many first.
+          const n = x.ids.length;
+          if (!(await confirmDialog(`Delete ${n.toLocaleString()} messages?`, `Delete ${n.toLocaleString()} messages`))) return;
+        }
         if (inTrash()) {
           const n = x.ids.length;
           const ok = await confirmDialog(`Delete ${n === 1 ? '1 message' : `${n} messages`} forever? This can't be undone.`, 'Delete forever');
@@ -256,6 +302,7 @@ function useActions(t: () => ActionTarget | null) {
       case 'unread':
         return runAction({ kind: x.anyUnread ? 'read' : 'unread' }, { ...base, advance: false });
       case 'star':
+        if (x.starIds) return runAction({ kind: x.starred ? 'unflag' : 'flag' }, { ids: x.starIds, folderId: x.folderId, advance: false });
         if (x.starId == null) return;
         return runAction({ kind: x.starred ? 'unflag' : 'flag' }, { ids: [x.starId], folderId: x.folderId, advance: false });
       case 'move':
@@ -276,6 +323,7 @@ function useActions(t: () => ActionTarget | null) {
       case 'reply':
       case 'replyAll':
       case 'forward':
+        if (c === 'forward' && x.forwardAll) return x.forwardAll();
         if (x.replyId != null) return startReply(x.replyId, c);
         return;
       default: {
@@ -353,6 +401,7 @@ function useActions(t: () => ActionTarget | null) {
     if (!a || !x || !f) return null;
     return (
       <MovePicker
+        messageIds={x.ids}
         accountId={f.accountId}
         excludeFolderId={x.folderId}
         anchor={a}
@@ -362,7 +411,7 @@ function useActions(t: () => ActionTarget | null) {
         }}
         onPick={(dest) => {
           setPicker(null);
-          void runAction({ kind: 'move', targetFolderId: dest.id }, { ids: x.ids, folderId: x.folderId, advance: x.advance });
+          void runAction({ kind: 'move', targetFolderId: dest.id }, { ids: x.ids, folderId: x.folderId, advance: x.advance, items: x.items });
         }}
       />
     );
@@ -415,13 +464,15 @@ export function HeaderActions(props: { target: ActionTarget | null }) {
   const x = () => props.target;
   return (
     <div class="act-bar" role="toolbar" aria-label="Message actions" classList={{ off: !x() }}>
-      <Btn label="Reply" key={hint('reply')} onClick={() => void a.command('reply')}>
-        <ReplyIcon />
-      </Btn>
-      <Btn label="Reply all" key={hint('reply-all')} onClick={() => void a.command('replyAll')}>
-        <ReplyAllIcon />
-      </Btn>
-      <Btn label="Forward" key={hint('forward')} onClick={() => void a.command('forward')}>
+      <Show when={!x()?.forwardAll}>
+        <Btn label="Reply" key={hint('reply')} onClick={() => void a.command('reply')}>
+          <ReplyIcon />
+        </Btn>
+        <Btn label="Reply all" key={hint('reply-all')} onClick={() => void a.command('replyAll')}>
+          <ReplyAllIcon />
+        </Btn>
+      </Show>
+      <Btn label={x()?.forwardAll ? 'Forward as attachments' : 'Forward'} key={hint('forward')} onClick={() => void a.command('forward')}>
         <ForwardIcon />
       </Btn>
       <span class="act-sep" />
