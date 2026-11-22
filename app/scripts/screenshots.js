@@ -6,6 +6,11 @@
 //
 // Uses the installed Google Chrome (or CHROME=/path/to/chromium). The clock, time zone, window
 // size and remote images are fixed, so an unchanged UI gives unchanged files.
+//
+// Each shot is framed as a macOS window (`frame`): rounded corners, an outline and a shadow on a
+// transparent background, so they stand apart on the page in light and dark. The main window is
+// shot in the app's macOS layout (`?mac`), which keeps room for the traffic lights over its top
+// band, and they're drawn there; a compose window gets the title bar it has on macOS.
 
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -21,7 +26,7 @@ const SIZE = { width: 1280, height: 800 };
 
 // ------------------------------------------------------------- scenes
 
-/** name → what to do before the shot; `shot` takes the page (or a popup) and an optional clip. */
+/** name → what to do before the shot; `shot` takes the page, or a compose window. */
 const SCENES = [
   {
     // The main window: accounts and folders, the list, a conversation open.
@@ -144,6 +149,7 @@ const SCENES = [
       await page.waitForSelector('.sp-row');
       await page.click('.sp-row >> nth=1');
       await page.click('.sp-row >> nth=3', { modifiers: ['Shift'] });
+      await bodyShown(page);
       await page.waitForTimeout(300);
       await shot(page);
     },
@@ -194,6 +200,11 @@ const SCENES = [
 /** Open a list row and wait until its message body has rendered (bodies load on demand). */
 async function openRow(page, selector) {
   await page.click(selector);
+  await bodyShown(page);
+}
+
+/** Wait until the open message's body has rendered. */
+async function bodyShown(page) {
   await page.waitForFunction(() => {
     const frames = [...document.querySelectorAll('.reader iframe, .conv-scroll iframe')];
     const plain = document.querySelector('.reader .plain, .conv-scroll .plain');
@@ -217,6 +228,45 @@ function placeholder(url) {
 
 const STILL = `*, *::before, *::after { transition: none !important; animation: none !important; caret-color: transparent !important; }`;
 
+/** The traffic lights: macOS's colours, 12 px, 20 px apart. */
+const LIGHTS = ['#ff5f57', '#febc2e', '#28c840']
+  .map((c) => `<i style="background:${c}"></i>`)
+  .join('');
+
+/**
+ * `shot` (a PNG at 2×, `size` CSS pixels) framed as a macOS window, saved to `path`: the main
+ * window with its lights at (18, 20) as the app sets them (`traffic_light_position`), a compose
+ * window under a title bar of its own.
+ */
+async function frame(browser, shot, size, { kind, theme, title }, path) {
+  const dark = theme === 'dark';
+  const bar = kind === 'compose'
+    ? `<div class="bar"><span class="lights">${LIGHTS}</span><span class="title">${title}</span></div>`
+    : `<span class="lights over">${LIGHTS}</span>`;
+  const html = `<!doctype html><html><head><style>
+    html, body { margin: 0; background: transparent; }
+    #shot { display: inline-block; padding: 36px 48px 60px; }
+    .win { position: relative; border-radius: 11px; overflow: hidden;
+      box-shadow: 0 0 0 0.5px ${dark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.28)'}, 0 24px 48px rgba(0,0,0,${dark ? 0.55 : 0.26}), 0 4px 12px rgba(0,0,0,0.12); }
+    .win img { display: block; width: ${size.width}px; height: ${size.height}px; }
+    .bar { position: relative; height: 28px; display: flex; align-items: center; justify-content: center;
+      background: ${dark ? '#323234' : '#ececec'}; border-bottom: 1px solid ${dark ? '#000' : '#d6d6d6'};
+      font: 600 13px -apple-system, "SF Pro Text", "Inter", system-ui, sans-serif; color: ${dark ? '#dfdfdf' : '#4d4d4d'}; }
+    .lights { position: absolute; left: 13px; top: 8px; display: flex; gap: 8px; }
+    .lights.over { left: 18px; top: 20px; }
+    .lights i { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.18); }
+  </style></head><body><div id="shot"><div class="win">${bar}<img src="data:image/png;base64,${shot.toString('base64')}"></div></div></body></html>`;
+  const ctx = await browser.newContext({ deviceScaleFactor: 2, viewport: { width: size.width + 200, height: size.height + 200 } });
+  try {
+    const p = await ctx.newPage();
+    await p.setContent(html);
+    await p.waitForFunction(() => document.querySelector('img')?.complete);
+    await p.locator('#shot').screenshot({ path, omitBackground: true });
+  } finally {
+    await ctx.close();
+  }
+}
+
 async function main() {
   const only = process.argv[2];
   const scenes = SCENES.filter((s) => !only || s.name.includes(only));
@@ -236,6 +286,8 @@ async function main() {
           colorScheme: theme,
           locale: 'en-US',
           timezoneId: 'America/New_York',
+          // A Mac's, so every window (compose ones too) takes the macOS layout and ⌘ keys.
+          userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)',
         });
         await context.route(/^https:\/\/picsum\.photos\//, (r) =>
           r.fulfill({ contentType: 'image/svg+xml', body: placeholder(r.request().url()) }),
@@ -250,13 +302,16 @@ async function main() {
           });
         }, STILL);
         const page = await context.newPage();
-        await page.goto(base + '?demo' + (scene.query ?? ''));
+        // The macOS layout: room for the traffic lights, which `frame` draws.
+        await page.goto(base + '?demo&mac' + (scene.query ?? ''));
         await page.waitForSelector('.row');
         await page.waitForTimeout(600);
         const file = `${scene.name}${theme === 'dark' ? '-dark' : ''}.png`;
-        const shot = async (target, clip) => {
+        const shot = async (target) => {
           await target.waitForTimeout(250);
-          await target.screenshot({ path: join(OUT, file), clip, animations: 'disabled', caret: 'hide' });
+          const raw = await target.screenshot({ animations: 'disabled', caret: 'hide' });
+          const kind = target === page ? 'main' : 'compose';
+          await frame(browser, raw, target.viewportSize(), { kind, theme, title: 'New Message' }, join(OUT, file));
           console.log(`  ${file}`);
         };
         await scene.run({ page, context, shot, base });

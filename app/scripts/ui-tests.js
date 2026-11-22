@@ -638,9 +638,15 @@ describe('search', () => {
     const { page, errors, close } = await open({ threaded: false });
     try {
       await page.locator('.folder-layer .row').first().click();
+      const first = (await page.locator('.folder-layer .row.selected .row-subject').textContent()).trim();
       await page.keyboard.press('End');
+      // The last page loads first: wait until the selection has moved there and opened.
+      await page.waitForFunction((f) => {
+        const s = document.querySelector('.folder-layer .row.selected .row-subject')?.textContent?.trim();
+        const h = [...document.querySelectorAll('h1')].map((x) => x.textContent?.trim());
+        return s && s !== f && h.includes(s);
+      }, first);
       const row = page.locator('.folder-layer .row.selected');
-      await row.waitFor();
       const subject = (await row.locator('.row-subject').textContent()).trim();
       const sender = (await row.locator('.row-from, .row-sender').first().textContent()).trim();
       await hasText(reader(page), subject, 'the oldest message open');

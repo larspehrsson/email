@@ -1,7 +1,7 @@
 # Email
 
-A fast desktop email app for Linux, macOS and Windows. All your accounts in one window, your mail kept
-on your computer so everything opens instantly, and a keyboard for everything.
+A fast desktop email app for Linux, macOS and Windows. All your accounts in one window, your
+mail kept on your computer so everything opens instantly, and a keyboard for everything.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/inbox-dark.png">
@@ -23,16 +23,14 @@ page:
 
 Installing a newer build over an older one upgrades it; your mail and settings stay.
 
-**Updates come by themselves** when the build you installed has them (builds of a repository
-with the update signing key, see [DEVELOPING](docs/DEVELOPING.md#updates)): shortly after
-Email starts and every six hours it looks for a newer build, downloads it in the background,
-and **Restart to update** appears at the bottom of the sidebar. Settings › Troubleshooting ›
-Updates turns the looking off, or looks now. (The `.deb` and `.rpm` get updated too, asking for
-your password; a copy built on your own computer doesn't update itself.)
+The builds here don't update themselves yet: to update, install the newer one the same way.
+(Email can update itself when it's built with an update signing key: **Updates** in
+[DEVELOPING](docs/DEVELOPING.md).)
 
 ## Adding your accounts
 
-Click **+** in the sidebar and enter your address.
+The first time Email starts, it asks for your address. Add more accounts in Settings ›
+Accounts › **+ Add account**.
 
 - **Outlook.com, Hotmail and Microsoft 365:** you sign in on Microsoft's own page in your
   browser. Work and school accounts need IMAP allowed by their administrator.
@@ -56,7 +54,7 @@ Reply all. Addresses are suggested from the people you write to most. Signatures
 Signatures, with pictures pasted in) go under your text, a default per account for new messages
 and for replies, switchable in the message. Sending waits 10 seconds so you can undo it.
 
-<img src="docs/screenshots/compose.png" alt="A compose window with address suggestions" width="600">
+<img src="docs/screenshots/compose.png" alt="A compose window with address suggestions" width="640">
 
 **Sort and group** the list from the View options: by date received (grouped into Today,
 Yesterday, this week's days, last weeks and months), or by sender or recipient, A to Z, with
@@ -68,8 +66,9 @@ message count shows everything. In Sent and Drafts each message shows who it wen
 
 ![The Newsletters folder sorted by sender](docs/screenshots/sorted.png)
 
-**Search** as you type, over senders, recipients, subjects and the text of your mail (and attachment names), in every folder or just the
-current one. It understands `from:`, `to:`, `subject:`, `body:`, `"exact phrases"` and `-exclusions`.
+**Search** as you type, over senders, recipients, subjects and the text of your mail (and
+attachment names), in every folder or just the current one. It understands `from:`, `to:`,
+`subject:`, `body:`, `"exact phrases"` and `-exclusions`.
 
 ![Search results for "from:sarah roadmap"](docs/screenshots/search.png)
 
@@ -88,11 +87,14 @@ then ✨ AI in a message (Ctrl/⌘+J) drafts a reply or a new message from a few
 what you wrote better, shorter, more formal or friendlier, fixes the spelling, or translates it.
 You see it first and choose whether to use it.
 
-<img src="docs/screenshots/writing-help.png" alt="Writing help drafting a reply" width="600">
+<img src="docs/screenshots/writing-help.png" alt="Writing help drafting a reply" width="640">
 
 **An address book** (Ctrl/⌘+Shift+B): the people you keep, with their addresses, phone
-numbers, company and notes, synced both ways with Google Contacts if you like ([setup](docs/GOOGLE_CONTACTS.md)). With Google Contacts, the sidebar (switched between Mail and Contacts at its top) shows each account's contacts and its groups (Starred, Family…), and every contact's groups are on its row. Add someone from the sender panel in one click; they come first when
-you type an address.
+numbers, company and notes, synced both ways with Google Contacts if you like
+([setup](docs/GOOGLE_CONTACTS.md)). With Google Contacts, the sidebar (switched between Mail
+and Contacts at its top) shows each account's contacts and its groups (Starred, Family…), and
+every contact's groups are on its row. Add someone from the sender panel in one click; they
+come first when you type an address.
 
 ![The address book](docs/screenshots/contacts.png)
 
@@ -102,9 +104,12 @@ at once — the quickest way to clear out a newsletter.
 
 ![The sender panel beside a message, three messages picked](docs/screenshots/sender.png)
 
-**Message source** (Ctrl/⌘+U or ⌥⌘U, or right-click a message), with questions to Claude about it: why wasn't this marked as spam, is it genuine, who really sent it.
+**Message source** (Ctrl/⌘+U or ⌥⌘U, or right-click a message), with questions to Claude
+about it: why wasn't this marked as spam, is it genuine, who really sent it.
 
-**AI apps:** let Claude Desktop, Claude Code or another MCP app read, search, draft and tidy your mail (Settings › AI apps; off until you turn it on; deleting and sending always ask you first).
+**AI apps:** let Claude Desktop, Claude Code or another MCP app read, search, draft and tidy
+your mail (Settings › AI apps; off until you turn it on; deleting and sending always ask you
+first).
 
 **Sender pictures** beside each message (View options; off until you turn them on): the person's
 own photo when they're one of your Google contacts with one, else their company's logo or
@@ -139,8 +144,9 @@ also teaches your provider's spam filter.
   ask for: writing help and questions about a message (to Anthropic, with your own key) and
   Google Contacts sync. Sender pictures, if you turn them on, are looked up from the sender's
   own domain, once, and only for domains where you've written to someone or have someone in
-  your address book: a stranger's mail never makes your computer contact them. It's stored in `~/.local/share/dev.mailclient.desktop/`
-  on Linux, `~/Library/Application Support/dev.mailclient.desktop/` on macOS and
+  your address book: a stranger's mail never makes your computer contact them. Your mail is
+  stored in `~/.local/share/dev.mailclient.desktop/` on Linux,
+  `~/Library/Application Support/dev.mailclient.desktop/` on macOS and
   `%APPDATA%\dev.mailclient.desktop\` on Windows.
 - **Check a link before you click it:** point at it and the address it really opens shows at
   the bottom of the message, with the site in bold. If the link's text is an address for one
