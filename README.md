@@ -152,4 +152,77 @@ also teaches your provider's spam filter.
 
 ## For developers
 
-Building, testing and how it works inside: [docs/DEVELOPING.md](docs/DEVELOPING.md).
+The app is [Tauri 2](https://v2.tauri.app): a Rust core (`crates/mail-core`: sync, storage,
+search) and a SolidJS interface (`app/src`), with the desktop shell in `app/src-tauri`. How it
+works inside: [docs/DEVELOPING.md](docs/DEVELOPING.md).
+
+### What you need
+
+- **Rust**, stable, through [rustup](https://rustup.rs).
+- **Node.js** 24 (with npm).
+- **macOS:** Xcode's command line tools (`xcode-select --install`).
+- **Linux** (Debian/Ubuntu): `sudo apt install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf build-essential`.
+- **Windows:** Visual Studio's C++ build tools, WebView2 (part of Windows 11), and
+  [NASM](https://www.nasm.us) on the `PATH`.
+
+Then, once:
+
+```sh
+cd app
+npm install
+```
+
+### Run
+
+```sh
+cd app
+npm run tauri dev    # the desktop app, rebuilt as you change the code
+npm run dev          # the interface alone, in a browser (http://localhost:1420), on made-up mail
+```
+
+`npm run tauri dev` uses the same accounts and mail as an installed copy (the same data
+folder and keychain item), so quit the installed app first. `npm run dev` needs no Rust and
+touches nothing real: it runs against an in-memory mock backend (`app/src/mock.ts`), with flags
+in the URL for other situations, such as `?empty` (first start) or `?many` (six accounts).
+
+### Build
+
+```sh
+cd app
+npm run tauri build                     # installers for this system, in target/release/bundle/
+npm run tauri build -- --bundles app    # macOS: just Email.app
+```
+
+To sign a macOS build with a certificate of your own, set `APPLE_SIGNING_IDENTITY` to its name
+first. Without one the app gets no proper signature, and macOS won't show its notifications.
+The GitHub workflow (`.github/workflows/build.yml`) builds every system's installers on each push.
+
+### Test
+
+```sh
+cargo test --workspace            # the Rust core
+cd app && npm run test:unit       # interface logic
+cd app && npm run test:ui         # the interface, driven in a browser against the mock
+```
+
+### Debug
+
+- **The interface:** Developer Tools are in the View menu (⌥⌘I, or Ctrl+Alt+I), in dev and
+  release builds alike.
+- **The core:** it logs to the terminal under `npm run tauri dev`, and always to `email.log`
+  (`~/Library/Logs/dev.mailclient.desktop/` on macOS, `~/.local/share/dev.mailclient.desktop/logs/`
+  on Linux). Set `RUST_LOG` for more, for example `RUST_LOG=debug npm run tauri dev`, or
+  `RUST_LOG=mail_core=debug` for the core alone.
+- **The data:** `mail.db` and `bodies.db` (SQLite) are in
+  `~/Library/Application Support/dev.mailclient.desktop/` on macOS,
+  `~/.local/share/dev.mailclient.desktop/` on Linux and `%APPDATA%\dev.mailclient.desktop\` on
+  Windows. With the app quit, deleting them makes it start over with no accounts (their
+  passwords stay in the keychain until removed there).
+
+### Clean
+
+```sh
+cargo clean                  # Rust's build output (target/, which grows to many GB)
+rm -rf app/dist              # the interface's built files
+rm -rf app/node_modules      # npm's packages (npm install brings them back)
+```
