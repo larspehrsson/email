@@ -418,6 +418,8 @@ export function setNotifyNewMail(on: boolean): void {
 }
 
 export function selectFolder(id: number): void {
+  // Picking a folder is for its mail: away from the address book, if that's open.
+  setMainView('mail');
   if (selectedFolderId() === id) return;
   batch(() => {
     setSelectedFolderId(id);

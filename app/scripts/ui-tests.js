@@ -1595,6 +1595,35 @@ describe('writing help', () => {
 });
 
 describe('address book', () => {
+  test('a contact with no mail: the search finds none and the reader empties; a folder goes back to mail', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.locator('.folder-layer .row').first().click();
+      await page.locator('.pane-reader .reader-subject').waitFor();
+      await page.locator('button[aria-label="Address book"]').click();
+      await page.locator('.contacts').waitFor();
+      await page.locator('button[aria-label="New contact"]').click();
+      await page.locator('.ct-big').fill('Nobody Atall');
+      await page.locator('input[aria-label="Email 1"]').fill('nobody@nowhere.example');
+      await page.locator('.contacts button', { hasText: 'Show mail' }).click();
+      await page.locator('.contacts').waitFor({ state: 'detached' });
+      await hasText(page.locator('.search-layer .list-empty-title'), 'No results', 'no results');
+      await page.locator('.reader-empty').waitFor();
+      assert.equal(await page.locator('.pane-reader .reader-subject, .pane-reader .conv-view').count(), 0, 'nothing from before the search');
+
+      // From the address book, a folder in the sidebar shows that folder's mail.
+      await page.keyboard.press('Escape');
+      await page.locator('button[aria-label="Address book"]').click();
+      await page.locator('.contacts').waitFor();
+      await page.locator('.sidebar button.folder').nth(1).click();
+      await page.locator('.contacts').waitFor({ state: 'detached' });
+      assert.equal(await page.locator('button[aria-label="Address book"]').getAttribute('aria-pressed'), 'false');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('a sender added from the panel is kept, suggested first, and can be written to', async () => {
     const { page, errors, context, close } = await open({ threaded: false });
     try {

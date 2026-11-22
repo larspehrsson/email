@@ -444,6 +444,18 @@ export function MessageList(props: {
       untrack(() => model.reset(searchFetcher(sp)));
       pendingSpec = sp;
     });
+    // The first results too (later ones go through onReset): the message open from before the
+    // search stays only if it's among them; else the reader empties, not showing mail the
+    // search didn't find.
+    let first = true;
+    createEffect(() => {
+      if (!first || model.state.total == null) return;
+      first = false;
+      untrack(() => {
+        const id = selectedId();
+        if (id != null && model.indexOfId(id) < 0) selectMessage(null);
+      });
+    });
   }
   // Before the first page answers, show a plausible number of skeleton rows.
   if (threaded) {
