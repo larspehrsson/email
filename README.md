@@ -197,6 +197,12 @@ To sign a macOS build with a certificate of your own, set `APPLE_SIGNING_IDENTIT
 first. Without one the app gets no proper signature, and macOS won't show its notifications.
 The GitHub workflow (`.github/workflows/build.yml`) builds every system's installers on each push.
 
+With an Apple Developer ID, `scripts/build-mac.sh` does the whole thing on a Mac: builds
+Email.app, signs it with your Developer ID Application certificate, has Apple notarize it,
+staples the ticket and zips it (`--install` puts it in ~/Applications, `--no-notarize` only
+signs). Your certificate's name and notarization credentials (a `notarytool` keychain profile)
+go in `scripts/mac-signing.env`, which isn't committed; `scripts/build-mac.sh --help` says how.
+
 ### Test
 
 ```sh

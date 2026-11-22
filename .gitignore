@@ -3,3 +3,4 @@
 /app/dist
 /app/src-tauri/gen/schemas
 .DS_Store
+/scripts/mac-signing.env
