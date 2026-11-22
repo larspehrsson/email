@@ -790,9 +790,15 @@ impl Core {
         Ok(result)
     }
 
-    /// The picture for a sender's address (a data: URL), from what's kept or looked up now
-    /// (see `icons`). None: no picture (a shared mail service, or the domain has none).
+    /// The picture for a sender's address (a data: URL): their own when they're a Google
+    /// contact with a photo, else their domain's, from what's kept or looked up now (see
+    /// `icons`). None: no picture (a shared mail service, or the domain has none).
     pub async fn sender_icon(&self, addr: &str) -> Result<Option<String>> {
+        match self.contact_photo(addr).await {
+            Ok(Some(photo)) => return Ok(Some(photo)),
+            Ok(None) => {}
+            Err(e) => tracing::warn!("contact photo for a sender: {e:#}"),
+        }
         let Some(domain) = icons::icon_domain(addr) else { return Ok(None) };
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
         if let Some((icon, fetched)) = self.store.sender_icon(&domain)? {
@@ -1358,23 +1364,46 @@ impl Core {
         };
         let person: serde_json::Value = serde_json::from_str(&raw)?;
         let mut d = gcontacts::details(&person);
-        if let Some(url) = gcontacts::photo_url(&person) {
-            let icon = match self.store.card_photo(card_id)? {
-                Some((u, mime, data)) if u == url => Some(icons::Icon { mime, data }),
-                _ => match icons::get_image(&url).await {
-                    Ok(icon) => {
-                        self.store.save_card_photo(card_id, &url, &icon.mime, &icon.data)?;
-                        Some(icon)
-                    }
-                    Err(e) => {
-                        tracing::warn!(card_id, "contact photo: {e:#}");
-                        None
-                    }
-                },
-            };
-            d.photo = icon.map(|i| i.data_url());
-        }
+        d.photo = self.card_photo(card_id, &person).await?.map(|i| i.data_url());
         Ok(Some(d))
+    }
+
+    /// A Google contact's own picture: kept once fetched (`card_photos`), fetched again when
+    /// Google's address for it changes. None: no picture of their own, or it can't be had now.
+    async fn card_photo(&self, card_id: i64, person: &serde_json::Value) -> Result<Option<icons::Icon>> {
+        let Some(url) = gcontacts::photo_url(person) else { return Ok(None) };
+        if let Some((u, mime, data)) = self.store.card_photo(card_id)?
+            && u == url
+        {
+            return Ok(Some(icons::Icon { mime, data }));
+        }
+        let _slot = self.icon_slots.acquire().await.ok();
+        match tokio::time::timeout(std::time::Duration::from_secs(25), icons::get_image(&url)).await {
+            Ok(Ok(icon)) => {
+                self.store.save_card_photo(card_id, &url, &icon.mime, &icon.data)?;
+                Ok(Some(icon))
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(card_id, "contact photo: {e:#}");
+                Ok(None)
+            }
+            Err(_) => {
+                tracing::warn!(card_id, "contact photo: timed out");
+                Ok(None)
+            }
+        }
+    }
+
+    /// The picture of the Google contact with this address, if they have one of their own.
+    async fn contact_photo(&self, addr: &str) -> Result<Option<String>> {
+        for card_id in self.store.google_cards_with_email(addr)? {
+            let Some(raw) = self.store.card_link(card_id)?.and_then(|l| l.raw) else { continue };
+            let person: serde_json::Value = serde_json::from_str(&raw)?;
+            if let Some(icon) = self.card_photo(card_id, &person).await? {
+                return Ok(Some(icon.data_url()));
+            }
+        }
+        Ok(None)
     }
 
     /// Sync one account's Google contacts (one sync per account at a time); what it did.

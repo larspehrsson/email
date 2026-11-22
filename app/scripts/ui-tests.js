@@ -976,11 +976,20 @@ describe('size and filters', () => {
       await bar.waitFor();
       assert.match(await page.locator('.folder-layer .filter-what').textContent(), /Unread/);
       assert.equal(await unread.getAttribute('aria-pressed'), 'true');
-      assert.equal(await page.locator('.folder-layer .row:not(.unread)').count(), 0, 'only unread rows');
+      // The list reloads after the bar shows: wait for it.
+      const readRows = page.locator('.folder-layer .row:not(.unread)');
+      const settles = async (ok, what) => {
+        const end = Date.now() + 3000;
+        while (!ok(await readRows.count())) {
+          if (Date.now() > end) assert.fail(`${what}: ${await readRows.count()} read rows`);
+          await page.waitForTimeout(50);
+        }
+      };
+      await settles((n) => n === 0, 'only unread rows');
       await unread.click();
       await bar.waitFor({ state: 'detached' });
       assert.equal(await unread.getAttribute('aria-pressed'), 'false');
-      assert.ok((await page.locator('.folder-layer .row:not(.unread)').count()) > 0, 'read ones back');
+      await settles((n) => n > 0, 'read ones back');
       // The message count shows all, from any filter.
       await unread.click();
       await bar.waitFor();
@@ -1414,6 +1423,35 @@ describe('google contacts', () => {
       await page.locator('.st-acct').first().getByRole('button', { name: 'Connect Google Contacts…' }).waitFor();
       const cards = await page.evaluate(() => JSON.parse(localStorage.getItem('mock.cards') ?? '[]'));
       assert.ok(!cards.some((c) => c.google != null), 'their cards went');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('sender pictures', () => {
+  test('a Google contact\'s own photo, in place of their company\'s logo', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      // The colour inside a row's picture (the demo's pictures are SVGs of one colour each).
+      const pictureOf = async (who) => {
+        await page.fill('.search-field input', who);
+        const img = page.locator('.search-layer .row', { hasText: who }).first().locator('.row-avatar img');
+        await img.waitFor({ timeout: 3000 });
+        const src = await img.getAttribute('src');
+        return /fill="(#[0-9a-f]{6})"/.exec(Buffer.from(src.split(',')[1], 'base64').toString())?.[1];
+      };
+      assert.equal(await pictureOf('GitHub'), '#24292f', 'the company\'s logo');
+      // Their address on a Google contact with a photo (pictures are asked for once a run).
+      await page.evaluate(() =>
+        localStorage.setItem(
+          'mock.cards',
+          JSON.stringify([{ id: 1, name: 'Olivia Hart', emails: ['Notifications@GitHub.com'], phones: [], company: '', notes: '', google: 1 }]),
+        ),
+      );
+      await page.reload();
+      assert.equal(await pictureOf('GitHub'), '#c2410c', 'their own photo');
       assert.deepEqual(errors, []);
     } finally {
       await close();

@@ -98,7 +98,8 @@ at once — the quickest way to clear out a newsletter.
 
 **AI apps:** let Claude Desktop, Claude Code or another MCP app read, search, draft and tidy your mail (Settings › AI apps; off until you turn it on; deleting and sending always ask you first).
 
-**Sender pictures** beside each message: the company's logo or website icon, or initials.
+**Sender pictures** beside each message: the person's own photo when they're one of your Google
+contacts with one, else their company's logo or website icon, or initials.
 
 **Several at once:** Ctrl/⌘-click or Shift-click messages in the list (or Ctrl/⌘+A for all of
 them) to delete, move, mark or tag them together, or forward them as attachments.

@@ -904,6 +904,25 @@ mod tests {
     }
 
     #[test]
+    fn a_senders_google_contact() {
+        // Whose picture a sender gets: a Google contact with the address, whatever its case;
+        // not a card kept only here.
+        let (dir, store, acct) = setup("sendercard");
+        let g = Fake::new(1);
+        g.add("Ann", "Ann@X.com", "work");
+        block(sync(&store, acct, &g, 1)).unwrap();
+        let ann = store.cards().unwrap().into_iter().find(|c| c.name == "Ann").unwrap().id;
+        let local = store
+            .save_card(crate::addressbook::Card { id: 0, name: "Bob".into(), emails: vec!["bob@x.com".into()], phones: vec![], company: String::new(), notes: String::new(), google: None })
+            .unwrap();
+        assert_eq!(store.google_cards_with_email("ann@x.com").unwrap(), vec![ann]);
+        assert_eq!(store.google_cards_with_email(" ANN@x.com ").unwrap(), vec![ann]);
+        assert!(store.google_cards_with_email("bob@x.com").unwrap().is_empty(), "card {local} isn't a Google contact");
+        assert!(store.google_cards_with_email("nobody@x.com").unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_page_failing_changes_nothing() {
         let (dir, store, acct) = setup("pagefail");
         let g = Fake::new(1);

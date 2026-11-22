@@ -3837,6 +3837,20 @@ impl Store {
             .optional()?)
     }
 
+    /// The Google contacts (cards linked to Google) with this address, oldest first: whose
+    /// picture a sender gets.
+    pub fn google_cards_with_email(&self, addr: &str) -> Result<Vec<i64>> {
+        let db = self.rdb();
+        let mut stmt = db.prepare_cached(
+            "SELECT b.id FROM address_book b JOIN card_links l ON l.card_id = b.id
+             WHERE l.raw IS NOT NULL
+               AND EXISTS (SELECT 1 FROM json_each(b.emails) j WHERE lower(j.value) = lower(?1))
+             ORDER BY b.id",
+        )?;
+        let ids = stmt.query_map([addr.trim()], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        Ok(ids)
+    }
+
     /// A contact's picture as fetched: (the url it came from, its type, the image).
     pub fn card_photo(&self, card_id: i64) -> Result<Option<(String, String, Vec<u8>)>> {
         Ok(self

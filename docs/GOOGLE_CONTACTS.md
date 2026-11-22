@@ -42,7 +42,9 @@ can mark the client ID as trusted (Admin console › Security › API controls).
   the kind of each address and number ("Mobile", "Work"), postal addresses, birthday and other
   dates, websites, family and chat accounts. These are shown only; **Edit more in Google
   Contacts** opens the contact there to change them. The photo is fetched from Google the first
-  time the contact is opened, then kept on this computer.
+  time the contact is opened or their mail is listed, then kept on this computer.
+- A contact's photo is also their sender picture beside their mail, in place of their company's
+  logo.
 - Deleting a contact here deletes it in Google (the question says so).
 - A new contact goes to the place chosen under **Saved in** (this computer, or one of the
   connected Google accounts).

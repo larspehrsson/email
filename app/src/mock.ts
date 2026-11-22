@@ -589,6 +589,12 @@ export function createMockBackend(): Backend {
       return { clientId: null, links: [] };
     }
   };
+  /** The made-up photo Google has of one contact (Olivia Hart): a coloured circle. */
+  const contactPhoto = (c: Card): string | null =>
+    c.google != null && c.name === 'Olivia Hart'
+      ? 'data:image/svg+xml;base64,' +
+        btoa('<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="96" height="96" fill="#c2410c"/><circle cx="48" cy="38" r="18" fill="#fde7d9"/><rect x="20" y="62" width="56" height="40" rx="28" fill="#fde7d9"/></svg>')
+      : null;
   const cardsLoad = (): Card[] => {
     try {
       return JSON.parse(localStorage.getItem('mock.cards') ?? '[]') as Card[];
@@ -1649,6 +1655,12 @@ export function createMockBackend(): Backend {
     },
     async sender_icon({ addr }) {
       await sleep(20);
+      // A Google contact's own photo comes first.
+      const a = addr.trim().toLowerCase();
+      for (const c of cardsLoad()) {
+        const photo = c.emails.some((e) => e.toLowerCase() === a) ? contactPhoto(c) : null;
+        if (photo) return photo;
+      }
       // Companies in the demo have a logo (made up here); people and free mail don't.
       const LOGOS: Record<string, [string, string]> = {
         'github.com': ['#24292f', 'G'],
@@ -1893,13 +1905,10 @@ export function createMockBackend(): Backend {
       if (!c || c.google == null) return null;
       const none = { photo: null, title: '', department: '', nicknames: [], emails: [], phones: [], addresses: [], birthday: null, events: [], websites: [], relations: [], chat: [], link: null };
       if (c.name !== 'Olivia Hart') return { ...none, link: `https://contacts.google.com/person/c${cardId}` };
-      // A made-up photo (a coloured circle), and the rest of what Google might have.
-      const photo =
-        'data:image/svg+xml;base64,' +
-        btoa('<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="96" height="96" fill="#c2410c"/><circle cx="48" cy="38" r="18" fill="#fde7d9"/><rect x="20" y="62" width="56" height="40" rx="28" fill="#fde7d9"/></svg>');
+      // A made-up photo, and the rest of what Google might have.
       return {
         ...none,
-        photo,
+        photo: contactPhoto(c),
         title: 'Head of Design',
         department: 'Studio',
         nicknames: ['Liv'],
