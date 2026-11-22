@@ -104,6 +104,8 @@ export interface MessageSummary {
   snoozedUntil?: number | null;
   /** bytes (the whole message, as the server counts it) */
   size?: number;
+  /** its recipients (To, then Cc): shown instead of the sender for mail of ours (Sent, Drafts) */
+  to?: Addr[];
 }
 
 export interface Addr {
@@ -336,6 +338,8 @@ export interface ThreadSummary {
   participants: string[];
   /** the newest one from someone else (ours when all are): the conversation's picture */
   fromAddr?: string;
+  /** the newest message's recipients (To, then Cc): shown when all of it is ours */
+  to?: Addr[];
   /** messages in the whole conversation (all folders) */
   messageCount: number;
   unread: boolean;

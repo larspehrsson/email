@@ -126,6 +126,29 @@ for (const threaded of [false, true]) {
       }
     });
 
+    test('Sent names who it went to; the Inbox who it came from', async () => {
+      const { page, errors, close } = await open({ threaded });
+      try {
+        const from = page.locator('.folder-layer .row .row-from').first();
+        const matches = async (re, what) => {
+          const end = Date.now() + 3000;
+          let got = null;
+          while (Date.now() < end) {
+            got = (await from.textContent({ timeout: 200 }).catch(() => null))?.trim();
+            if (got && re.test(got)) return got;
+            await new Promise((r) => setTimeout(r, 50));
+          }
+          assert.fail(`${what}: got "${got}"`);
+        };
+        await matches(/^(?!To:)\S/, 'the Inbox shows senders');
+        await page.locator('.sidebar button.folder', { hasText: /^Sent$/ }).first().click();
+        await matches(/^To: \S/, 'Sent shows the recipient');
+        assert.deepEqual(errors, []);
+      } finally {
+        await close();
+      }
+    });
+
     test('a notification click opens its message in the folder on screen', async () => {
       const { page, errors, close } = await open({ threaded });
       try {

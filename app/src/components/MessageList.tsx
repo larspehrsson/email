@@ -1,6 +1,6 @@
 import { type JSX, batch, on, createEffect, createMemo, createSelector, createSignal, For, onCleanup, onMount, Show, untrack } from 'solid-js';
 import { createVirtualizer } from '@tanstack/solid-virtual';
-import { api, type Folder, type MessageSummary, type SearchField, type ThreadSummary } from '../api';
+import { api, type Addr, type Folder, type MessageSummary, type SearchField, type ThreadSummary } from '../api';
 import { createPagedList } from '../lib/messageList';
 import { senderPictures } from '../lib/senderIcons';
 import { Avatar } from './Avatar';
@@ -162,7 +162,27 @@ export function SendState(props: { m: { sending: boolean; sendFailed: boolean };
   );
 }
 
+/** Mail of ours (Sent, Drafts): its row names who it went to, as eM Client's "To" column. */
+function oursFolder(folderId: number): boolean {
+  const role = folderById(folderId)?.role;
+  return role === 'sent' || role === 'drafts';
+}
+
+function recipientNames(to: Addr[]): string {
+  return to.map((a) => a.name || a.addr).join(', ');
+}
+
+/** "To: Jane Doe, bob@example.org" in place of the sender. */
+function ToLine(props: { to: Addr[]; re?: RegExp | null }) {
+  return (
+    <>
+      <span class="row-to">To:</span> <Hl text={recipientNames(props.to)} re={props.re ?? null} />
+    </>
+  );
+}
+
 function RowContent(props: { m: MessageSummary; re?: RegExp | null; subjRe?: RegExp | null; folderTag?: string; showSize?: boolean }) {
+  const to = () => (oursFolder(props.m.folderId) && props.m.to?.length ? props.m.to : null);
   return (
     // A tag describes the message: shown as a bar in the first tag's colour beside the text
     // (unread dot stays at the edge); all tags appear as dots on the first line.
@@ -173,11 +193,18 @@ function RowContent(props: { m: MessageSummary; re?: RegExp | null; subjRe?: Reg
     >
       <span class="unread-dot" />
       <Show when={senderPictures()}>
-        <Avatar name={props.m.fromName} addr={props.m.fromAddr} size={36} class="row-avatar" />
+        <Avatar
+          name={to() ? to()![0]!.name : props.m.fromName}
+          addr={to() ? to()![0]!.addr : props.m.fromAddr}
+          size={36}
+          class="row-avatar"
+        />
       </Show>
       <div class="row-line1">
         <span class="row-from">
-          <Hl text={props.m.fromName || props.m.fromAddr} re={props.re ?? null} />
+          <Show when={to()} fallback={<Hl text={props.m.fromName || props.m.fromAddr} re={props.re ?? null} />}>
+            {(t) => <ToLine to={t()} re={props.re} />}
+          </Show>
         </span>
         <Show when={props.folderTag}>
           <span class="folder-tag">{props.folderTag}</span>
@@ -231,6 +258,8 @@ function ThreadRowContent(props: { t: ThreadSummary; me: { name: string; email: 
     props.t.participants
       .map((p) => (props.me && (p === props.me.name || p.toLowerCase() === props.me.email.toLowerCase()) ? 'me' : p))
       .join(', ');
+  // All of it ours (a conversation in Sent nobody answered yet): who it went to.
+  const to = () => (people() === 'me' && props.t.to?.length ? props.t.to : null);
   return (
     <div
       class="row-inner"
@@ -239,11 +268,18 @@ function ThreadRowContent(props: { t: ThreadSummary; me: { name: string; email: 
     >
       <span class="unread-dot" />
       <Show when={senderPictures()}>
-        <Avatar name={props.t.participants[0] ?? null} addr={props.t.fromAddr ?? ''} size={36} class="row-avatar" />
+        <Avatar
+          name={to() ? to()![0]!.name : (props.t.participants[0] ?? null)}
+          addr={to() ? to()![0]!.addr : (props.t.fromAddr ?? '')}
+          size={36}
+          class="row-avatar"
+        />
       </Show>
       <div class="row-line1">
         <span class="row-from">
-          {people() || '(no sender)'}
+          <Show when={to()} fallback={people() || '(no sender)'}>
+            {(t) => <ToLine to={t()} />}
+          </Show>
         </span>
         <Show when={props.t.messageCount > 1}>
           <span class="thread-count">{props.t.messageCount}</span>

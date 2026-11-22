@@ -55,7 +55,8 @@ Yesterday, this week's days, last weeks and months), or by sender or recipient, 
 each person's messages together under their name, or by size, largest first, to find what
 takes the space. **Filter** it to unread or read mail, starred, or messages with attachments.
 Clicking the unread count above the list shows only unread mail (again: all of it); clicking the
-message count shows everything.
+message count shows everything. In Sent and Drafts each message shows who it went to
+("To: …"), not you.
 
 ![The Newsletters folder sorted by sender](docs/screenshots/sorted.png)
 

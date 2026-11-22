@@ -200,6 +200,8 @@ pub struct MessageSummary {
     pub snoozed_until: Option<i64>,
     /// Bytes, as the server counts them (the whole message, attachments too).
     pub size: i64,
+    /// Its recipients (To, then Cc): what the list shows for mail of ours (Sent, Drafts).
+    pub to: Vec<Addr>,
 }
 
 /// What the actions need about the messages behind several picked rows.
@@ -264,6 +266,8 @@ pub struct ThreadSummary {
     /// The address of the newest one from someone else (ours when all are ours): the
     /// conversation's picture.
     pub from_addr: String,
+    /// The newest message's recipients (To, then Cc): shown when all of it is ours.
+    pub to: Vec<Addr>,
     pub message_count: u32,
     pub unread: bool,
     pub flagged: bool,

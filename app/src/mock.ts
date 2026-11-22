@@ -703,6 +703,8 @@ export function createMockBackend(): Backend {
       sending: false,
       sendFailed: false,
       draftId: null,
+      // Ours went to someone (picked without rnd(): the rest of the data stays as it was).
+      to: [isSent ? PEOPLE[id % PEOPLE.length]! : me].map((p) => ({ name: p.name, addr: p.addr })),
     };
     const attachments: Attachment[] = [];
     if (hasAttachments) {
@@ -906,6 +908,7 @@ export function createMockBackend(): Backend {
       subject: first?.subject ?? newestInFolder.subject,
       participants,
       fromAddr: all[all.length - 1]?.fromAddr ?? newestInFolder.fromAddr,
+      to: (all[all.length - 1] ?? newestInFolder).to ?? [],
       messageCount: all.length,
       tags: [...new Set(all.flatMap((m) => m.tags))],
       unread: all.some((m) => m.unread),
@@ -1101,7 +1104,9 @@ export function createMockBackend(): Backend {
       // Meeting notes go to the whole team: a long To line (folded in the reader).
       to: /notes from today/i.test(m.subject)
         ? [{ name: me.name, addr: me.addr }, ...PEOPLE.slice(0, 11).map((p) => ({ name: p.name, addr: p.addr }))]
-        : [{ name: me.name, addr: me.addr }],
+        : m.to?.length
+          ? m.to.map((a) => ({ ...a }))
+          : [{ name: me.name, addr: me.addr }],
       cc: md?.cc ? [pick(rnd, PEOPLE), pick(rnd, PEOPLE)].map((p) => ({ name: p.name, addr: p.addr })) : [],
       date: m.date,
       html,
@@ -2255,6 +2260,7 @@ export function createMockBackend(): Backend {
           sending: true,
           sendFailed: false,
           draftId: null,
+          to: [...request.to, ...request.cc],
         };
         const c = copy;
         meta.set(c.id, { kind: 'person', seed: c.id, accountId: acc.id, attachments: [], cc: false, threadId: c.id });

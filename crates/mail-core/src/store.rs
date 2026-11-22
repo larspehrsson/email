@@ -32,7 +32,7 @@ fn thread_rows_from(filter: &ListFilter) -> String {
 }
 
 /// A message as listed with its folder: id, folder, subject, from_name, from_addr, date, snippet,
-/// flags, has_attachments, has_body, keywords, (outgoing failed?), draft_id, size.
+/// flags, has_attachments, has_body, keywords, (outgoing failed?), draft_id, size, to_addrs.
 fn placed_summary(r: &rusqlite::Row) -> rusqlite::Result<MessageSummary> {
     let flags: i64 = r.get(7)?;
     let keywords: String = r.get(10)?;
@@ -56,6 +56,7 @@ fn placed_summary(r: &rusqlite::Row) -> rusqlite::Result<MessageSummary> {
         send_failed: r.get::<_, Option<bool>>(11)? == Some(true),
         draft_id: r.get(12)?,
         size: r.get(13)?,
+        to: crate::contacts::parse_list(&r.get::<_, String>(14)?),
     })
 }
 
@@ -693,7 +694,7 @@ const SCOPE_FILTER: &str = "(
 /// while a large header batch is being written.
 /// A conversation member as `list_threads` reads it: id, subject, from name, from address,
 /// flags, has attachments, snippet, Message-ID, keywords, send state (None / Some(failed)).
-type Member = (i64, String, String, String, i64, bool, Option<String>, Option<String>, String, Option<bool>);
+type Member = (i64, String, String, String, i64, bool, Option<String>, Option<String>, String, Option<bool>, String);
 
 /// A message to queue for sending (see `Store::enqueue_outgoing`).
 pub struct NewOutgoing {
@@ -1548,7 +1549,7 @@ impl Store {
         let mut stmt = db.prepare_cached(&format!(
             "SELECT m.id, m.subject, m.from_name, m.from_addr, m.date, m.snippet, m.flags,
                     m.has_attachments, m.has_body, m.keywords,
-                    (SELECT o.failed IS NOT NULL FROM outgoing o WHERE o.id = m.pending_send), m.draft_id, m.size
+                    (SELECT o.failed IS NOT NULL FROM outgoing o WHERE o.id = m.pending_send), m.draft_id, m.size, m.to_addrs
              FROM entries e JOIN messages m ON m.id = e.message_id
              WHERE e.folder_id=?1{f} ORDER BY {order} LIMIT ?2 OFFSET ?3"
         ))?;
@@ -1574,6 +1575,7 @@ impl Store {
                 send_failed: r.get::<_, Option<bool>>(10)? == Some(true),
                 draft_id: r.get(11)?,
                 size: r.get(12)?,
+                to: crate::contacts::parse_list(&r.get::<_, String>(13)?),
             })
         })?;
         Ok(MessagePage { total, messages: rows.collect::<rusqlite::Result<_>>()? })
@@ -1613,14 +1615,14 @@ impl Store {
             .unwrap_or_default();
         let mut members = db.prepare_cached(&format!(
             "SELECT m.id, m.subject, m.from_name, m.from_addr, m.flags, m.has_attachments, m.snippet, m.message_id,
-                    m.keywords, (SELECT o.failed IS NOT NULL FROM outgoing o WHERE o.id = m.pending_send)
+                    m.keywords, (SELECT o.failed IS NOT NULL FROM outgoing o WHERE o.id = m.pending_send), m.to_addrs
              FROM messages m WHERE m.thread_id=?1 AND {SCOPE_FILTER} ORDER BY m.date, m.id"
         ))?;
         let mut threads = Vec::with_capacity(page.len());
         for (thread_id, date) in page {
             let rows: Vec<Member> = members
                 .query_map(params![thread_id, folder_id, scope.all_folders, scope.include_trash], |r| {
-                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?))
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?))
                 })?
                 .collect::<rusqlite::Result<_>>()?;
             let Some(first) = rows.first() else { continue };
@@ -1646,6 +1648,7 @@ impl Store {
                 subject: first.1.clone(),
                 participants,
                 from_addr: incoming.map(|i| rows[i].3.clone()).unwrap_or_else(|| latest.3.clone()),
+                to: crate::contacts::parse_list(&latest.10),
                 message_count: count as u32,
                 unread: rows.iter().any(|r| r.4 & flags::SEEN == 0),
                 flagged: rows.iter().any(|r| r.4 & flags::FLAGGED != 0),
@@ -1694,7 +1697,7 @@ impl Store {
                     EXISTS (SELECT 1 FROM entries e JOIN folders f ON f.id = e.folder_id
                             WHERE e.message_id = m.id AND f.role IN ('trash', 'junk')),
                     m.keywords,
-                    (SELECT o.failed IS NOT NULL FROM outgoing o WHERE o.id = m.pending_send), m.draft_id, m.size
+                    (SELECT o.failed IS NOT NULL FROM outgoing o WHERE o.id = m.pending_send), m.draft_id, m.size, m.to_addrs
              FROM messages m WHERE m.thread_id = ?1
              ORDER BY m.date, m.has_body DESC, m.id",
         )?;
@@ -1723,6 +1726,7 @@ impl Store {
                     send_failed: r.get::<_, Option<bool>>(15)? == Some(true),
                     draft_id: r.get(16)?,
                     size: r.get(17)?,
+                    to: crate::contacts::parse_list(&r.get::<_, String>(18)?),
                 },
             ))
         })?;
@@ -1797,7 +1801,7 @@ impl Store {
                                  WHEN 'trash' THEN 2 WHEN 'junk' THEN 2 ELSE 1 END LIMIT 1), 0),
                     m.subject, m.from_name, m.from_addr, m.date, m.snippet, m.flags,
                     m.has_attachments, m.has_body, m.keywords,
-                    (SELECT o.failed IS NOT NULL FROM outgoing o WHERE o.id = m.pending_send), m.draft_id, m.size
+                    (SELECT o.failed IS NOT NULL FROM outgoing o WHERE o.id = m.pending_send), m.draft_id, m.size, m.to_addrs
              FROM {from} WHERE {scope} ORDER BY m.date DESC, m.id DESC LIMIT ?4 OFFSET ?5"
         ))?;
         let rows = stmt.query_map(rusqlite::params_from_iter(args.iter().map(|b| b.as_ref())), placed_summary)?;
@@ -1861,7 +1865,7 @@ impl Store {
                                  WHEN 'trash' THEN 4 WHEN 'junk' THEN 4 ELSE 1 END LIMIT 1), 0),
                     m.subject, m.from_name, m.from_addr, m.date, m.snippet, m.flags,
                     m.has_attachments, m.has_body, m.keywords,
-                    (SELECT o.failed IS NOT NULL FROM outgoing o WHERE o.id = m.pending_send), m.draft_id, m.size
+                    (SELECT o.failed IS NOT NULL FROM outgoing o WHERE o.id = m.pending_send), m.draft_id, m.size, m.to_addrs
              FROM messages m WHERE {scope} ORDER BY m.date DESC, m.id DESC LIMIT ?3 OFFSET ?4"
         ))?;
         let messages = stmt
@@ -4256,6 +4260,39 @@ mod tests {
         assert_eq!(store.drop_matched_local_copies(None).unwrap(), vec![sent]);
         assert_eq!(count(), 1);
         assert!(store.body(copy).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rows_carry_their_recipients() {
+        // What Sent and Drafts show in place of the sender (who it went to).
+        let dir = std::env::temp_dir().join(format!("mail-core-to-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = Store::open(&dir).unwrap();
+        let acct = store.insert_account("me@example.com", "Me", Provider::Imap, "h", 993).unwrap();
+        let lf = |name: &str, role| ListedFolder { raw_name: name.into(), path: vec![name.into()], role, selectable: true };
+        store.sync_folder_list(acct.id, &[lf("Sent", Some(FolderRole::Sent))]).unwrap();
+        let sent = store.folders(acct.id).unwrap()[0].id;
+        let mine = HeaderRecord {
+            gm_msgid: None,
+            gm_labels: None,
+            message_id: Some("one@example.com".into()),
+            from_name: "Me".into(),
+            from_addr: "me@example.com".into(),
+            to_addrs: "\"Doe, Jane\" <jane@example.org>, bob@example.org".into(),
+            ..rec(1, 0, &[])
+        };
+        store.upsert_headers(acct.id, sent, &[mine], &HashMap::new()).unwrap();
+        let want = vec![
+            Addr { name: Some("Doe, Jane".into()), addr: "jane@example.org".into() },
+            Addr { name: None, addr: "bob@example.org".into() },
+        ];
+        let m = &store.list_messages(sent, 0, 10).unwrap().messages[0];
+        assert_eq!(m.to, want);
+        let t = &store.list_threads(sent, ThreadScope::default(), 0, 10).unwrap().threads[0];
+        assert_eq!(t.to, want);
+        let v = store.thread_messages(t.id, sent, ThreadScope::default()).unwrap();
+        assert_eq!(v.messages[0].to, want);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -694,6 +694,10 @@ body.resizing iframe {
 .row.unread .row-from {
   font-weight: 700;
 }
+.row-from .row-to {
+  color: var(--rs-muted, var(--text-3));
+  font-weight: 400;
+}
 .row-icons {
   display: flex;
   align-items: center;
