@@ -1835,6 +1835,24 @@ body.resizing iframe {
   color: var(--text-3);
   overflow: hidden;
 }
+.sf-update {
+  grid-template-columns: 14px minmax(0, 1fr);
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+  text-align: left;
+}
+.sf-update .sf-icon {
+  color: var(--accent);
+}
+.sf-update:hover {
+  background: var(--hover, rgba(127, 127, 127, 0.1));
+}
 .sf-icon {
   width: 14px;
   height: 14px;

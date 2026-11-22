@@ -1,4 +1,5 @@
 import { createEffect, createMemo, createSignal, Match, onCleanup, onMount, Show, Switch } from 'solid-js';
+import { startUpdateChecks } from './lib/updates';
 import type { Account, ListSort } from './api';
 import {
   accounts,
@@ -76,6 +77,7 @@ export function App() {
     void initApp();
     initExports();
     startGoogleSync();
+    startUpdateChecks();
   });
 
   // Ctrl/⌘+1: full ↔ rail · Ctrl/⌘+Shift+1: folder flyout · Ctrl/⌘+G: folder switcher ·

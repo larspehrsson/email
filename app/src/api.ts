@@ -6,6 +6,7 @@ import type {
   AttachmentCounts,
   ActionResult,
   Addr,
+  UpdateStatus,
   FileInfo,
   NextUnread,
   Provider,
@@ -274,6 +275,12 @@ export const api = {
   setSignatureDefaults: (accountId: number, newId: number | null, replyId: number | null): Promise<void> =>
     call('set_signature_defaults', { accountId, newId, replyId }),
   appVersion: (): Promise<string> => call('app_version', undefined),
+  /** Whether this copy updates itself, and where that stands (see lib/updates.ts). */
+  updateStatus: (): Promise<UpdateStatus> => call('update_status', undefined),
+  /** Ask for a newer version and download it; the status after. */
+  checkForUpdate: (): Promise<UpdateStatus> => call('check_for_update', undefined),
+  /** Install the downloaded version and restart (doesn't return when it works). */
+  installUpdate: (): Promise<void> => call('install_update', undefined),
   revealPath: (path: string): Promise<void> => call('reveal_path', { path }),
   setRead: (id: number, read: boolean): Promise<void> => call('set_read', { id, read }),
   setAllowRemote: (id: number, allow: boolean): Promise<void> => call('set_allow_remote', { id, allow }),

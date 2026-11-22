@@ -2,13 +2,15 @@ import { batch, createEffect, createMemo, createSignal, For, Match, onCleanup, S
 import { folderMenu } from './ContextMenu';
 import { hint } from '../lib/shortcuts';
 import { createStore } from 'solid-js/store';
-import { api, type Account, type Folder, type FolderRole, type SyncStatus } from '../api';
+import { api, errorMessage, type Account, type Folder, type FolderRole, type SyncStatus } from '../api';
 import { folderById, foldersByAccount, moveAccount, selectedFolderId, selectFolder, syncByAccount, accounts, mainView, setMainView } from '../state';
 import { AccountDot } from './FolderSwitcher';
 import { cancelExport, exportLabel, exportNow } from '../lib/exports';
 import { fmtNum, loadPref, savePref } from '../lib/format';
 import { AlertIcon, CheckIcon, ChevronIcon, FolderIcon, LockIcon, PeopleIcon, RoleIcon, SidebarIcon } from './Icons';
 import { PasswordDialog } from './PasswordPrompt';
+import { restartToUpdate, updateStatus } from '../lib/updates';
+import { showToast } from './Toast';
 import { toggleSidebar } from '../lib/layout';
 import { DRAG, platform } from '../lib/platform';
 
@@ -372,6 +374,25 @@ export function SyncFooter(props: { compact?: boolean }) {
           </For>
           <div class="sp-version">{appVersion() ? `Email ${appVersion()}` : '\u00a0'}</div>
         </div>
+      </Show>
+      <Show when={updateStatus()?.ready}>
+        {(v) => (
+          <button
+            class="sf-row sf-update"
+            title={`Email ${v()} is downloaded: restart to use it`}
+            onClick={() => restartToUpdate().catch((e) => showToast({ kind: 'error', text: errorMessage(e) }))}
+          >
+            <span class="sf-icon" aria-hidden="true">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M13.5 8a5.5 5.5 0 1 1-1.7-4" />
+                <path d="M13.5 2.5v3h-3" />
+              </svg>
+            </span>
+            <Show when={!props.compact}>
+              <span class="sf-text">Restart to update</span>
+            </Show>
+          </button>
+        )}
       </Show>
       <button
         ref={rowEl}

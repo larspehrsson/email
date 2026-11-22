@@ -23,6 +23,13 @@ page:
 
 Installing a newer build over an older one upgrades it; your mail and settings stay.
 
+**Updates come by themselves** when the build you installed has them (builds of a repository
+with the update signing key, see [DEVELOPING](docs/DEVELOPING.md#updates)): shortly after
+Email starts and every six hours it looks for a newer build, downloads it in the background,
+and **Restart to update** appears at the bottom of the sidebar. Settings › Troubleshooting ›
+Updates turns the looking off, or looks now. (The `.deb` and `.rpm` get updated too, asking for
+your password; a copy built on your own computer doesn't update itself.)
+
 ## Adding your accounts
 
 Click **+** in the sidebar and enter your address.

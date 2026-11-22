@@ -23,9 +23,10 @@ import { api, errorMessage, events, type Account, type AccountDetails, type Acco
 import { accountMark, accounts, notifyNewMail, reloadAccounts, setAddingAccount, setNotifyNewMail } from '../state';
 import { MARK_COLORS } from '../lib/accountMarks';
 import { AccountTools } from './AccountTools';
-import { fmtNum, fmtSize, loadPref, savePref } from '../lib/format';
+import { fmtNum, fmtSize, loadPref, savePref, smartDate } from '../lib/format';
 import { AccountDot } from './FolderSwitcher';
 import { SignaturesSection } from './SignatureSettings';
+import { autoUpdates, checkForUpdate, restartToUpdate, setAutoUpdates, updateStatus } from '../lib/updates';
 import { AiSection } from './AiSettings';
 
 // Settings: sections on the left, the chosen one on the right (each with its own heading,
@@ -790,6 +791,16 @@ function NotificationsSection() {
   );
 }
 
+function updateText(): string {
+  const s = updateStatus();
+  if (!s) return '';
+  if (s.checking) return 'Looking for a new version…';
+  if (s.ready) return `Version ${s.ready} is downloaded. It’s used once Email restarts.`;
+  if (s.error) return `Couldn’t look for a new version: ${s.error}`;
+  if (s.checked) return `Up to date (looked ${smartDate(s.checked)}).`;
+  return 'Looks shortly after Email starts, then every six hours.';
+}
+
 function TroubleshootingSection() {
   const [version] = createResource(() => api.appVersion().catch(() => ''));
   const [msg, setMsg] = createSignal<string | null>(null);
@@ -797,6 +808,34 @@ function TroubleshootingSection() {
   return (
     <div class="st-body">
       <Field label="Version">{version() ?? ''}</Field>
+      <Field label="Updates">
+        <Show
+          when={updateStatus()?.supported}
+          fallback={<span class="st-muted">This copy was built on this computer and doesn’t update itself; copies installed from the GitHub releases do.</span>}
+        >
+          <label class="st-check">
+            <input type="checkbox" checked={autoUpdates()} onChange={(e) => setAutoUpdates(e.currentTarget.checked)} />
+            Look for new versions and download them
+          </label>
+        </Show>
+      </Field>
+      <Show when={updateStatus()?.supported}>
+        <Field label="">
+          <span class="st-muted st-update-state">{updateText()}</span>
+          <Show
+            when={updateStatus()?.ready}
+            fallback={
+              <button class="link-btn st-field-action" disabled={!!updateStatus()?.checking} onClick={() => void checkForUpdate()}>
+                Check now
+              </button>
+            }
+          >
+            <button class="link-btn st-field-action" onClick={act(() => restartToUpdate())}>
+              Restart to update
+            </button>
+          </Show>
+        </Field>
+      </Show>
       <Field label="App log">
         <span class="st-muted">Connections, sync, sending: what to look at when something misbehaves.</span>
         <button class="link-btn st-field-action" onClick={act(() => api.showLog())}>

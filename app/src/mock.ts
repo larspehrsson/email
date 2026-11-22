@@ -22,6 +22,7 @@ import type {
   Signature,
   SignatureDefaults,
   Card,
+  UpdateStatus,
   GoogleStatus,
   ListFilter,
   TagDef,
@@ -1198,6 +1199,13 @@ export function createMockBackend(): Backend {
   }
 
   const startEmpty = typeof location !== 'undefined' && new URLSearchParams(location.search).has('empty');
+  const mockUpdate: UpdateStatus = {
+    supported: typeof location !== 'undefined' && new URLSearchParams(location.search).has('updates'),
+    checking: false,
+    ready: null,
+    checked: null,
+    error: null,
+  };
   // `?demo`: for screenshots (scripts/screenshots.js): no test samples, sync already done,
   // nothing arriving or changing on its own.
   const demo = typeof location !== 'undefined' && new URLSearchParams(location.search).has('demo');
@@ -2006,6 +2014,21 @@ export function createMockBackend(): Backend {
     async app_version() {
       await sleep(3);
       return '0.1.0 (preview)';
+    },
+    // `?updates`: a copy that updates itself, with 0.1.999 waiting.
+    async update_status() {
+      await sleep(3);
+      return { ...mockUpdate };
+    },
+    async check_for_update() {
+      if (!mockUpdate.supported) return { ...mockUpdate };
+      await sleep(200);
+      Object.assign(mockUpdate, { ready: '0.1.999', checked: Math.floor(Date.now() / 1000), error: null });
+      return { ...mockUpdate };
+    },
+    async install_update() {
+      await sleep(10);
+      (window as unknown as { __updateInstalled?: string }).__updateInstalled = mockUpdate.ready ?? '';
     },
     async reveal_path() {
       await sleep(5);

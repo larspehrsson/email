@@ -22,6 +22,7 @@ tauri-plugin-deep-link = "2.6.3"
 tauri-plugin-dialog = "2.8.3"
 tauri-plugin-opener = "2.7.2"
 tauri-plugin-single-instance = { version = "2.5.4", features = ["deep-link"] }
+tauri-plugin-updater = "2.14.1"
 tokio = { version = "1.53.3", features = ["time", "sync", "macros", "rt", "net", "io-util", "io-std"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

@@ -6,6 +6,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# One run at a time per branch: a newer push waits, so the "latest" release never mixes two
+# builds' files (and latest.json names the files beside it).
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   test:
     runs-on: ubuntu-22.04
@@ -111,6 +117,41 @@ jobs:
           echo "APP_VERSION=$v" >> "$GITHUB_ENV"
           echo "Building version $v"
 
+      # Updates (app/src-tauri/src/updater.rs): with the TAURI_SIGNING_PRIVATE_KEY secret (and
+      # its password) and the TAURI_UPDATER_PUBKEY variable set, the build signs its update
+      # files (.sig beside each) and the app gets the updater's configuration: the public key,
+      # and latest.json on this repository's "latest" release (written by the release job).
+      # Without them (pull requests from forks, other repositories) the app doesn't update itself.
+      - name: Updater
+        shell: bash
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ -z "$KEY" ] || [ -z "$PUBKEY" ]; then
+            echo "No updater key: this build doesn't update itself"
+            exit 0
+          fi
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY=$KEY"
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+          f=app/src-tauri/tauri.conf.json
+          node -e "
+            const fs = require('fs');
+            const c = JSON.parse(fs.readFileSync('$f'));
+            c.bundle.createUpdaterArtifacts = true;
+            c.plugins.updater = {
+              pubkey: process.env.PUBKEY,
+              endpoints: ['https://github.com/' + process.env.REPO + '/releases/download/latest/latest.json'],
+              windows: { installMode: 'passive' },
+            };
+            fs.writeFileSync('$f', JSON.stringify(c, null, 2) + '\n');
+          "
+          echo "Updates on, from $REPO"
+
       # macOS signing and notarization (https://v2.tauri.app/distribute/sign/macos/): with the
       # APPLE_* secrets set, the Tauri build imports the Developer ID certificate into a
       # temporary keychain, signs, notarizes and staples. Without them (pull requests from
@@ -160,11 +201,14 @@ jobs:
             ${{ matrix.bundle }}/dmg/*.dmg
             ${{ matrix.bundle }}/nsis/*.exe
             ${{ matrix.bundle }}/msi/*.msi
+            ${{ matrix.bundle }}/*/*.sig
+            ${{ matrix.bundle }}/macos/*.app.tar.gz
           if-no-files-found: ignore
 
       # Every build of main: its files on the "latest" pre-release, as plain downloads with
       # stable links (artifacts come zipped, need a login, expire, and their download service
-      # fails at times). Each platform replaces only its own files there.
+      # fails at times). Each platform replaces only its own files there. With the updater key,
+      # also the update files: each installer's signature (.sig), and macOS's Email.app.tar.gz.
       - name: Publish to the latest release
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         shell: bash
@@ -174,7 +218,8 @@ jobs:
           BUNDLE: ${{ matrix.bundle }}
         run: |
           shopt -s nullglob
-          files=("$BUNDLE"/deb/*.deb "$BUNDLE"/rpm/*.rpm "$BUNDLE"/appimage/*.AppImage "$BUNDLE"/dmg/*.dmg "$BUNDLE"/nsis/*.exe "$BUNDLE"/msi/*.msi)
+          files=("$BUNDLE"/deb/*.deb "$BUNDLE"/rpm/*.rpm "$BUNDLE"/appimage/*.AppImage "$BUNDLE"/dmg/*.dmg "$BUNDLE"/nsis/*.exe "$BUNDLE"/msi/*.msi
+                 "$BUNDLE"/*/*.sig "$BUNDLE"/macos/*.app.tar.gz)
           if [ ${#files[@]} -eq 0 ]; then echo "nothing to publish"; exit 0; fi
           # The first build creates the release (the platforms may try at once: one wins).
           gh release view latest >/dev/null 2>&1 \
@@ -183,7 +228,9 @@ jobs:
             || gh release view latest >/dev/null
           for a in $(gh release view latest --json assets --jq '.assets[].name'); do
             case "$PLATFORM:$a" in
-              macos:*.dmg | linux:*.deb | linux:*.rpm | linux:*.AppImage | windows:*.exe | windows:*.msi) gh release delete-asset latest "$a" --yes ;;
+              macos:*.dmg | macos:*.app.tar.gz | macos:*.app.tar.gz.sig \
+              | linux:*.deb | linux:*.deb.sig | linux:*.rpm | linux:*.rpm.sig | linux:*.AppImage | linux:*.AppImage.sig \
+              | windows:*.exe | windows:*.exe.sig | windows:*.msi | windows:*.msi.sig) gh release delete-asset latest "$a" --yes ;;
             esac
           done
           gh release upload latest "${files[@]}" --clobber
@@ -208,3 +255,23 @@ jobs:
           git push --force origin "$GITHUB_SHA:refs/tags/latest"
           gh release edit latest --prerelease --title "Latest build ($v)" \
             --notes "Version $v, built from ${GITHUB_SHA:0:7}. Unsigned on Linux and Windows; signed and notarized on macOS."
+          echo "APP_VERSION=$v" >> "$GITHUB_ENV"
+
+      # What the apps ask for to update themselves (app/src-tauri/src/updater.rs): this version,
+      # and for each platform and kind of install the file and its signature, all on this
+      # release. Only when the build signed its files (the updater key is set).
+      - name: Publish latest.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          dir="$RUNNER_TEMP/sigs"
+          mkdir -p "$dir"
+          gh release download latest --pattern '*.sig' --dir "$dir" --clobber || true
+          if ! ls "$dir"/*.sig >/dev/null 2>&1; then
+            echo "No signatures: no update files"
+            exit 0
+          fi
+          node .github/latest-json.js "$dir" "$APP_VERSION" "${GITHUB_SHA:0:7}" "https://github.com/$REPO/releases/download/latest" > "$RUNNER_TEMP/latest.json"
+          cat "$RUNNER_TEMP/latest.json"
+          gh release upload latest "$RUNNER_TEMP/latest.json" --clobber

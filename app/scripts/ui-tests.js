@@ -1459,6 +1459,40 @@ describe('sender pictures', () => {
   });
 });
 
+describe('updates', () => {
+  test('a copy built here says it doesn\'t update itself', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'Troubleshooting' }).click();
+      await page.locator('.st-field', { hasText: 'Updates' }).getByText(/doesn’t update itself/).waitFor();
+      assert.equal(await page.locator('.sf-update').count(), 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('one from the releases: Check now downloads it, Restart to update installs it', async () => {
+    const { page, errors, close } = await open({ threaded: false, query: '&updates' });
+    try {
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'Troubleshooting' }).click();
+      const box = page.locator('.st-field', { hasText: 'Look for new versions' }).locator('input[type=checkbox]');
+      assert.equal(await box.isChecked(), true, 'on by default');
+      await page.getByRole('button', { name: 'Check now' }).click();
+      await page.locator('.st-update-state', { hasText: '0.1.999 is downloaded' }).waitFor();
+      await page.keyboard.press('Escape');
+      // The sidebar offers the restart too.
+      await page.locator('.sf-update').click();
+      await page.waitForFunction(() => window.__updateInstalled === '0.1.999');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('message source', () => {
   test('right-click › Show source; a question about it is answered; ⌥⌘U opens it too', async () => {
     const { page, errors, close } = await open({ threaded: false });

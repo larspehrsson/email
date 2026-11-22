@@ -16,6 +16,7 @@ use tauri_plugin_opener::OpenerExt;
 mod default_mail;
 mod mcp;
 mod notify;
+mod updater;
 mod window_state;
 
 type Res<T> = Result<T, String>;
@@ -1357,7 +1358,7 @@ pub fn run() {
         }
         let _ = app.emit("menu-action", MenuAction { id });
     });
-    builder
+    let builder = builder
         // One instance per machine: a second launch focuses the existing window instead of
         // starting another sync engine on the same database and accounts.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -1368,7 +1369,16 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_dialog::init());
+    // Updating itself: only a build made by CI with the signing key has the updater's
+    // configuration (see `updater`); without it the plugin isn't there and Settings says so.
+    let context = tauri::generate_context!();
+    let builder = if updater::enabled(context.config()) {
+        builder.plugin(tauri_plugin_updater::Builder::new().build()).manage(Arc::new(updater::UpdateState::default()))
+    } else {
+        builder
+    };
+    builder
         .setup(|app| {
             init_logging(app.path().app_log_dir().ok());
             tracing::info!(version = version_label(), "starting");
@@ -1504,8 +1514,11 @@ pub fn run() {
             set_tag,
             delete_tag,
             notify::set_notifications,
+            updater::update_status,
+            updater::check_for_update,
+            updater::install_update,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         .run(|_app, _event| {
             // ⌘Q (or the like) with an export running: ask first.

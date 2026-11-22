@@ -108,6 +108,19 @@ export interface MessageSummary {
   to?: Addr[];
 }
 
+/** Updating itself (app/src-tauri/src/updater.rs). */
+export interface UpdateStatus {
+  /** this copy updates itself (installed from the GitHub releases) */
+  supported: boolean;
+  checking: boolean;
+  /** the version downloaded, installed on restart */
+  ready: string | null;
+  /** when it last asked, Unix seconds */
+  checked: number | null;
+  /** why the last check or download failed */
+  error: string | null;
+}
+
 export interface Addr {
   name: string | null;
   addr: string;
@@ -700,6 +713,9 @@ export interface CommandMap {
   set_tag: { args: { keyword: string | null; name: string; color: string }; ret: string };
   delete_tag: { args: { keyword: string }; ret: void };
   app_version: { args: undefined; ret: string };
+  update_status: { args: undefined; ret: UpdateStatus };
+  check_for_update: { args: undefined; ret: UpdateStatus };
+  install_update: { args: undefined; ret: void };
   reveal_path: { args: { path: string }; ret: void };
   index_of: { args: { folderId: number; id: number; threaded: boolean; sort: ListSort; filter?: ListFilter }; ret: number | null };
   locate_message: {
