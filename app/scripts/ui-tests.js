@@ -1459,6 +1459,24 @@ describe('sender pictures', () => {
   });
 });
 
+describe('notifications', () => {
+  test('Settings: also while in use (on), and a test notification', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'Notifications' }).click();
+      const inUse = page.locator('.st-field', { hasText: 'Also while Email is the window' }).locator('input[type=checkbox]');
+      assert.equal(await inUse.isChecked(), true, 'also while in use, by default');
+      await page.getByRole('button', { name: 'Send a test notification' }).click();
+      await page.waitForFunction(() => window.__testNotifications === 1);
+      await page.getByText(/^Sent\. Nothing showed\?/).waitFor();
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('updates', () => {
   test('a copy built here says it doesn\'t update itself', async () => {
     const { page, errors, close } = await open({ threaded: false });

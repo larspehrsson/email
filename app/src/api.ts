@@ -331,7 +331,9 @@ export const api = {
   setAccountMark: (accountId: number, letter: string | null, color: string | null): Promise<void> =>
     call('set_account_mark', { accountId, letter, color }),
   /** Desktop notifications for new mail in an Inbox (while the window isn't in use). */
-  setNotifications: (enabled: boolean): Promise<void> => call('set_notifications', { enabled }),
+  setNotifications: (enabled: boolean, whileInUse: boolean): Promise<void> => call('set_notifications', { enabled, whileInUse }),
+  /** Show a notification now, whatever the window: to see that they come through. */
+  testNotification: (): Promise<void> => call('test_notification', undefined),
 };
 
 async function on<K extends EventName>(event: K, cb: (p: EventMap[K]) => void): Promise<() => void> {

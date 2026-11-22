@@ -1514,6 +1514,7 @@ pub fn run() {
             set_tag,
             delete_tag,
             notify::set_notifications,
+            notify::test_notification,
             updater::update_status,
             updater::check_for_update,
             updater::install_update,

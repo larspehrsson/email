@@ -761,7 +761,8 @@ export interface CommandMap {
   default_mail_status: { args: Record<string, never>; ret: DefaultMail };
   make_default_mail: { args: Record<string, never>; ret: void };
   set_account_mark: { args: { accountId: number; letter: string | null; color: string | null }; ret: void };
-  set_notifications: { args: { enabled: boolean }; ret: void };
+  set_notifications: { args: { enabled: boolean; whileInUse: boolean }; ret: void };
+  test_notification: { args: undefined; ret: void };
   account_storage: { args: undefined; ret: AccountStorage[] };
   attachment_counts: { args: undefined; ret: AttachmentCounts[] };
   ui_log: { args: { message: string }; ret: void };

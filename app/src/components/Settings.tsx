@@ -20,7 +20,7 @@ import {
 } from '../lib/shortcuts';
 import { ChevronIcon, CloseIcon } from './Icons';
 import { api, errorMessage, events, type Account, type AccountDetails, type AccountStorage, type AttachmentCounts } from '../api';
-import { accountMark, accounts, notifyNewMail, reloadAccounts, setAddingAccount, setNotifyNewMail } from '../state';
+import { accountMark, accounts, notifyInUse, notifyNewMail, reloadAccounts, setAddingAccount, setNotifyInUse, setNotifyNewMail } from '../state';
 import { MARK_COLORS } from '../lib/accountMarks';
 import { AccountTools } from './AccountTools';
 import { fmtNum, fmtSize, loadPref, savePref, smartDate } from '../lib/format';
@@ -776,6 +776,7 @@ function RemoteSenders() {
 }
 
 function NotificationsSection() {
+  const [testSent, setTestSent] = createSignal(false);
   return (
     <div class="st-body">
       <Field label="New mail">
@@ -785,7 +786,27 @@ function NotificationsSection() {
         </label>
       </Field>
       <Field label="">
-        <span class="st-muted">Only while Email isn’t the window you’re using. Click one to open the message.</span>
+        <label class="st-check">
+          <input
+            type="checkbox"
+            checked={notifyInUse()}
+            disabled={!notifyNewMail()}
+            onChange={(e) => setNotifyInUse(e.currentTarget.checked)}
+          />
+          Also while Email is the window you’re using
+        </label>
+      </Field>
+      <Field label="">
+        <span class="st-muted">Click one to open the message.</span>
+      </Field>
+      <Field label="">
+        <span class="st-muted">{testSent() ? 'Sent. Nothing showed? Look for Email in your system’s notification settings.' : 'See that they come through.'}</span>
+        <button
+          class="link-btn st-field-action"
+          onClick={() => api.testNotification().then(() => setTestSent(true), () => setTestSent(true))}
+        >
+          Send a test notification
+        </button>
       </Field>
     </div>
   );

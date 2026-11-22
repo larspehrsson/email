@@ -1,5 +1,5 @@
-//! Desktop notifications for new mail in an Inbox, shown while the window isn't the one in use,
-//! and for snoozed mail whose time came.
+//! Desktop notifications for new mail in an Inbox (also while the window is the one in use,
+//! unless turned off in Settings), and for snoozed mail whose time came.
 //! Clicking one brings the window up on the message (or, for several, on the Inbox).
 //!
 //! On macOS through UNUserNotificationCenter (`mac`): what macOS shows, lists under System
@@ -14,8 +14,10 @@ use mail_core::model::{FolderRole, NewMessage};
 use serde::Serialize;
 use tauri::{Emitter, Manager};
 
-/// The UI's setting (Settings › Notifications), pushed at startup and on every change.
+/// The UI's settings (Settings › Notifications), pushed at startup and on every change: new
+/// mail notifies at all; and also while the window is the one in use.
 static ENABLED: AtomicBool = AtomicBool::new(true);
+static WHILE_IN_USE: AtomicBool = AtomicBool::new(true);
 
 /// Notifications whose click is still awaited, each on a thread of its own. Unattended ones
 /// pile up (GNOME keeps them until dismissed), so past this many new ones aren't clickable.
@@ -23,8 +25,9 @@ static WAITING: AtomicUsize = AtomicUsize::new(0);
 const MAX_WAITING: usize = 32;
 
 #[tauri::command]
-pub fn set_notifications(enabled: bool) {
+pub fn set_notifications(enabled: bool, while_in_use: Option<bool>) {
     ENABLED.store(enabled, Ordering::Relaxed);
+    WHILE_IN_USE.store(while_in_use.unwrap_or(true), Ordering::Relaxed);
 }
 
 #[derive(Clone, Serialize)]
@@ -53,7 +56,11 @@ pub fn new_mail(app: &tauri::AppHandle, core: &Core, account_id: i64, folder_id:
         .ok()
         .and_then(|fs| fs.into_iter().find(|f| f.id == folder_id))
         .is_some_and(|f| f.role == Some(FolderRole::Inbox));
-    if !is_inbox || in_use(app) {
+    if !is_inbox {
+        return;
+    }
+    if !WHILE_IN_USE.load(Ordering::Relaxed) && in_use(app) {
+        tracing::info!(folder_id, count = messages.len(), "new mail while the window is in use: no notification");
         return;
     }
     let accounts = core.accounts().unwrap_or_default();
@@ -73,6 +80,14 @@ pub fn new_mail(app: &tauri::AppHandle, core: &Core, account_id: i64, folder_id:
     }
     tracing::info!(account = account.email, count = messages.len(), "new mail notification");
     show(app, summary, body, folder_id, target, "email.arrived");
+}
+
+/// Settings › Notifications › Send a test notification: one now, whatever the window. A click
+/// only brings the window up.
+#[tauri::command]
+pub fn test_notification(app: tauri::AppHandle) {
+    tracing::info!("test notification");
+    show(&app, "Email".into(), "Notifications work: new mail shows like this while you're in another app.".into(), 0, None, "email");
 }
 
 /// Snoozed mail whose time came: a reminder you asked for, so shown even while the window is in
@@ -176,7 +191,10 @@ fn open(app: &tauri::AppHandle, folder_id: i64, id: Option<i64>) {
         let _ = w.show();
         let _ = w.set_focus();
     }
-    let _ = app.emit("open-message", OpenPayload { folder_id, id });
+    // 0: a test notification, nothing to open.
+    if folder_id != 0 {
+        let _ = app.emit("open-message", OpenPayload { folder_id, id });
+    }
 }
 
 #[cfg(target_os = "macos")]

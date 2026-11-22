@@ -2396,6 +2396,10 @@ export function createMockBackend(): Backend {
       return { messages: kept, freedBytes: kept * 458_000 };
     },
     async set_notifications() {},
+    async test_notification() {
+      (window as unknown as { __testNotifications?: number }).__testNotifications =
+        ((window as unknown as { __testNotifications?: number }).__testNotifications ?? 0) + 1;
+    },
     async set_display_name({ accountId, name }) {
       await sleep(3);
       const acc = accounts.find((x) => x.id === accountId);

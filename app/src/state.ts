@@ -414,7 +414,18 @@ export { notifyNewMail };
 export function setNotifyNewMail(on: boolean): void {
   setNotifyNewMailSig(on);
   savePref('notify.newMail', on);
-  api.setNotifications(on).catch((e) => console.warn('set_notifications failed', e));
+  pushNotifySettings();
+}
+// Also while Email is the window in use (several accounts: which one got it isn't on screen).
+const [notifyInUse, setNotifyInUseSig] = createSignal<boolean>(loadPref<boolean>('notify.whileInUse', true) !== false);
+export { notifyInUse };
+export function setNotifyInUse(on: boolean): void {
+  setNotifyInUseSig(on);
+  savePref('notify.whileInUse', on);
+  pushNotifySettings();
+}
+function pushNotifySettings(): void {
+  api.setNotifications(notifyNewMail(), notifyInUse()).catch((e) => console.warn('set_notifications failed', e));
 }
 
 export function selectFolder(id: number): void {
@@ -547,7 +558,7 @@ export async function initApp(): Promise<void> {
     }),
     events.onOpenMessage(({ folderId, id }) => revealMessage(folderId, id)),
   ];
-  api.setNotifications(notifyNewMail()).catch((e) => console.warn('set_notifications failed', e));
+  pushNotifySettings();
   await Promise.all(listening).catch((e) => console.warn('subscribing to core events', e));
 
   await moveOldOrder().catch((e) => console.warn('moving the account order', e));
