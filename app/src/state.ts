@@ -431,6 +431,12 @@ function pushNotifySettings(): void {
 export function selectFolder(id: number): void {
   // Picking a folder is for its mail: away from the address book, if that's open.
   setMainView('mail');
+  showFolder(id);
+}
+
+/** The folder shown behind whatever view is up: chosen by the app itself (at startup, after an
+ *  account goes), which leaves the address book open. */
+function showFolder(id: number): void {
   if (selectedFolderId() === id) return;
   batch(() => {
     setSelectedFolderId(id);
@@ -465,7 +471,7 @@ function ensureFolderSelected(): void {
   if (cur != null && folderById(cur)?.selectable) return;
   const pref = loadPref<number | null>('ui.folder', null);
   const f = (pref != null && folderById(pref)?.selectable ? folderById(pref) : undefined) ?? firstInbox();
-  if (f) selectFolder(f.id);
+  if (f) showFolder(f.id);
 }
 
 /** A compose window: just the accounts (for From), no folders or sync. */
