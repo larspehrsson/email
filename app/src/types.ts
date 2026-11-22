@@ -221,6 +221,36 @@ export interface GoogleLink {
   error: string | null;
   count: number;
 }
+/** A value with Google's name for its kind ("Mobile", "Work"; may be empty). */
+export interface Labeled {
+  value: string;
+  label: string;
+}
+/** A date as Google keeps it (a birthday may have no year). */
+export interface ContactDay {
+  year: number | null;
+  month: number;
+  day: number;
+}
+/** What Google has for a contact beyond what the address book edits (shown, edited there). */
+export interface ContactDetails {
+  /** data: URL */
+  photo: string | null;
+  title: string;
+  department: string;
+  nicknames: string[];
+  emails: Labeled[];
+  phones: Labeled[];
+  addresses: Labeled[];
+  birthday: ContactDay | null;
+  /** [date, kind] */
+  events: [ContactDay, string][];
+  websites: Labeled[];
+  relations: Labeled[];
+  chat: Labeled[];
+  /** The contact in Google Contacts. */
+  link: string | null;
+}
 export interface GoogleStatus {
   /** the user's OAuth client (null: not set yet) */
   clientId: string | null;
@@ -651,6 +681,7 @@ export interface CommandMap {
   sender_icon: { args: { addr: string }; ret: string | null };
   account_logos: { args: undefined; ret: { accountId: number; dataUrl: string }[] };
   google_status: { args: undefined; ret: GoogleStatus };
+  contact_details: { args: { cardId: number }; ret: ContactDetails | null };
   message_source: { args: { id: number }; ret: string };
   mcp_status: { args: undefined; ret: McpStatus };
   set_mcp_settings: { args: { settings: McpSettings }; ret: void };

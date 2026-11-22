@@ -29,9 +29,134 @@ use serde_json::{Value, json};
 use crate::addressbook::Card;
 use crate::store::Store;
 
-/// The fields a sync reads, and the ones an update replaces.
-pub const PERSON_FIELDS: &str = "names,emailAddresses,phoneNumbers,organizations,biographies,metadata";
+/// The fields a sync reads, and the ones an update replaces. The others are shown with the
+/// contact (`details`), and edited in Google.
+pub const PERSON_FIELDS: &str =
+    "names,emailAddresses,phoneNumbers,organizations,biographies,metadata,photos,addresses,birthdays,events,urls,nicknames,relations,imClients";
 pub const UPDATE_FIELDS: &str = "names,emailAddresses,phoneNumbers,organizations,biographies";
+
+/// Google's sync token only works with the fields it was made for, so it's kept tagged with
+/// them: after `PERSON_FIELDS` changes, the next sync reads everything again (and so has the
+/// new fields for every contact).
+fn tag_token(t: &str) -> String {
+    format!("{PERSON_FIELDS}|{t}")
+}
+fn untag_token(t: &str) -> Option<&str> {
+    t.strip_prefix(PERSON_FIELDS)?.strip_prefix('|')
+}
+
+// ------------------------------------------------------------- what else Google has
+
+/// A value with Google's name for its kind ("Mobile", "Work"; empty if it has none).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Labeled {
+    pub value: String,
+    pub label: String,
+}
+
+/// A date as Google keeps it: the year may be missing (a birthday without one).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Day {
+    pub year: Option<i64>,
+    pub month: i64,
+    pub day: i64,
+}
+
+/// A Google contact's details beyond what the address book edits, for showing with it.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Details {
+    /// The picture, as a data: URL (`Core::contact_details` fetches it).
+    pub photo: Option<String>,
+    pub title: String,
+    pub department: String,
+    pub nicknames: Vec<String>,
+    /// With their kinds; the addresses themselves are edited in the address book.
+    pub emails: Vec<Labeled>,
+    pub phones: Vec<Labeled>,
+    /// Postal addresses, as Google formats them (lines).
+    pub addresses: Vec<Labeled>,
+    pub birthday: Option<Day>,
+    /// Anniversaries and other dates.
+    pub events: Vec<(Day, String)>,
+    pub websites: Vec<Labeled>,
+    /// Spouse, child…: the person's name and how they're related.
+    pub relations: Vec<Labeled>,
+    /// Chat accounts (Skype, …).
+    pub chat: Vec<Labeled>,
+    /// The contact in Google Contacts, to edit what's here.
+    pub link: Option<String>,
+}
+
+fn labeled(p: &Value, field: &str, value_key: &str, label_keys: &[&str]) -> Vec<Labeled> {
+    p.get(field)
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|e| {
+                    let value = e.get(value_key).and_then(Value::as_str)?.trim().to_string();
+                    let label = label_keys.iter().find_map(|k| e.get(*k).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty())).unwrap_or("");
+                    (!value.is_empty()).then(|| Labeled { value, label: label.to_string() })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn day(d: &Value) -> Option<Day> {
+    let month = d.get("month")?.as_i64().filter(|m| (1..=12).contains(m))?;
+    let day = d.get("day")?.as_i64().filter(|x| (1..=31).contains(x))?;
+    Some(Day { year: d.get("year").and_then(Value::as_i64).filter(|y| *y > 0), month, day })
+}
+
+/// What a person (as last seen) has besides the fields the address book shows itself.
+pub fn details(p: &Value) -> Details {
+    let org = first(p, "organizations");
+    Details {
+        photo: None,
+        title: text(org, "title"),
+        department: text(org, "department"),
+        nicknames: labeled(p, "nicknames", "value", &[]).into_iter().map(|l| l.value).collect(),
+        emails: labeled(p, "emailAddresses", "value", &["formattedType", "type"]),
+        phones: labeled(p, "phoneNumbers", "value", &["formattedType", "type"]),
+        addresses: labeled(p, "addresses", "formattedValue", &["formattedType", "type"]),
+        birthday: p.get("birthdays").and_then(Value::as_array).and_then(|a| a.iter().find_map(|b| b.get("date").and_then(day))),
+        events: p
+            .get("events")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|e| {
+                        let label = ["formattedType", "type"].iter().find_map(|k| e.get(*k).and_then(Value::as_str)).unwrap_or("").to_string();
+                        Some((day(e.get("date")?)?, label))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        websites: labeled(p, "urls", "value", &["formattedType", "type"]),
+        relations: labeled(p, "relations", "person", &["formattedType", "type"]),
+        chat: labeled(p, "imClients", "username", &["formattedProtocol", "protocol"]),
+        link: resource_of(p).and_then(|r| r.strip_prefix("people/").map(|id| format!("https://contacts.google.com/person/{id}"))),
+    }
+}
+
+/// The contact's own picture (not the letter Google makes up when there's none), at a size
+/// for the address book.
+pub fn photo_url(p: &Value) -> Option<String> {
+    let photos = p.get("photos")?.as_array()?;
+    let own = |ph: &&Value| !ph.get("default").and_then(Value::as_bool).unwrap_or(false);
+    let primary = |ph: &&Value| ph.pointer("/metadata/primary").and_then(Value::as_bool).unwrap_or(false);
+    let ph = photos.iter().filter(own).find(primary).or_else(|| photos.iter().find(own))?;
+    let url = ph.get("url")?.as_str()?;
+    if !url.starts_with("https://") {
+        return None;
+    }
+    // Google's picture addresses end in their size ("=s100"): ask for a sharper one.
+    Some(match url.rfind("=s") {
+        Some(i) if url[i + 2..].chars().all(|c| c.is_ascii_digit()) && i + 2 < url.len() => format!("{}=s256", &url[..i]),
+        _ => url.to_string(),
+    })
+}
 
 /// An account linked to its Google contacts.
 #[derive(Debug, Clone, Serialize)]
@@ -335,7 +460,8 @@ pub async fn sync<A: PeopleApi>(store: &Store, account_id: i64, api: &A, now: i6
     }
 
     // ---- read: every page first, then apply.
-    let mut token = link.sync_token.clone();
+    // A token from another set of fields (an older version of the app) can't be used.
+    let mut token = link.sync_token.as_deref().and_then(untag_token).map(str::to_string);
     let (people, next_token, full) = 'read: loop {
         let full = token.is_none();
         let mut people = Vec::new();
@@ -416,7 +542,7 @@ pub async fn sync<A: PeopleApi>(store: &Store, account_id: i64, api: &A, now: i6
             }
         }
     }
-    store.set_google_sync(account_id, next_token.as_deref(), Some(now), None)?;
+    store.set_google_sync(account_id, next_token.as_deref().map(tag_token).as_deref(), Some(now), None)?;
     Ok(report)
 }
 
@@ -714,6 +840,67 @@ mod tests {
         assert_eq!(r.removed, 1);
         assert_eq!(names(&store), ["Ann"]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_token_from_other_fields_reads_everything_again() {
+        let (dir, store, acct) = setup("oldfields");
+        let g = Fake::new(10);
+        g.add("Ann", "ann@x.com", "work");
+        // Saved by a version that asked for fewer fields: not sent back to Google.
+        store.set_google_sync(acct, Some("10"), Some(1), None).unwrap();
+        block(sync(&store, acct, &g, 2)).unwrap();
+        assert_eq!(g.calls.borrow().last().unwrap(), "list None None", "{:?}", g.calls.borrow());
+        // Its own token is used next time.
+        block(sync(&store, acct, &g, 3)).unwrap();
+        assert!(g.calls.borrow().last().unwrap().starts_with("list Some("), "{:?}", g.calls.borrow());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn details_beyond_the_address_book() {
+        let p = json!({
+            "resourceName": "people/c123",
+            "organizations": [{ "name": "Acme", "title": "Engineer", "department": "R&D" }],
+            "nicknames": [{ "value": "Lasse" }],
+            "emailAddresses": [{ "value": "a@x.com", "type": "work", "formattedType": "Work" }, { "value": "b@x.com" }],
+            "phoneNumbers": [{ "value": "+61 400 000 000", "formattedType": "Mobile" }],
+            "addresses": [{ "formattedValue": "1 Main St\nMelbourne VIC 3000", "formattedType": "Home" }],
+            "birthdays": [{ "date": { "month": 5, "day": 14 } }],
+            "events": [{ "date": { "year": 2001, "month": 6, "day": 2 }, "formattedType": "Anniversary" }],
+            "urls": [{ "value": "https://pehrsson.info", "formattedType": "Homepage" }],
+            "relations": [{ "person": "Oliver", "formattedType": "Child" }],
+            "imClients": [{ "username": "lars.p", "formattedProtocol": "Skype" }],
+        });
+        let d = details(&p);
+        assert_eq!((d.title.as_str(), d.department.as_str()), ("Engineer", "R&D"));
+        assert_eq!(d.nicknames, ["Lasse"]);
+        assert_eq!(d.emails, [Labeled { value: "a@x.com".into(), label: "Work".into() }, Labeled { value: "b@x.com".into(), label: "".into() }]);
+        assert_eq!(d.phones[0].label, "Mobile");
+        assert_eq!(d.addresses[0].value, "1 Main St\nMelbourne VIC 3000");
+        assert_eq!(d.birthday, Some(Day { year: None, month: 5, day: 14 }));
+        assert_eq!(d.events, [(Day { year: Some(2001), month: 6, day: 2 }, "Anniversary".to_string())]);
+        assert_eq!(d.websites[0].value, "https://pehrsson.info");
+        assert_eq!(d.relations[0], Labeled { value: "Oliver".into(), label: "Child".into() });
+        assert_eq!(d.chat[0], Labeled { value: "lars.p".into(), label: "Skype".into() });
+        assert_eq!(d.link.as_deref(), Some("https://contacts.google.com/person/c123"));
+        // A person with nothing more: empty, no errors.
+        assert_eq!(details(&json!({})), Details::default());
+    }
+
+    #[test]
+    fn the_contacts_own_photo_only() {
+        // The letter Google makes up isn't a photo.
+        assert_eq!(photo_url(&json!({ "photos": [{ "url": "https://lh3.googleusercontent.com/cm/abc=s100", "default": true }] })), None);
+        assert_eq!(
+            photo_url(&json!({ "photos": [
+                { "url": "https://lh3.googleusercontent.com/cm/abc=s100", "default": true },
+                { "url": "https://lh3.googleusercontent.com/contacts/xyz=s100", "metadata": { "primary": true } }
+            ] })),
+            Some("https://lh3.googleusercontent.com/contacts/xyz=s256".to_string())
+        );
+        assert_eq!(photo_url(&json!({ "photos": [{ "url": "https://lh3.googleusercontent.com/a/x" }] })).as_deref(), Some("https://lh3.googleusercontent.com/a/x"));
+        assert_eq!(photo_url(&json!({ "photos": [{ "url": "http://insecure.example/p.jpg" }] })), None);
     }
 
     #[test]

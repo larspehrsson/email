@@ -214,7 +214,7 @@ fn absolute(href: &str, base: &str) -> Option<String> {
 }
 
 /// A picture at `url`: an image type (by the answer's type, or its first bytes), not too big.
-async fn get_image(url: &str) -> Result<Icon> {
+pub(crate) async fn get_image(url: &str) -> Result<Icon> {
     let (_, status, mime, body) = get(url, 4).await?;
     if !(200..300).contains(&status) || body.is_empty() {
         bail!("{status}");

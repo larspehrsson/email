@@ -364,6 +364,13 @@ async fn google_disconnect(core: State<'_, Arc<Core>>, account_id: i64) -> Res<(
     core.google_disconnect(account_id).map_err(err)
 }
 
+/// A Google contact's details beyond what the address book edits (photo, title, addresses,
+/// birthday…); null for one kept only here.
+#[tauri::command]
+async fn contact_details(core: State<'_, Arc<Core>>, card_id: i64) -> Res<Option<mail_core::gcontacts::Details>> {
+    core.inner().clone().contact_details(card_id).await.map_err(err)
+}
+
 /// Sync one account's Google contacts (null: all); whether anything changed here.
 #[tauri::command]
 async fn google_sync(core: State<'_, Arc<Core>>, account_id: Option<i64>) -> Res<bool> {
@@ -1450,6 +1457,7 @@ pub fn run() {
             google_connect,
             google_disconnect,
             google_sync,
+            contact_details,
             set_account_logo,
             remote_senders,
             set_remote_sender,

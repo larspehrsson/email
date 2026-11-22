@@ -23,6 +23,7 @@ import type {
   ListFilter,
   SelectionInfo,
   GoogleStatus,
+  ContactDetails,
   McpStatus,
   McpSettings,
   McpLogEntry,
@@ -132,6 +133,8 @@ export const api = {
   googleDisconnect: (accountId: number): Promise<void> => call('google_disconnect', { accountId }),
   /** Sync one account's Google contacts (null: all); whether anything changed here. */
   googleSync: (accountId: number | null): Promise<boolean> => call('google_sync', { accountId }),
+  /** A Google contact's photo, title, addresses, birthday…; null for one kept only here. */
+  contactDetails: (cardId: number): Promise<ContactDetails | null> => call('contact_details', { cardId }),
   setAccountLogo: (accountId: number, dataUrl: string | null): Promise<void> => call('set_account_logo', { accountId, dataUrl }),
   /** A sender's picture (data: URL) from their domain; null when there's none. */
   senderIcon: (addr: string): Promise<string | null> => call('sender_icon', { addr }),

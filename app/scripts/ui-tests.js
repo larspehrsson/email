@@ -1362,6 +1362,21 @@ describe('google contacts', () => {
       assert.equal(await page.locator('.ct-row', { hasText: 'Olivia Hart' }).locator('.ct-google').count(), 1);
       await page.locator('.ct-row', { hasText: 'Olivia Hart' }).click();
       assert.match(await page.locator('.ct-where-text').textContent(), /Google Contacts/);
+      // What Google has beyond the fields here: photo, title, kinds, address, birthday…
+      await page.locator('.ct-photo').waitFor();
+      assert.match(await page.locator('.ct-photo').getAttribute('src'), /^data:image\//);
+      assert.equal(await page.locator('.ct-role').textContent(), 'Head of Design · Studio · “Liv”');
+      assert.equal(await page.locator('.ct-line .ct-kind').first().textContent(), 'Work', 'the address\'s kind');
+      const more = page.locator('.ct-google-more');
+      assert.match(await more.textContent(), /12 Harbor St/);
+      assert.match(await more.locator('.ct-field', { hasText: 'Birthday' }).textContent(), /14/);
+      assert.match(await more.locator('.ct-field', { hasText: 'Spouse' }).textContent(), /Sam Hart/);
+      assert.match(await page.locator('.ct-google-link').getAttribute('href'), /^https:\/\/contacts\.google\.com\/person\//);
+      // One with nothing more: no photo, no block, still the link to edit there.
+      await page.locator('.ct-row', { hasText: 'Noah Becker' }).click();
+      await page.locator('.ct-photo').waitFor({ state: 'detached' });
+      assert.equal(await page.locator('.ct-google-more').count(), 0);
+      await page.locator('.ct-google-link').waitFor();
       await page.locator('[aria-label="New contact"]').click();
       const saveIn = page.locator('select.ct-save-in');
       await saveIn.waitFor();

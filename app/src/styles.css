@@ -5962,3 +5962,88 @@ body.dragging-account * {
   font-weight: 500;
   white-space: normal;
 }
+
+/* A Google contact's photo, title and what else Google has (shown; edited there). */
+.ct-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.ct-head-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ct-head-text .ct-big {
+  width: 100%;
+}
+.ct-photo {
+  width: 64px;
+  height: 64px;
+  flex: none;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--bg-subtle);
+  box-shadow: 0 0 0 1px var(--sep);
+}
+.ct-role {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.ct-nick {
+  color: var(--text-3);
+}
+.ct-line .st-input {
+  flex: 1;
+  min-width: 0;
+}
+.ct-kind {
+  flex: none;
+  min-width: 52px;
+  padding: 0 4px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.ct-kind-after {
+  display: inline-block;
+  min-width: 0;
+  margin-left: 8px;
+  vertical-align: baseline;
+}
+.ct-address .ct-kind-after {
+  display: block;
+  margin: 2px 0 0;
+  padding: 0;
+}
+.ct-google-more {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 0 2px;
+  border-top: 1px solid var(--sep);
+}
+.ct-ro-value {
+  padding-top: 7px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.ct-address {
+  white-space: pre-line;
+  line-height: 1.45;
+}
+.ct-ro-value a,
+.ct-google-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+.ct-ro-value a:hover,
+.ct-google-link:hover {
+  text-decoration: underline;
+}
+.ct-google-link {
+  padding-top: 2px;
+  font-size: 12.5px;
+}

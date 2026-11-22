@@ -1,5 +1,5 @@
-import { batch, createEffect, createMemo, createSignal, For, Index, on, onCleanup, onMount, Show } from 'solid-js';
-import { api, errorMessage, type Card } from '../api';
+import { batch, createEffect, createMemo, createResource, createSignal, For, Index, on, onCleanup, onMount, Show } from 'solid-js';
+import { api, errorMessage, type Card, type ContactDay, type Labeled } from '../api';
 import { cards, emptyCard, loadCards, reloadCards } from '../lib/addressBook';
 import { newMessageTo } from '../lib/compose';
 import { hint } from '../lib/shortcuts';
@@ -18,6 +18,12 @@ const [opening, setOpening] = createSignal<{ id: number } | { name: string; emai
 export function openContacts(at?: { id: number } | { name: string; email: string }): void {
   setOpening(at ?? null);
   setMainView('contacts');
+}
+
+/** "14 May 1971", or "14 May" for a birthday without a year (in the user's language). */
+function dayText(d: ContactDay): string {
+  const date = new Date(Date.UTC(d.year ?? 2000, d.month - 1, d.day));
+  return date.toLocaleDateString(undefined, { day: 'numeric', month: 'long', ...(d.year ? { year: 'numeric' } : {}), timeZone: 'UTC' });
 }
 
 export function ContactsView() {
@@ -87,6 +93,24 @@ export function ContactsView() {
   }
 
   const set = (patch: Partial<Card>) => form() && setForm({ ...form()!, ...patch });
+
+  // What Google has beyond these fields (photo, title, addresses, birthday…), for a Google
+  // contact: shown, and edited in Google. Fetched again only when another contact is chosen.
+  const [details] = createResource(
+    () => (form()?.google != null && form()!.id ? form()!.id : null),
+    (id) => api.contactDetails(id).catch(() => null),
+  );
+  /** Google's kind ("Mobile", "Work") for an address or number as typed here. */
+  const kindOf = (list: Labeled[] | undefined, value: string) => {
+    const v = value.trim().toLowerCase();
+    const plain = (s: string) => s.replace(/[^\d+]/g, '');
+    return list?.find((l) => l.value.toLowerCase() === v || (plain(v).length > 4 && plain(l.value) === plain(v)))?.label ?? '';
+  };
+  const role = () => [details()?.title, details()?.department].filter(Boolean).join(' · ');
+  const googleExtras = () => {
+    const d = details();
+    return !!d && (d.addresses.length > 0 || !!d.birthday || d.events.length > 0 || d.websites.length > 0 || d.relations.length > 0 || d.chat.length > 0);
+  };
 
   async function save() {
     const f = form();
@@ -198,15 +222,30 @@ export function ContactsView() {
         <Show when={form()} fallback={<p class="ct-empty ct-none">Choose someone, or add a contact with +.</p>}>
           {(f) => (
             <div class="ct-form">
-              <input
-                ref={(el) => (nameInput = el)}
-                class="ct-big"
-                type="text"
-                placeholder="Name"
-                aria-label="Name"
-                value={f().name}
-                onInput={(e) => set({ name: e.currentTarget.value })}
-              />
+              <div class="ct-head" classList={{ 'has-photo': !!details()?.photo }}>
+                <Show when={details()?.photo}>{(src) => <img class="ct-photo" src={src()} alt="" />}</Show>
+                <div class="ct-head-text">
+                  <input
+                    ref={(el) => (nameInput = el)}
+                    class="ct-big"
+                    type="text"
+                    placeholder="Name"
+                    aria-label="Name"
+                    value={f().name}
+                    onInput={(e) => set({ name: e.currentTarget.value })}
+                  />
+                  <Show when={role() || details()?.nicknames.length}>
+                    <div class="ct-role">
+                      {role()}
+                      <Show when={details()?.nicknames.length}>
+                        <span class="ct-nick">
+                          {role() ? ' · ' : ''}“{details()!.nicknames.join('”, “')}”
+                        </span>
+                      </Show>
+                    </div>
+                  </Show>
+                </div>
+              </div>
               <div class="ct-field ct-where">
                 <span>Saved in</span>
                 <Show
@@ -241,6 +280,7 @@ export function ContactsView() {
                           value={e()}
                           onInput={(ev) => set({ emails: f().emails.map((x, j) => (j === i ? ev.currentTarget.value : x)) })}
                         />
+                        <Show when={kindOf(details()?.emails, e())}>{(k) => <span class="ct-kind">{k()}</span>}</Show>
                         <Show when={f().emails.length > 1}>
                           <button class="icon-btn" aria-label={`Remove email ${i + 1}`} onClick={() => set({ emails: f().emails.filter((_, j) => j !== i) })}>
                             <CloseIcon size={11} />
@@ -267,6 +307,7 @@ export function ContactsView() {
                           value={p()}
                           onInput={(ev) => set({ phones: f().phones.map((x, j) => (j === i ? ev.currentTarget.value : x)) })}
                         />
+                        <Show when={kindOf(details()?.phones, p())}>{(k) => <span class="ct-kind">{k()}</span>}</Show>
                         <button class="icon-btn" aria-label={`Remove phone ${i + 1}`} onClick={() => set({ phones: f().phones.filter((_, j) => j !== i) })}>
                           <CloseIcon size={11} />
                         </button>
@@ -278,6 +319,84 @@ export function ContactsView() {
                   </button>
                 </div>
               </div>
+              <Show when={googleExtras() && details()}>
+                {(d) => (
+                  <div class="ct-google-more" aria-label="From Google Contacts">
+                    <For each={d().addresses}>
+                      {(a) => (
+                        <div class="ct-field ct-ro">
+                          <span>Address</span>
+                          <div class="ct-ro-value ct-address">
+                            {a.value}
+                            <Show when={a.label}>
+                              <span class="ct-kind ct-kind-after">{a.label}</span>
+                            </Show>
+                          </div>
+                        </div>
+                      )}
+                    </For>
+                    <Show when={d().birthday}>
+                      {(b) => (
+                        <div class="ct-field ct-ro">
+                          <span>Birthday</span>
+                          <div class="ct-ro-value">{dayText(b())}</div>
+                        </div>
+                      )}
+                    </Show>
+                    <For each={d().events}>
+                      {([day, kind]) => (
+                        <div class="ct-field ct-ro">
+                          <span>{kind || 'Date'}</span>
+                          <div class="ct-ro-value">{dayText(day)}</div>
+                        </div>
+                      )}
+                    </For>
+                    <For each={d().websites}>
+                      {(w) => (
+                        <div class="ct-field ct-ro">
+                          <span>Website</span>
+                          <div class="ct-ro-value">
+                            <Show when={/^https?:\/\//i.test(w.value)} fallback={w.value}>
+                              <a href={w.value} target="_blank" rel="noopener noreferrer">
+                                {w.value.replace(/^https?:\/\//i, '')}
+                              </a>
+                            </Show>
+                            <Show when={w.label}>
+                              <span class="ct-kind ct-kind-after">{w.label}</span>
+                            </Show>
+                          </div>
+                        </div>
+                      )}
+                    </For>
+                    <For each={d().relations}>
+                      {(r) => (
+                        <div class="ct-field ct-ro">
+                          <span>{r.label || 'Related'}</span>
+                          <div class="ct-ro-value">{r.value}</div>
+                        </div>
+                      )}
+                    </For>
+                    <For each={d().chat}>
+                      {(c) => (
+                        <div class="ct-field ct-ro">
+                          <span>{c.label || 'Chat'}</span>
+                          <div class="ct-ro-value">{c.value}</div>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                )}
+              </Show>
+              <Show when={details()?.link}>
+                {(href) => (
+                  <div class="ct-field ct-ro">
+                    <span />
+                    <a class="ct-google-link" href={href()} target="_blank" rel="noopener noreferrer">
+                      Edit more in Google Contacts ↗
+                    </a>
+                  </div>
+                )}
+              </Show>
               <label class="ct-field">
                 <span>Notes</span>
                 <textarea class="st-input ct-notes" rows={4} value={f().notes} onInput={(e) => set({ notes: e.currentTarget.value })} />

@@ -38,6 +38,11 @@ can mark the client ID as trusted (Admin console › Security › API controls).
   and notes are changed; everything else (labels like "work" or "mobile", job titles, birthdays,
   photos) stays as it is. If it was changed in Google meanwhile, the other fields keep Google's
   version and yours go on top.
+- A contact shows what else Google has for it: its photo, job title and department, nickname,
+  the kind of each address and number ("Mobile", "Work"), postal addresses, birthday and other
+  dates, websites, family and chat accounts. These are shown only; **Edit more in Google
+  Contacts** opens the contact there to change them. The photo is fetched from Google the first
+  time the contact is opened, then kept on this computer.
 - Deleting a contact here deletes it in Google (the question says so).
 - A new contact goes to the place chosen under **Saved in** (this computer, or one of the
   connected Google accounts).

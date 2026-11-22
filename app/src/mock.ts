@@ -1882,6 +1882,33 @@ export function createMockBackend(): Backend {
       localStorage.setItem('mock.google', JSON.stringify(st));
       localStorage.setItem('mock.cards', JSON.stringify(cardsLoad().filter((c) => c.google !== accountId)));
     },
+    async contact_details({ cardId }) {
+      await sleep(10);
+      const c = cardsLoad().find((x) => x.id === cardId);
+      if (!c || c.google == null) return null;
+      const none = { photo: null, title: '', department: '', nicknames: [], emails: [], phones: [], addresses: [], birthday: null, events: [], websites: [], relations: [], chat: [], link: null };
+      if (c.name !== 'Olivia Hart') return { ...none, link: `https://contacts.google.com/person/c${cardId}` };
+      // A made-up photo (a coloured circle), and the rest of what Google might have.
+      const photo =
+        'data:image/svg+xml;base64,' +
+        btoa('<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="96" height="96" fill="#c2410c"/><circle cx="48" cy="38" r="18" fill="#fde7d9"/><rect x="20" y="62" width="56" height="40" rx="28" fill="#fde7d9"/></svg>');
+      return {
+        ...none,
+        photo,
+        title: 'Head of Design',
+        department: 'Studio',
+        nicknames: ['Liv'],
+        emails: c.emails.map((value) => ({ value, label: 'Work' })),
+        phones: [{ value: '+1 503 555 0142', label: 'Mobile' }],
+        addresses: [{ value: '12 Harbor St\nPortland, ME 04101\nUSA', label: 'Work' }],
+        birthday: { year: null, month: 5, day: 14 },
+        events: [[{ year: 2019, month: 9, day: 7 }, 'Anniversary']],
+        websites: [{ value: 'https://fabrikam.example/olivia', label: 'Work' }],
+        relations: [{ value: 'Sam Hart', label: 'Spouse' }],
+        chat: [{ value: 'olivia.hart', label: 'Skype' }],
+        link: `https://contacts.google.com/person/c${cardId}`,
+      };
+    },
     async google_sync() {
       await sleep(20);
       const st = googleLoad();

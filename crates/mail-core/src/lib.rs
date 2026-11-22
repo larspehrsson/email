@@ -1349,6 +1349,34 @@ impl Core {
         Ok(())
     }
 
+    /// What Google has for a contact beyond what the address book edits (None: not a Google
+    /// contact, or not synced yet). Its picture is fetched the first time (and again when it
+    /// changes there), then kept.
+    pub async fn contact_details(&self, card_id: i64) -> Result<Option<gcontacts::Details>> {
+        let Some(raw) = self.store.card_link(card_id)?.and_then(|l| l.raw) else {
+            return Ok(None);
+        };
+        let person: serde_json::Value = serde_json::from_str(&raw)?;
+        let mut d = gcontacts::details(&person);
+        if let Some(url) = gcontacts::photo_url(&person) {
+            let icon = match self.store.card_photo(card_id)? {
+                Some((u, mime, data)) if u == url => Some(icons::Icon { mime, data }),
+                _ => match icons::get_image(&url).await {
+                    Ok(icon) => {
+                        self.store.save_card_photo(card_id, &url, &icon.mime, &icon.data)?;
+                        Some(icon)
+                    }
+                    Err(e) => {
+                        tracing::warn!(card_id, "contact photo: {e:#}");
+                        None
+                    }
+                },
+            };
+            d.photo = icon.map(|i| i.data_url());
+        }
+        Ok(Some(d))
+    }
+
     /// Sync one account's Google contacts (one sync per account at a time); what it did.
     pub async fn google_sync(&self, account_id: i64) -> Result<gcontacts::SyncReport> {
         let lock = self.google_locks.lock().unwrap().entry(account_id).or_default().clone();

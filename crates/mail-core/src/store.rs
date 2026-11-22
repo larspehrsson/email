@@ -239,6 +239,14 @@ CREATE TABLE IF NOT EXISTS card_links (
     dirty      INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX IF NOT EXISTS card_links_resource ON card_links(account_id, resource) WHERE resource IS NOT NULL;
+-- A Google contact's picture, fetched when the contact is shown (from `url`; a new url there:
+-- fetched again).
+CREATE TABLE IF NOT EXISTS card_photos (
+    card_id INTEGER PRIMARY KEY,
+    url     TEXT NOT NULL,
+    mime    TEXT NOT NULL,
+    data    BLOB NOT NULL
+);
 -- Google contacts deleted here, still to delete there.
 CREATE TABLE IF NOT EXISTS card_tombstones (
     account_id INTEGER NOT NULL,
@@ -3726,6 +3734,7 @@ impl Store {
         let db = self.db();
         db.execute("DELETE FROM address_book WHERE id=?1", [id])?;
         db.execute("DELETE FROM card_links WHERE card_id=?1", [id])?;
+        db.execute("DELETE FROM card_photos WHERE card_id=?1", [id])?;
         Ok(())
     }
 
@@ -3784,6 +3793,7 @@ impl Store {
     pub fn remove_google_link(&self, account_id: i64) -> Result<()> {
         let db = self.db();
         db.execute("DELETE FROM address_book WHERE id IN (SELECT card_id FROM card_links WHERE account_id=?1)", [account_id])?;
+        db.execute("DELETE FROM card_photos WHERE card_id IN (SELECT card_id FROM card_links WHERE account_id=?1)", [account_id])?;
         db.execute("DELETE FROM card_links WHERE account_id=?1", [account_id])?;
         db.execute("DELETE FROM card_tombstones WHERE account_id=?1", [account_id])?;
         db.execute("DELETE FROM google_links WHERE account_id=?1", [account_id])?;
@@ -3821,6 +3831,22 @@ impl Store {
                 })
             })
             .optional()?)
+    }
+
+    /// A contact's picture as fetched: (the url it came from, its type, the image).
+    pub fn card_photo(&self, card_id: i64) -> Result<Option<(String, String, Vec<u8>)>> {
+        Ok(self
+            .rdb()
+            .query_row("SELECT url, mime, data FROM card_photos WHERE card_id=?1", [card_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .optional()?)
+    }
+
+    pub fn save_card_photo(&self, card_id: i64, url: &str, mime: &str, data: &[u8]) -> Result<()> {
+        self.db().execute(
+            "INSERT OR REPLACE INTO card_photos (card_id, url, mime, data) VALUES (?1, ?2, ?3, ?4)",
+            params![card_id, url, mime, data],
+        )?;
+        Ok(())
     }
 
     pub fn save_card_link(&self, l: &crate::gcontacts::CardLink) -> Result<()> {
