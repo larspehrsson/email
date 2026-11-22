@@ -333,6 +333,7 @@ impl Core {
     pub fn start(&self) -> Result<()> {
         imap::spawn_wake_detector();
         self.refresh_contacts();
+        self.spawn_body_indexer();
         for account in self.store.accounts()? {
             if let Err(e) = self.start_account(account.clone()) {
                 tracing::warn!(account = account.email, "not starting sync: {e:#}");
@@ -340,6 +341,41 @@ impl Core {
             }
         }
         Ok(())
+    }
+
+    /// Makes the text of downloaded messages searchable, in the background, for the app's life:
+    /// those already here (after the upgrade that added it, all of them, newest first), then
+    /// each body as it arrives, within seconds.
+    fn spawn_body_indexer(&self) {
+        let store = self.store.clone();
+        let spawned = std::thread::Builder::new().name("body-index".into()).spawn(move || {
+            let mut started: Option<(std::time::Instant, usize)> = None;
+            loop {
+                match store.index_bodies(100) {
+                    Ok(0) => {
+                        if let Some((t, n)) = started.take()
+                            && n > 1000
+                        {
+                            tracing::info!(messages = n, secs = t.elapsed().as_secs(), "message text made searchable");
+                        }
+                        std::thread::sleep(std::time::Duration::from_secs(3));
+                    }
+                    Ok(n) => {
+                        let s = started.get_or_insert((std::time::Instant::now(), 0));
+                        s.1 += n;
+                        // Gentle: the window's queries and the sync share the database.
+                        std::thread::sleep(std::time::Duration::from_millis(30));
+                    }
+                    Err(e) => {
+                        tracing::warn!("making message text searchable: {e:#}");
+                        std::thread::sleep(std::time::Duration::from_secs(60));
+                    }
+                }
+            }
+        });
+        if let Err(e) = spawned {
+            tracing::warn!("no search in message text: {e}");
+        }
     }
 
     fn start_account(&self, account: Account) -> Result<()> {

@@ -348,7 +348,7 @@ export interface ListGroup {
 }
 
 /** Fields plain (unprefixed) quick-search terms look in; null/empty = all three. */
-export type SearchField = 'sender' | 'recipients' | 'subject';
+export type SearchField = 'sender' | 'recipients' | 'subject' | 'body';
 
 /** One conversation as it appears in a folder. */
 export interface ThreadSummary {

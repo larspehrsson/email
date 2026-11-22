@@ -211,6 +211,42 @@ pub fn parse_header_block(raw: &[u8]) -> ParsedHeader {
     }
 }
 
+/// How much of a message's text search looks through (a long newsletter's tail isn't worth the
+/// index's space).
+pub const SEARCH_TEXT_MAX: usize = 100_000;
+
+/// What search finds a message by in its body: its text (HTML as text), then its attachments'
+/// names; at most `SEARCH_TEXT_MAX` bytes. None: not a message the parser can read.
+pub fn search_text(raw: &[u8]) -> Option<String> {
+    let msg = MessageParser::default().parse(raw)?;
+    let mut text = String::new();
+    let mut i = 0;
+    while let Some(t) = msg.body_text(i) {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(&t);
+        i += 1;
+        if text.len() >= SEARCH_TEXT_MAX {
+            break;
+        }
+    }
+    for a in msg.attachments() {
+        if let Some(name) = a.attachment_name() {
+            text.push('\n');
+            text.push_str(name);
+        }
+    }
+    if text.len() > SEARCH_TEXT_MAX {
+        let mut end = SEARCH_TEXT_MAX;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+    }
+    Some(text)
+}
+
 /// Snippet and real attachment presence, computed once a body is downloaded.
 pub fn body_summary(raw: &[u8]) -> (Option<String>, bool) {
     let Some(msg) = MessageParser::default().parse(raw) else {

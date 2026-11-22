@@ -140,7 +140,7 @@ interface SyncStatus {
 | `get_message` | `{ id, allowRemote }` | `MessageDetail \| null` — null means not downloaded yet; core queues it at top priority and emits `message-ready` |
 | `list_threads` | `{ folderId, offset, limit, scope, includeTrash }` | `{ total: number, threads: ThreadSummary[] }` newest first — threaded counterpart of `list_messages`. A conversation is listed if any of its messages is in `folderId`; summary fields (count, participants, unread, flagged, attachments, snippet, latestMessageId) cover only the messages `scope`/`includeTrash` select. |
 | `get_thread` | `{ threadId, folderId, scope, includeTrash }` | `ThreadView` — the conversation's messages selected by `scope`/`includeTrash`, oldest first, plus counts of hidden ones. A message's `folderId` is `folderId` when it's in that folder, else its most specific other folder (labels before All Mail) |
-| `search_messages` | `{ accountId, folderId, query, offset, limit, fields }` | `{ total, messages: MessageSummary[] }` newest first. `folderId: null` = whole account. Each result's `folderId` is the most specific folder it's in (Inbox/label over All Mail). `fields: SearchField[] \| null` limits plain (unprefixed) terms to those fields; null or empty = all three. Query syntax below. |
+| `search_messages` | `{ accountId, folderId, query, offset, limit, fields }` | `{ total, messages: MessageSummary[] }` newest first. `folderId: null` = whole account. Each result's `folderId` is the most specific folder it's in (Inbox/label over All Mail). `fields: SearchField[] \| null` limits plain (unprefixed) terms to those fields; null or empty = all (`sender`, `recipients`, `subject`, `body`). Query syntax below. |
 | `open_attachment` | `{ messageId, index }` | `void` — fetches if needed, writes to the app cache, opens in the default app. Rejects (string) for non-openable types or on failure |
 | `save_attachment` | `{ messageId, index }` | `string` — absolute path written in the Downloads folder (`name (1).ext` if taken) |
 | `save_all_attachments` | `{ messageId }` | `string[]` — absolute paths of every attachment, each saved directly in Downloads (`name (1).ext` if taken) |
@@ -193,11 +193,11 @@ interface SyncStatus {
 
 ## Quick search query syntax
 
-Matches sender (name + address), recipients (To/Cc names + addresses) and subject; every term must match (AND), case- and accent-insensitive, each word matched as a prefix (`inv` finds "invoice").
+Matches sender (name + address), recipients (To/Cc names + addresses), subject and text; every term must match (AND), case- and accent-insensitive, each word matched as a prefix (`inv` finds "invoice").
 
-- `word` — any of the three fields
+- `word` — any of the fields, the message's text included (`body`: its text, HTML as text, and its attachments' names, for messages whose body is downloaded; indexed in the background)
 - `"exact phrase"` — phrase (last word still prefix-matched)
-- `from:x`, `to:x`, `subject:x` — restrict a term to one field (`from:"Ada L"` works); these override `fields`
+- `from:x`, `to:x`, `subject:x`, `body:x` — restrict a term to one field (`from:"Ada L"` works); these override `fields`
 - `-word` — exclude
 - `tag:work`, `tag:"to do"`, `tag:$label2` — messages with that tag (by tag name or keyword); may be used alone
 

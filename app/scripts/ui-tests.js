@@ -619,6 +619,48 @@ describe('search', () => {
       await close();
     }
   });
+
+  test('words in the text find mail; the Text chip and body: limit it', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const count = async (q) => {
+        await page.fill('.search-field input', q);
+        await page.waitForTimeout(400);
+        return page.locator('.search-layer .row').count();
+      };
+      // "package" is only in the text of the order mails ("your package is on its way").
+      assert.ok((await count('package')) > 0, 'found by its text');
+      const subjects = await page.locator('.search-layer .row .row-subject').allTextContents();
+      assert.ok(subjects.every((s) => !/package/i.test(s)), `none by its subject: ${subjects.join(' | ')}`);
+      assert.ok((await count('body:package')) > 0, 'body: finds it');
+      assert.equal(await count('subject:package'), 0, 'not in a subject');
+      // Text off: plain words skip it (the choice is kept, so it's put back).
+      await count('package');
+      const chip = page.locator('.field-chip', { hasText: 'Text' });
+      assert.equal(await chip.getAttribute('aria-pressed'), 'true', 'on by default');
+      await chip.click();
+      await page.waitForTimeout(400);
+      assert.equal(await page.locator('.search-layer .row').count(), 0, 'Text off: not found');
+      await chip.click();
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('a saved choice of every field from before includes the text', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.evaluate(() => localStorage.setItem('ui.searchFields', JSON.stringify(['sender', 'recipients', 'subject'])));
+      await page.reload();
+      await page.fill('.search-field input', 'package');
+      await page.locator('.field-chip', { hasText: 'Text' }).waitFor();
+      assert.equal(await page.locator('.field-chip', { hasText: 'Text' }).getAttribute('aria-pressed'), 'true');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
 });
 
 describe('compose', () => {

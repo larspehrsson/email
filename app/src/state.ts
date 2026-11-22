@@ -150,10 +150,12 @@ const [searchQuery, setSearchQuerySig] = createSignal('');
 const [searchScope, setSearchScopeSig] = createSignal<SearchScope>(
   loadPref<SearchScope>('ui.searchScope', 'all') === 'folder' ? 'folder' : 'all',
 );
-export const ALL_SEARCH_FIELDS: SearchField[] = ['sender', 'recipients', 'subject'];
+export const ALL_SEARCH_FIELDS: SearchField[] = ['sender', 'recipients', 'subject', 'body'];
 function loadFields(): SearchField[] {
   const v = loadPref<unknown>('ui.searchFields', ALL_SEARCH_FIELDS);
   const ok = Array.isArray(v) ? ALL_SEARCH_FIELDS.filter((f) => v.includes(f)) : [];
+  // Saved before the text could be searched, with every field then on: all, the text too.
+  if (Array.isArray(v) && !v.includes('body') && ['sender', 'recipients', 'subject'].every((f) => v.includes(f))) return ALL_SEARCH_FIELDS;
   return ok.length ? ok : ALL_SEARCH_FIELDS;
 }
 const [searchFields, setSearchFieldsSig] = createSignal<SearchField[]>(loadFields());

@@ -1291,6 +1291,8 @@ export function createMockBackend(): Backend {
       for (const m of folderMsgs.get(f.id) ?? []) {
         const fromT = tokenize(`${m.fromName} ${m.fromAddr}`);
         const subjT = tokenize(m.subject);
+        // The demo's bodies are made from the snippet.
+        const textT = tokenize(m.snippet ?? '');
         const ok = terms.every((t) => {
           const hit =
             t.field === 'tag'
@@ -1301,9 +1303,12 @@ export function createMockBackend(): Backend {
                 ? fieldMatches(toTokens, t.words)
                 : t.field === 'subject'
                   ? fieldMatches(subjT, t.words)
-                  : (inField('sender') && fieldMatches(fromT, t.words)) ||
-                    (inField('subject') && fieldMatches(subjT, t.words)) ||
-                    (inField('recipients') && fieldMatches(toTokens, t.words));
+                  : t.field === 'body'
+                    ? fieldMatches(textT, t.words)
+                    : (inField('sender') && fieldMatches(fromT, t.words)) ||
+                      (inField('subject') && fieldMatches(subjT, t.words)) ||
+                      (inField('recipients') && fieldMatches(toTokens, t.words)) ||
+                      (inField('body') && fieldMatches(textT, t.words));
           return t.neg ? !hit : hit;
         });
         if (ok) out.push(m);

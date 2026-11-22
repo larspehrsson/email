@@ -35,6 +35,7 @@ import {
   searchScope,
   searchFields,
   toggleSearchField,
+  ALL_SEARCH_FIELDS,
   setSearchQuery,
   setSearchScope,
   selectedMessageId,
@@ -242,7 +243,7 @@ function RowContent(props: { m: MessageSummary; re?: RegExp | null; subjRe?: Reg
   );
 }
 
-const FIELD_LABEL: Record<SearchField, string> = { sender: 'Sender', recipients: 'Recipients', subject: 'Subject' };
+const FIELD_LABEL: Record<SearchField, string> = { sender: 'Sender', recipients: 'Recipients', subject: 'Subject', body: 'Text' };
 
 export interface SearchSpec {
   accountId: number;
@@ -1043,7 +1044,7 @@ export function MessageList(props: {
             </div>
             <div class="search-fields" role="group" aria-label="Search in" data-tauri-drag-region={DRAG}>
               <span class="search-fields-label" data-tauri-drag-region={DRAG}>Search in</span>
-              <For each={['sender', 'recipients', 'subject'] as SearchField[]}>
+              <For each={ALL_SEARCH_FIELDS}>
                 {(f) => (
                   <button
                     class="chip-toggle field-chip"

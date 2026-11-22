@@ -125,7 +125,8 @@ CREATE TABLE IF NOT EXISTS messages (
     -- whole body holding true attachments: 1 kept (Remove takes them); 2 not meant to be kept
     -- (a whole-message fallback in an account without "keep"), stripped at the next start;
     -- NULL not known yet
-    attachments_stored INTEGER
+    attachments_stored INTEGER,
+    body_indexed    INTEGER NOT NULL DEFAULT 0 -- its text is in body_fts (0: still to do, or a new body)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS messages_gm ON messages(account_id, gm_msgid) WHERE gm_msgid IS NOT NULL;
 CREATE INDEX IF NOT EXISTS messages_nobody ON messages(account_id, has_body, date DESC);
@@ -331,6 +332,18 @@ CREATE TRIGGER IF NOT EXISTS msg_fts_upd AFTER UPDATE OF subject, from_name, fro
     INSERT INTO msg_fts(rowid, subject, sender, recipients)
     VALUES (NEW.id, NEW.subject, NEW.from_name || ' ' || NEW.from_addr, NEW.to_addrs);
 END;
+
+-- The text of messages whose body is here (rowid = message id), for search. Bodies are in
+-- bodies.db, so it's filled from Rust, in the background (`Store::index_bodies`), not by a
+-- trigger; a message whose body comes or changes gets body_indexed=0 and is done again.
+CREATE VIRTUAL TABLE IF NOT EXISTS body_fts USING fts5(
+    body,
+    content='', contentless_delete=1,
+    tokenize='unicode61 remove_diacritics 2', prefix='2 3');
+CREATE TRIGGER IF NOT EXISTS body_fts_del AFTER DELETE ON messages BEGIN
+    DELETE FROM body_fts WHERE rowid = OLD.id;
+END;
+CREATE INDEX IF NOT EXISTS messages_unindexed ON messages(id) WHERE has_body=1 AND body_indexed=0;
 "#;
 
 /// Schema versions (`PRAGMA user_version`). `SCHEMA` is always the current schema, whole:
@@ -392,6 +405,8 @@ const MIGRATIONS: &[fn(&Connection) -> Result<()>] = &[
     },
     // 12: Microsoft accounts can keep tags and snooze through Graph
     |db| Ok(db.execute_batch("ALTER TABLE accounts ADD COLUMN graph INTEGER;")?),
+    // 13: search in the text of messages (body_fts, filled by `index_bodies`)
+    |db| Ok(db.execute_batch("ALTER TABLE messages ADD COLUMN body_indexed INTEGER NOT NULL DEFAULT 0;")?),
 ];
 const SCHEMA_VERSION: i64 = BASE_VERSION + MIGRATIONS.len() as i64;
 
@@ -1758,7 +1773,8 @@ impl Store {
         Ok(view)
     }
 
-    /// Quick search over sender, recipients and subject (see `crate::search`), newest first.
+    /// Quick search over sender, recipients, subject and the text of messages whose body is
+    /// here (see `crate::search`), newest first.
     /// `folder_id` restricts to one folder; otherwise the whole account.
     pub fn search(
         &self,
@@ -1771,47 +1787,54 @@ impl Store {
     ) -> Result<MessagePage> {
         // `tag:work` / `tag:"to do"` / `tag:$label2` terms filter by keyword; the rest is FTS.
         let (rest, tag_terms) = crate::search::split_tags(query);
-        let fts = crate::search::to_fts5(&rest, fields);
-        if fts.is_none() && tag_terms.is_empty() {
+        let terms = crate::search::terms(&rest, fields);
+        if terms.is_none() && tag_terms.is_empty() {
             return Ok(MessagePage { total: 0, messages: vec![] });
         }
         let keywords: Vec<String> = tag_terms.iter().map(|t| self.tag_keyword(t)).collect::<Result<_>>()?;
         let db = self.rdb();
-        let from = if fts.is_some() { "msg_fts JOIN messages m ON m.id = msg_fts.rowid" } else { "messages m" };
-        let mut scope = String::from(if fts.is_some() { "msg_fts MATCH ?1" } else { "?1 IS NULL" });
-        scope.push_str(
-            " AND m.account_id = ?2
-             AND (?3 IS NULL OR EXISTS (SELECT 1 FROM entries e WHERE e.message_id = m.id AND e.folder_id = ?3))
+        let from = "messages m";
+        // ?1 account, ?2 folder, ?3 limit, ?4 offset; then each term's expressions and each tag.
+        let mut args: Vec<Box<dyn rusqlite::ToSql>> =
+            vec![Box::new(account_id), Box::new(folder_id), Box::new(limit), Box::new(offset)];
+        let mut scope = String::from(
+            "m.account_id = ?1
+             AND (?2 IS NULL OR EXISTS (SELECT 1 FROM entries e WHERE e.message_id = m.id AND e.folder_id = ?2))
              AND EXISTS (SELECT 1 FROM entries e WHERE e.message_id = m.id)",
         );
-        for n in 0..keywords.len() {
-            scope.push_str(&format!(" AND m.keywords LIKE ?{} ESCAPE '\\'", n + 6));
+        // A term matches in the header index or in the text: the union of the two.
+        for t in terms.into_iter().flatten() {
+            let mut sets = Vec::new();
+            for (table, expr) in [("msg_fts", t.head), ("body_fts", t.body)] {
+                if let Some(expr) = expr {
+                    args.push(Box::new(expr));
+                    sets.push(format!("SELECT rowid FROM {table} WHERE {table} MATCH ?{}", args.len()));
+                }
+            }
+            if !sets.is_empty() {
+                scope.push_str(&format!(" AND m.id {}IN ({})", if t.negated { "NOT " } else { "" }, sets.join(" UNION ")));
+            }
         }
-        let like: Vec<String> = keywords
-            .iter()
-            .map(|k| format!("% {} %", k.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")))
-            .collect();
-        let mut args: Vec<Box<dyn rusqlite::ToSql>> =
-            vec![Box::new(fts.clone()), Box::new(account_id), Box::new(folder_id), Box::new(limit), Box::new(offset)];
-        for l in &like {
-            args.push(Box::new(l.clone()));
+        for k in &keywords {
+            args.push(Box::new(format!("% {} %", k.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"))));
+            scope.push_str(&format!(" AND m.keywords LIKE ?{} ESCAPE '\\'", args.len()));
         }
         let total: u32 = {
-            // Same numbering as the page query; ?4/?5 are unused here but keep positions aligned.
-            let sql = format!("SELECT count(*) FROM {from} WHERE {scope} AND ?4 IS NOT NULL AND ?5 IS NOT NULL");
+            // Same numbering as the page query; ?3/?4 are unused here but keep positions aligned.
+            let sql = format!("SELECT count(*) FROM {from} WHERE {scope} AND ?3 IS NOT NULL AND ?4 IS NOT NULL");
             db.query_row(&sql, rusqlite::params_from_iter(args.iter().map(|b| b.as_ref())), |r| r.get(0))?
         };
         // Report each hit in its most specific folder: Inbox, then labels/folders, then
         // Trash/Spam, and Gmail's All Mail last.
         let mut stmt = db.prepare_cached(&format!(
-            "SELECT m.id, coalesce(?3, (SELECT e.folder_id FROM entries e JOIN folders f ON f.id = e.folder_id
+            "SELECT m.id, coalesce(?2, (SELECT e.folder_id FROM entries e JOIN folders f ON f.id = e.folder_id
                         WHERE e.message_id = m.id
                         ORDER BY CASE f.role WHEN 'inbox' THEN 0 WHEN 'all' THEN 3
                                  WHEN 'trash' THEN 2 WHEN 'junk' THEN 2 ELSE 1 END LIMIT 1), 0),
                     m.subject, m.from_name, m.from_addr, m.date, m.snippet, m.flags,
                     m.has_attachments, m.has_body, m.keywords,
                     (SELECT o.failed IS NOT NULL FROM outgoing o WHERE o.id = m.pending_send), m.draft_id, m.size, m.to_addrs
-             FROM {from} WHERE {scope} ORDER BY m.date DESC, m.id DESC LIMIT ?4 OFFSET ?5"
+             FROM {from} WHERE {scope} ORDER BY m.date DESC, m.id DESC LIMIT ?3 OFFSET ?4"
         ))?;
         let rows = stmt.query_map(rusqlite::params_from_iter(args.iter().map(|b| b.as_ref())), placed_summary)?;
         Ok(MessagePage { total, messages: rows.collect::<rusqlite::Result<_>>()? })
@@ -2739,10 +2762,55 @@ impl Store {
         // inline pictures): parsed only for whole bodies the parser says have attachments.
         let stored = omitted.is_none() && has_attachments && crate::partial::has_omittable(raw);
         self.db().execute(
-            "UPDATE messages SET has_body=1, snippet=?2, has_attachments=?3, omitted=?4, attachments_stored=?5 WHERE id=?1",
+            "UPDATE messages SET has_body=1, snippet=?2, has_attachments=?3, omitted=?4, attachments_stored=?5, body_indexed=0
+             WHERE id=?1",
             params![id, snippet, has_attachments, omitted, stored],
         )?;
         Ok(())
+    }
+
+    /// Make the text of up to `batch` messages whose body is here searchable (body_fts), newest
+    /// first. Returns how many were done: 0 when none are waiting. Each body is read and parsed
+    /// with no lock held but the moment's, and the batch is written in one short transaction.
+    pub fn index_bodies(&self, batch: usize) -> Result<usize> {
+        let ids: Vec<i64> = {
+            let db = self.rdb();
+            let mut stmt = db.prepare_cached("SELECT id FROM messages WHERE has_body=1 AND body_indexed=0 ORDER BY id DESC LIMIT ?1")?;
+            stmt.query_map([batch as i64], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?
+        };
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let mut texts: Vec<(i64, Option<String>)> = Vec::with_capacity(ids.len());
+        for id in &ids {
+            let raw: Option<Vec<u8>> = {
+                let bodies = self.bodies_read.lock().unwrap_or_else(|e| e.into_inner());
+                bodies.prepare_cached("SELECT raw FROM bodies WHERE message_id=?1")?.query_row([id], |r| r.get(0)).optional()?
+            };
+            texts.push((*id, raw.as_deref().and_then(crate::mime::search_text)));
+        }
+        let mut db = self.db();
+        let tx = db.transaction()?;
+        {
+            let mut del = tx.prepare_cached("DELETE FROM body_fts WHERE rowid=?1")?;
+            let mut add = tx.prepare_cached("INSERT INTO body_fts (rowid, body) VALUES (?1, ?2)")?;
+            let mut done = tx.prepare_cached("UPDATE messages SET body_indexed=1 WHERE id=?1")?;
+            for (id, text) in &texts {
+                del.execute([id])?;
+                if let Some(t) = text.as_deref().filter(|t| !t.trim().is_empty()) {
+                    add.execute(params![id, t])?;
+                }
+                done.execute([id])?;
+            }
+        }
+        tx.commit()?;
+        Ok(texts.len())
+    }
+
+    /// Messages whose body is here and still to be made searchable.
+    pub fn bodies_to_index(&self) -> Result<u64> {
+        let db = self.rdb();
+        Ok(db.query_row("SELECT count(*) FROM messages WHERE has_body=1 AND body_indexed=0", [], |r| r.get::<_, i64>(0))? as u64)
     }
 
     /// Fill in `attachments_stored` for bodies stored before it was recorded (once, after the
@@ -4890,6 +4958,103 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn search_in_the_text() {
+        let dir = std::env::temp_dir().join(format!("mail-core-search-text-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = Store::open(&dir).unwrap();
+        let acct = store.insert_account("x@example.com", "x", Provider::Imap, "h", 993).unwrap();
+        store
+            .sync_folder_list(acct.id, &[ListedFolder { raw_name: "INBOX".into(), path: vec!["INBOX".into()], role: Some(FolderRole::Inbox), selectable: true }])
+            .unwrap();
+        let inbox = store.folders(acct.id).unwrap()[0].id;
+        let mk = |uid: u32, subject: &str| HeaderRecord { gm_msgid: None, gm_labels: None, subject: subject.into(), from_addr: "bob@corp.com".into(), ..rec(uid, 0, &[]) };
+        store.upsert_headers(acct.id, inbox, &[mk(1, "Lunch"), mk(2, "Newsletter"), mk(3, "Refund policy"), mk(4, "Files")], &HashMap::new()).unwrap();
+        let id = |subject: &str| -> i64 { store.db().query_row("SELECT id FROM messages WHERE subject=?1", [subject], |r| r.get(0)).unwrap() };
+        let hits = |q: &str| -> Vec<String> {
+            store.search(acct.id, None, q, &[], 0, 50).unwrap().messages.into_iter().map(|m| m.subject).collect::<std::collections::BTreeSet<_>>().into_iter().collect()
+        };
+        store.store_body(id("Lunch"), b"Subject: Lunch\r\nContent-Type: text/plain\r\n\r\nShall we ask about the refund over lunch?\r\n", None, false, None).unwrap();
+        store
+            .store_body(
+                id("Newsletter"),
+                b"Subject: Newsletter\r\nContent-Type: text/html\r\n\r\n<html><body><p>Meet the <b>kangaroo</b> of the month</p></body></html>\r\n",
+                None,
+                false,
+                None,
+            )
+            .unwrap();
+        store
+            .store_body(
+                id("Files"),
+                b"Subject: Files\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nAttached.\r\n--b\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename=\"quarterly-figures.pdf\"\r\n\r\n%PDF\r\n--b--\r\n",
+                None,
+                true,
+                None,
+            )
+            .unwrap();
+        // Not searchable until indexed.
+        assert!(hits("kangaroo").is_empty());
+        assert_eq!(store.bodies_to_index().unwrap(), 3);
+        assert_eq!(store.index_bodies(2).unwrap(), 2);
+        assert_eq!(store.index_bodies(100).unwrap(), 1);
+        assert_eq!(store.index_bodies(100).unwrap(), 0);
+
+        assert_eq!(hits("kangaroo"), ["Newsletter"], "HTML as text");
+        assert_eq!(hits("refund"), ["Lunch", "Refund policy"], "in the text, or in the subject");
+        assert_eq!(hits("body:refund"), ["Lunch"]);
+        assert_eq!(hits("subject:refund"), ["Refund policy"]);
+        assert_eq!(hits("refund -lunch"), ["Refund policy"], "a word in the subject excludes");
+        assert_eq!(hits("refund -shall"), ["Refund policy"], "a word in the text excludes");
+        assert_eq!(hits("quarterly"), ["Files"], "attachments by name");
+        assert_eq!(hits("bob refund"), ["Lunch", "Refund policy"], "terms from either place");
+        let only = |fields: &[&str]| store.search(acct.id, None, "refund", fields, 0, 50).unwrap().total;
+        assert_eq!((only(&["subject"]), only(&["body"]), only(&["subject", "body"])), (1, 1, 2));
+
+        // A header change (a draft retitled) keeps the text searchable.
+        store.db().execute("UPDATE messages SET subject='Lunch!' WHERE subject='Lunch'", []).unwrap();
+        assert_eq!(hits("body:refund"), ["Lunch!"]);
+        // A new body: the old text goes with the next round.
+        store.store_body(id("Lunch!"), b"Subject: Lunch\r\nContent-Type: text/plain\r\n\r\nPizza it is.\r\n", None, false, None).unwrap();
+        assert_eq!(store.index_bodies(100).unwrap(), 1);
+        assert!(hits("body:refund").is_empty());
+        assert_eq!(hits("pizza"), ["Lunch!"]);
+        // A message gone: its text too.
+        store.db().execute("DELETE FROM messages WHERE subject='Newsletter'", []).unwrap();
+        let left: i64 = store.db().query_row("SELECT count(*) FROM body_fts WHERE body_fts MATCH 'kangaroo'", [], |r| r.get(0)).unwrap();
+        assert_eq!(left, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Indexing every body of a real database copy, and searching it after:
+    /// MAIL_DB_DIR=/path cargo test --release -p mail-core real_db_body_index -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn real_db_body_index() {
+        let dir = std::path::PathBuf::from(std::env::var("MAIL_DB_DIR").unwrap());
+        let store = Store::open(&dir).unwrap();
+        let size = || std::fs::metadata(dir.join("mail.db")).unwrap().len() / 1_000_000;
+        let (todo, before) = (store.bodies_to_index().unwrap(), size());
+        let t = std::time::Instant::now();
+        let mut done = 0;
+        loop {
+            let n = store.index_bodies(100).unwrap();
+            if n == 0 {
+                break;
+            }
+            done += n;
+        }
+        let _ = store.db().execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+        println!("{done} of {todo} bodies in {:?}; mail.db {before} MB -> {} MB", t.elapsed(), size());
+        for a in store.accounts().unwrap() {
+            for q in ["a", "re", "invoice", "meeting", "body:password", "\"pull request\"", "from:google security"] {
+                let t = std::time::Instant::now();
+                let r = store.search(a.id, None, q, &[], 0, 200).unwrap();
+                println!("{:<28} search {:<24} {:>7} hits  {:>6.1?}", a.email.split('@').nth(1).unwrap_or(""), q, r.total, t.elapsed());
+            }
+        }
+    }
+
     /// Timing against a real database copy: MAIL_DB_DIR=/path cargo test -p mail-core real_db -- --ignored --nocapture
     #[test]
     #[ignore]
@@ -4937,6 +5102,7 @@ mod tests {
                  ALTER TABLE accounts DROP COLUMN mark_letter; ALTER TABLE accounts DROP COLUMN mark_color;
                  ALTER TABLE accounts DROP COLUMN graph;
                  ALTER TABLE messages DROP COLUMN attachments_stored;
+                 DROP INDEX messages_unindexed; ALTER TABLE messages DROP COLUMN body_indexed;
                  DROP TABLE signature_defaults; DROP TABLE signatures;
                  PRAGMA user_version={BASE_VERSION};"
             ))
