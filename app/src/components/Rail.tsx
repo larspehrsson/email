@@ -6,8 +6,8 @@ import type { Account, Folder } from '../api';
 import { fmtNum } from '../lib/format';
 import { flyout, setFlyout, toggleSidebar } from '../lib/layout';
 import { DRAG } from '../lib/platform';
-import { accountMark, accounts, folderById, foldersByAccount, selectedFolderId, selectFolder } from '../state';
-import { FoldersIcon, RoleIcon, SidebarIcon } from './Icons';
+import { accountMark, accounts, folderById, foldersByAccount, mainView, selectedFolderId, selectFolder, setMainView } from '../state';
+import { FoldersIcon, PeopleIcon, RoleIcon, SidebarIcon } from './Icons';
 import { badgeFor, isAccountCollapsed, isInboxPath, roleFolders, SyncFooter, toggleAccount } from './Sidebar';
 
 const compact = (n: number) => (n > 99 ? '99+' : String(n));
@@ -102,6 +102,16 @@ export function Rail() {
           }}
         >
           <FoldersIcon size={17} />
+        </button>
+        <button
+          class="rail-btn"
+          classList={{ on: mainView() === 'contacts' }}
+          title={`Address book (${hint('contacts')})`}
+          aria-label="Address book"
+          aria-pressed={mainView() === 'contacts'}
+          onClick={() => setMainView(mainView() === 'contacts' ? 'mail' : 'contacts')}
+        >
+          <PeopleIcon size={17} />
         </button>
       </div>
       <div class="rail-scroll">

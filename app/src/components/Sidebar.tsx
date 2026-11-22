@@ -7,7 +7,8 @@ import { folderById, foldersByAccount, moveAccount, selectedFolderId, selectFold
 import { AccountDot } from './FolderSwitcher';
 import { cancelExport, exportLabel, exportNow } from '../lib/exports';
 import { fmtNum, loadPref, savePref } from '../lib/format';
-import { AlertIcon, CheckIcon, ChevronIcon, FolderIcon, LockIcon, PeopleIcon, RoleIcon, SidebarIcon } from './Icons';
+import { AlertIcon, CheckIcon, ChevronIcon, FolderIcon, LockIcon, MailIcon, PeopleIcon, RoleIcon, SidebarIcon } from './Icons';
+import { ContactSources } from './ContactSources';
 import { PasswordDialog } from './PasswordPrompt';
 import { restartToUpdate, updateStatus } from '../lib/updates';
 import { showToast } from './Toast';
@@ -671,20 +672,32 @@ function AccountSection(props: { account: Account; index: number }) {
 }
 
 export function Sidebar(props: { flyout?: boolean }) {
+  // Mail or the address book: the sidebar lists the mailboxes' folders, or whose contacts.
+  const contacts = () => mainView() === 'contacts';
   return (
-    <nav class="sidebar" classList={{ flyout: !!props.flyout }} aria-label="Mailboxes">
+    <nav class="sidebar" classList={{ flyout: !!props.flyout }} aria-label={contacts() ? 'Contacts' : 'Mailboxes'}>
       <div class="sidebar-top" data-tauri-drag-region={DRAG}>
         <span class="sidebar-title" data-tauri-drag-region={DRAG}>
-          Mailboxes
+          {contacts() ? 'Contacts' : 'Mailboxes'}
         </span>
         <span class="sidebar-top-btns">
           <button
             class="icon-btn"
-            classList={{ on: mainView() === 'contacts' }}
-            onClick={() => setMainView(mainView() === 'contacts' ? 'mail' : 'contacts')}
+            classList={{ on: !contacts() }}
+            onClick={() => setMainView('mail')}
+            title="Mail"
+            aria-label="Mail"
+            aria-pressed={!contacts()}
+          >
+            <MailIcon />
+          </button>
+          <button
+            class="icon-btn"
+            classList={{ on: contacts() }}
+            onClick={() => setMainView(contacts() ? 'mail' : 'contacts')}
             title={`Address book (${hint('contacts')})`}
             aria-label="Address book"
-            aria-pressed={mainView() === 'contacts'}
+            aria-pressed={contacts()}
           >
             <PeopleIcon />
           </button>
@@ -699,7 +712,9 @@ export function Sidebar(props: { flyout?: boolean }) {
         </span>
       </div>
       <div class="sidebar-scroll">
-        <For each={accounts() ?? []}>{(a, i) => <AccountSection account={a} index={i()} />}</For>
+        <Show when={contacts()} fallback={<For each={accounts() ?? []}>{(a, i) => <AccountSection account={a} index={i()} />}</For>}>
+          <ContactSources class="ct-sources-sidebar" />
+        </Show>
       </div>
       <SyncFooter />
     </nav>

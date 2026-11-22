@@ -1506,8 +1506,12 @@ describe('contact groups', () => {
       };
       await page.reload();
       await openContacts();
-      const sources = page.locator('.ct-sources');
+      // The sidebar lists whose contacts, in place of the folders.
+      const sources = page.locator('.sidebar .ct-sources');
       await sources.waitFor();
+      assert.equal(await page.locator('.sidebar .acct-section, .sidebar [role="tree"]').count(), 0, 'no folders');
+      assert.equal(await page.locator('.sidebar-title').textContent(), 'Contacts');
+      assert.equal(await page.locator('.contacts .ct-sources').count(), 0, 'not twice');
       const rows = async () => (await page.locator('.ct-row .ct-name').allTextContents()).map((t) => t.replace(/G$/, '').trim());
       const source = (name) => sources.locator('.ct-source', { hasText: name });
       // Everyone, each with their groups (Starred first; My Contacts not shown).
@@ -1537,6 +1541,15 @@ describe('contact groups', () => {
       await page.locator('.ct-source.on', { hasText: 'Kolleger' }).waitFor();
       await page.locator('.ct-row', { hasText: 'Olivia Hart' }).waitFor();
       assert.deepEqual(await rows(), ['Olivia Hart']);
+      // Back to mail with the Mail button: the folders again.
+      await page.locator('.sidebar [aria-label="Mail"]').click();
+      await page.locator('.contacts').waitFor({ state: 'detached' });
+      assert.equal(await page.locator('.sidebar .ct-sources').count(), 0);
+      assert.equal(await page.locator('.sidebar-title').textContent(), 'Mailboxes');
+      // With the sidebar as a rail, the address book has the column itself.
+      await page.locator('.sidebar [aria-label="Collapse sidebar"]').click();
+      await page.locator('[aria-label="Address book"]').first().click();
+      await page.locator('.contacts .ct-sources').waitFor();
       assert.deepEqual(errors, []);
     } finally {
       await close();
@@ -1853,12 +1866,14 @@ describe('address book', () => {
       await page.locator('.reader-empty').waitFor();
       assert.equal(await page.locator('.pane-reader .reader-subject, .pane-reader .conv-view').count(), 0, 'nothing from before the search');
 
-      // From the address book, a folder in the sidebar shows that folder's mail.
+      // From the address book, Mail brings back the folders, and a folder its mail.
       await page.keyboard.press('Escape');
       await page.locator('button[aria-label="Address book"]').click();
       await page.locator('.contacts').waitFor();
-      await page.locator('.sidebar button.folder').nth(1).click();
+      assert.equal(await page.locator('.sidebar button.folder').count(), 0, 'the sidebar lists contacts');
+      await page.locator('.sidebar button[aria-label="Mail"]').click();
       await page.locator('.contacts').waitFor({ state: 'detached' });
+      await page.locator('.sidebar button.folder').nth(1).click();
       assert.equal(await page.locator('button[aria-label="Address book"]').getAttribute('aria-pressed'), 'false');
       assert.deepEqual(errors, []);
     } finally {

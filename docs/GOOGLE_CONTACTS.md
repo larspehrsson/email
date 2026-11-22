@@ -43,7 +43,7 @@ can mark the client ID as trusted (Admin console › Security › API controls).
   dates, websites, family and chat accounts. These are shown only; **Edit more in Google
   Contacts** opens the contact there to change them. The photo is fetched from Google the first
   time the contact is opened or their mail is listed, then kept on this computer.
-- The address book gets a column on the left: all contacts, each connected account's contacts
+- While the address book is open, the sidebar lists, in place of the folders: all contacts, each connected account's contacts
   and its groups (labels in Google Contacts: My Contacts, Starred, and your own, such as Family
   or Work), and those kept only on this computer, each with how many. A contact's groups are
   shown on its row (all but My Contacts). Groups are changed in Google; the next sync brings

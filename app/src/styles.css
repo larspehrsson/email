@@ -3119,6 +3119,11 @@ body.resizing .app {
   align-items: center;
   gap: 2px;
 }
+/* Mail / Address book: the one showing */
+.sidebar-top-btns .icon-btn.on {
+  background: var(--sidebar-sel);
+  color: var(--text);
+}
 
 /* rail */
 .rail {
@@ -3212,7 +3217,8 @@ html.macos .rail-top {
 .rail-btn:hover {
   background: var(--bg-hover);
 }
-.rail-btn.selected {
+.rail-btn.selected,
+.rail-btn.on {
   background: var(--sidebar-sel);
 }
 .rail-badge {
@@ -5374,6 +5380,13 @@ body.dragging-account * {
   display: flex;
   flex-direction: column;
   gap: 1px;
+}
+/* in the sidebar, in place of the folders, while the address book is open */
+.ct-sources-sidebar {
+  padding: 4px 8px 12px;
+}
+/* a column of the address book, when the sidebar is a rail */
+.ct-sources-column {
   min-height: 0;
   overflow-y: auto;
   padding: 14px 8px 12px;
