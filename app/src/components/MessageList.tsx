@@ -1247,6 +1247,8 @@ export function MessageList(props: {
                   classList={{
                     selected: !!m() && shownSelected(m()!.id),
                     unread: !!m()?.unread,
+                    // the next group's header follows: it's the divider
+                    'before-group': !!startsGroup(groups(), item.index + 1),
                   }}
                   aria-selected={!!m() && shownSelected(m()!.id)}
                   style={{

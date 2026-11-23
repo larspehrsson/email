@@ -643,7 +643,8 @@ body.resizing iframe {
   height: 1px;
   background: var(--sep);
 }
-.row.selected .row-inner::after {
+.row.selected .row-inner::after,
+.row.before-group .row-inner::after {
   display: none;
 }
 .row:has(+ .row.selected) .row-inner::after {
@@ -2305,17 +2306,21 @@ body.resizing iframe {
   border-color: var(--sep);
 }
 
-/* A group's header in the message list (a period, a sender…), above its first row. */
+/* A group's header in the message list (a period, a sender…), above its first row: a band of
+   its own, in the rows' box (21px in, 8px from the right) with its text where theirs is, and
+   centred in its 30px slot. Set apart like this it reads as a divider between rows, not as room
+   above the row under it; the row above shows no hairline (the band is the line). */
 .group-head {
   position: absolute;
   top: 0;
-  left: 0;
-  right: 0;
+  left: 21px;
+  right: 8px;
   height: 30px;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 8px;
-  padding: 0 14px 5px 21px;
+  padding: 0 14px 0 11px;
+  isolation: isolate;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -2323,6 +2328,14 @@ body.resizing iframe {
   color: var(--text-3);
   contain: strict;
   cursor: pointer;
+}
+.group-head::before {
+  /* the band: 22px, centred in the slot */
+  content: '';
+  position: absolute;
+  inset: 4px 0;
+  z-index: -1;
+  background: var(--bg-band);
 }
 .group-head:hover {
   color: var(--text-2);
@@ -2335,7 +2348,6 @@ body.resizing iframe {
   place-items: center;
   width: 22px;
   height: 20px;
-  margin-bottom: -3px;
   border: 0;
   border-radius: 5px;
   background: transparent;
@@ -3981,6 +3993,11 @@ html.macos .app.rail-mode .search-bar {
   padding: 0 16px 0 28px;
   border-bottom: 1px solid var(--sep);
 }
+.st-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
 .st-pane-head h3 {
   margin: 0;
   font-size: 15px;
@@ -5613,9 +5630,6 @@ body.dragging-account * {
 .ctx-menu {
   min-width: 180px;
   transform-origin: top left;
-}
-.st-add-account {
-  margin-top: 12px;
 }
 
 /* pictures in a signature: drag a corner to size (TipTap's resizable image) */

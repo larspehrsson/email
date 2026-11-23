@@ -690,17 +690,6 @@ function AccountsSection() {
         <p class="st-acct-msg error">{errorMessage(details.error)}</p>
       </Show>
       <GoogleClientNote />
-      <div class="st-add-account">
-        <button
-          class="btn secondary"
-          onClick={() => {
-            close();
-            setAddingAccount(true);
-          }}
-        >
-          + Add account
-        </button>
-      </div>
     </div>
   );
 }
@@ -938,9 +927,23 @@ function Panel() {
         <div class="st-pane">
           <header class="st-pane-head">
             <h3>{title()}</h3>
-            <button class="icon-btn" onClick={close} aria-label="Close">
-              <CloseIcon />
-            </button>
+            <div class="st-head-actions">
+              {/* In the title bar, not after the accounts: there without scrolling past them. */}
+              <Show when={section() === 'accounts'}>
+                <button
+                  class="btn secondary"
+                  onClick={() => {
+                    close();
+                    setAddingAccount(true);
+                  }}
+                >
+                  + Add account
+                </button>
+              </Show>
+              <button class="icon-btn" onClick={close} aria-label="Close">
+                <CloseIcon />
+              </button>
+            </div>
           </header>
           <Switch>
             <Match when={section() === 'general'}>
