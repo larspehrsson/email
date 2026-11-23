@@ -2096,11 +2096,16 @@ describe('drag to folder', () => {
       await page.keyboard.press('ControlOrMeta+Shift+1');
       const flyout = page.locator('div.flyout');
       await flyout.waitFor();
-      // The panel slides open: measure once it has stopped.
+      // The sidebar folds into the rail and the panel slides open (animated): measure once the
+      // panel and the list have both stopped moving, for a few frames running.
       await page.waitForFunction(() => {
-        const f = document.querySelector('div.flyout');
-        const x = f?.getBoundingClientRect().right;
-        return new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(x != null && x === f.getBoundingClientRect().right))));
+        const place = () =>
+          ['div.flyout', '.folder-layer .row'].map((q) => {
+            const r = document.querySelector(q)?.getBoundingClientRect();
+            return r ? `${r.left},${r.right},${r.top}` : '';
+          }).join('|');
+        const first = place();
+        return new Promise((done) => setTimeout(() => done(first !== '|' && !first.startsWith('|') && first === place()), 250));
       });
       // A point on the first row that the panel doesn't cover (it covers the list's left part).
       const at = await page.evaluate(() => {
