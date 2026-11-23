@@ -5,7 +5,7 @@ import { fmtNum, smartDate } from '../lib/format';
 import { hint, MOD } from '../lib/shortcuts';
 import { ArchiveIcon, CloseIcon, ForwardIcon, ReadIcon, TrashIcon } from './Icons';
 import { platform } from '../lib/platform';
-import { registerSenderSelectAll } from '../lib/actions';
+import { advancePastRemoved, registerSenderSelectAll } from '../lib/actions';
 import { forwardAsAttachments } from '../lib/compose';
 import { hideToast, showToast } from './Toast';
 import { cardFor, loadCards } from '../lib/addressBook';
@@ -175,13 +175,21 @@ export function SenderPane() {
     for (const m of chosen) byFolder.set(m.folderId, [...(byFolder.get(m.folderId) ?? []), m.id]);
     setBusy(true);
     const ops: number[] = [];
+    let putBack: (() => void) | null = null;
+    let changed = false;
     try {
+      // Deleting what's open here: the overview moves on to the next email, as its own Delete does.
+      if (action.kind === 'trash' || action.kind === 'archive') putBack = await advancePastRemoved(chosen);
       for (const [folderId, ids] of byFolder) {
         const res = await api.applyAction(action, ids, folderId);
-        if (res.opId != null && res.undoable) ops.push(res.opId);
+        if (res.opId != null) {
+          changed = true;
+          if (res.undoable) ops.push(res.opId);
+        }
       }
       setPicked(new Set<number>());
       if (action.kind === 'read') return;
+      if (!changed) putBack?.();
       const n = chosen.length;
       const toast = showToast({
         kind: 'ok',
@@ -191,8 +199,9 @@ export function SenderPane() {
               label: 'Undo',
               run: () => {
                 hideToast(toast);
-                void Promise.all(ops.map((op) => api.undoAction(op))).catch((e) =>
-                  showToast({ kind: 'error', text: errorMessage(e) }),
+                void Promise.all(ops.map((op) => api.undoAction(op))).then(
+                  () => putBack?.(),
+                  (e) => showToast({ kind: 'error', text: errorMessage(e) }),
                 );
               },
             }
@@ -200,6 +209,7 @@ export function SenderPane() {
         ms: 6000,
       });
     } catch (e) {
+      putBack?.();
       showToast({ kind: 'error', text: errorMessage(e) });
     } finally {
       setBusy(false);

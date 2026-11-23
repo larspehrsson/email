@@ -1411,6 +1411,7 @@ describe('sender pane', () => {
     const { page, errors, close } = await open({ threaded: false });
     try {
       await page.locator('.folder-layer .row').first().click();
+      const openId = await page.locator('.folder-layer .row.selected').getAttribute('data-id');
       const from = (await page.locator('.folder-layer .row.selected .row-from').textContent()).trim();
       await page.keyboard.press('ControlOrMeta+2');
       await hasText(page.locator('.sp-name'), from, 'the sender of the message on screen');
@@ -1435,21 +1436,78 @@ describe('sender pane', () => {
       await page.keyboard.press('Delete');
       if (picked > 1) await page.locator('.confirm-backdrop .btn.danger').click();
       await page.locator('.toast', { hasText: 'Deleted' }).waitFor();
-      await page.waitForFunction(
-        (n) => {
-          const t = document.querySelector('.sp-all')?.textContent ?? '';
-          return Number((t.includes(' of ') ? t.split(' of ')[1] : t).replace(/[^\d]/g, '')) === n;
-        },
-        before - picked,
-      );
+      // The overview moves on to the next email instead of going blank.
+      assert.equal(await page.locator('.reader-empty').count(), 0, 'a message is still open');
+      assert.equal(await page.locator('.folder-layer .row.selected').count(), 1, 'the next row is selected');
+      assert.notEqual(await page.locator('.folder-layer .row.selected').getAttribute('data-id'), openId);
+      // The pane follows the open message: it now shows the next email's sender.
+      await page.waitForFunction(() => {
+        const name = document.querySelector('.sp-name')?.textContent?.trim();
+        const from = document.querySelector('.folder-layer .row.selected .row-from')?.textContent?.trim();
+        return !!name && !!from && name === from;
+      });
       await page.locator('.toast button', { hasText: 'Undo' }).click();
       await page.waitForFunction((n) => {
         const t = document.querySelector('.sp-all')?.textContent ?? '';
         return Number((t.includes(' of ') ? t.split(' of ')[1] : t).replace(/[^\d]/g, '')) === n;
       }, before);
+      // Undo opens the deleted message again, where it was.
+      await page.waitForFunction((id) => document.querySelector('.folder-layer .row.selected')?.dataset.id === id, openId);
       // Off again, remembered.
       await page.keyboard.press('ControlOrMeta+2');
       assert.equal(await page.locator('.sender-pane').count(), 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('deleting just the open one opens the next email; Undo goes back', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.locator('.folder-layer .row').first().click();
+      const openId = await page.locator('.folder-layer .row.selected').getAttribute('data-id');
+      await page.keyboard.press('ControlOrMeta+2');
+      await page.locator('.sp-row.current').waitFor();
+      await page.locator('.sp-row.current').click();
+      assert.equal(await page.locator('.sp-row.on').count(), 1, 'only the open one picked');
+      await page.keyboard.press('Delete');
+      await page.locator('.toast', { hasText: 'Deleted 1 message' }).waitFor();
+      await page.waitForFunction((gone) => {
+        const sel = document.querySelector('.folder-layer .row.selected');
+        return !!sel && sel.dataset.id !== gone;
+      }, openId);
+      assert.equal(await page.locator('.reader-empty').count(), 0, 'the next email is open, not a blank reader');
+      await page.locator('.toast button', { hasText: 'Undo' }).click();
+      await page.waitForFunction((id) => document.querySelector('.folder-layer .row.selected')?.dataset.id === id, openId);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('conversations: deleting the open one from the panel never blanks the overview', async () => {
+    const { page, errors, close } = await open({ threaded: true });
+    try {
+      await page.locator('.folder-layer .row').first().click();
+      const openId = await page.locator('.folder-layer .row.selected').getAttribute('data-id');
+      await page.keyboard.press('ControlOrMeta+2');
+      await page.locator('.sp-row.current').waitFor();
+      await page.locator('.sp-row.current').click();
+      await page.keyboard.press('ControlOrMeta+a');
+      await page.waitForFunction(() => document.querySelectorAll('.sp-row.on').length > 0);
+      const picked = await page.locator('.sp-row.on').count();
+      await page.keyboard.press('Delete');
+      if (picked > 1) await page.locator('.confirm-backdrop .btn.danger').click();
+      await page.locator('.toast', { hasText: 'Deleted' }).waitFor();
+      await page.waitForTimeout(400);
+      assert.ok((await page.locator('.folder-layer .row').count()) > 0, 'other conversations remain');
+      assert.equal(await page.locator('.reader-empty').count(), 0, 'still reading, not blank');
+      const sel = page.locator('.folder-layer .row.selected');
+      assert.equal(await sel.count(), 1);
+      // The conversation went entirely: the next one is open. Some of it left: it stays open.
+      const stillThere = await page.locator(`.folder-layer .row[data-id="${openId}"]`).count();
+      if (!stillThere) assert.notEqual(await sel.getAttribute('data-id'), openId);
       assert.deepEqual(errors, []);
     } finally {
       await close();

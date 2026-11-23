@@ -240,6 +240,58 @@ export function undoLast(): boolean {
   return true;
 }
 
+/** A removal made outside the list (the sender pane) that takes the item open in the overview:
+ *  select the next row in its place right away, as an own action does, and return how to put the
+ *  selection back (on undo). Null when the open item stays where it is. */
+export async function advancePastRemoved(chosen: MessageSummary[]): Promise<(() => void) | null> {
+  const nav = activeNav();
+  if (!nav) return null;
+  const ids = new Set(chosen.map((m) => m.id));
+  const back = (prev: Selection, next: number | null) => () => {
+    nav.refresh();
+    if (currentId() === next) restore(prev);
+  };
+  if (conversationMode()) {
+    const t = selectedThread();
+    if (!t) return null;
+    // The conversation's row goes only when its last message in this folder goes.
+    const view = await api.getThread(t.id, t.folderId, 'folder', false);
+    const here = view.messages.filter((m) => m.folderId === t.folderId);
+    if (here.length === 0 || !here.every((m) => ids.has(m.id))) return null;
+    // Every conversation row that goes entirely, not just the open one: the row landed on has
+    // to be one that stays.
+    const gone = new Set<number>([t.id]);
+    const touched = new Set<number>();
+    await Promise.all(
+      chosen
+        .filter((m) => m.folderId === t.folderId)
+        .map(async (m) => {
+          const at = await api.locateMessage(t.folderId, m.id, true);
+          if (at) touched.add(at.id);
+        }),
+    );
+    await Promise.all(
+      [...touched].map(async (id) => {
+        if (gone.has(id)) return;
+        const v = await api.getThread(id, t.folderId, 'folder', false);
+        const ms = v.messages.filter((m) => m.folderId === t.folderId);
+        if (ms.length > 0 && ms.every((m) => ids.has(m.id))) gone.add(id);
+      }),
+    );
+    const prev = snapshot();
+    nav.removeMany([...gone]);
+    return back(prev, currentId());
+  }
+  const open = selectedMessageId();
+  if (open == null || !ids.has(open)) return null;
+  const prev = snapshot();
+  // Search results span folders: a trashed message still matches, so keep it and step on.
+  if (searchActive()) nav.step();
+  else if (chosen.length === 1) nav.advance();
+  else nav.removeMany([...ids]);
+  return back(prev, currentId());
+}
+
 // ------------------------------------------------------------- reader header shortcuts
 
 /** `tag-N`: toggle the Nth tag (1–9) · `tag-clear`: remove all · `tag-menu`: open the Tag menu */
