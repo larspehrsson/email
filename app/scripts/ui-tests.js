@@ -1950,6 +1950,96 @@ describe('several messages', () => {
   });
 });
 
+describe('drag to folder', () => {
+  const rows = (page) => page.locator('.folder-layer .row');
+  const drag = async (page, row, target) => {
+    const rb = await row.boundingBox();
+    const tb = await target.boundingBox();
+    await page.mouse.move(rb.x + rb.width / 2, rb.y + rb.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(tb.x + tb.width / 2, tb.y + tb.height / 2, { steps: 12 });
+  };
+
+  test('a message dragged onto a folder moves there, with Undo', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const id = await rows(page).first().getAttribute('data-id');
+      const target = page.locator('.sidebar .folder', { hasText: 'Receipts' }).first();
+      await drag(page, rows(page).first(), target);
+      await page.locator('.drag-ghost.ok').waitFor();
+      assert.match(await page.locator('.drag-ghost').textContent(), /1\s*message/);
+      assert.equal(await target.evaluate((e) => e.classList.contains('drop-target')), true, 'the folder lights up');
+      await page.mouse.up();
+      await page.locator('.toast', { hasText: 'Moved to Receipts' }).waitFor();
+      await page.waitForFunction((gone) => ![...document.querySelectorAll('.folder-layer .row')].some((e) => e.dataset.id === gone), id);
+      assert.equal(await page.locator('.drag-ghost').count(), 0);
+      await page.locator('.toast button', { hasText: 'Undo' }).click();
+      await page.waitForFunction((back) => [...document.querySelectorAll('.folder-layer .row')].some((e) => e.dataset.id === back), id);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('rows picked together drag together; a conversation drags its messages', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const ids = await rows(page).evaluateAll((els) => els.slice(0, 2).map((e) => e.dataset.id));
+      await rows(page).nth(0).click();
+      await rows(page).nth(1).click({ modifiers: ['ControlOrMeta'] });
+      await page.locator('.multi-pane').waitFor();
+      const target = page.locator('.sidebar .folder', { hasText: 'Work' }).first();
+      await drag(page, rows(page).first(), target);
+      assert.match(await page.locator('.drag-ghost').textContent(), /2\s*messages/);
+      await page.mouse.up();
+      await page.locator('.toast', { hasText: 'Moved 2 messages to Work' }).waitFor();
+      await page.waitForFunction((gone) => gone.every((id) => ![...document.querySelectorAll('.folder-layer .row')].some((e) => e.dataset.id === id)), ids);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('a conversation dragged to a folder moves its messages', async () => {
+    const { page, errors, close } = await open({ threaded: true });
+    try {
+      const target = page.locator('.sidebar .folder', { hasText: 'Personal' }).first();
+      await drag(page, rows(page).first(), target);
+      await page.locator('.drag-ghost.ok').waitFor();
+      await page.mouse.up();
+      await page.locator('.toast').filter({ hasText: /Moved (\d+ messages )?to Personal/ }).waitFor();
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test("Escape cancels; another account's folder refuses the drop", async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const id = await rows(page).first().getAttribute('data-id');
+      const target = page.locator('.sidebar .folder', { hasText: 'Receipts' }).first();
+      await drag(page, rows(page).first(), target);
+      await page.locator('.drag-ghost').waitFor();
+      await page.keyboard.press('Escape');
+      assert.equal(await page.locator('.drag-ghost').count(), 0, 'cancelled');
+      await page.mouse.up();
+      // The second account's Inbox: not a target for this account's mail.
+      const other = page.locator('.sidebar .account').nth(1).locator('.folder', { hasText: 'Inbox' }).first();
+      await drag(page, rows(page).first(), other);
+      assert.equal(await page.locator('.drag-ghost.ok').count(), 0, 'no drop offered');
+      assert.equal(await other.evaluate((e) => e.classList.contains('drop-target')), false);
+      await page.mouse.up();
+      await page.waitForTimeout(300);
+      assert.equal(await page.locator('.toast', { hasText: 'Moved' }).count(), 0, 'nothing moved');
+      assert.equal(await rows(page).first().getAttribute('data-id'), id, 'the row stays');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('writing help', () => {
   test('without a key it says where to add one; with one, a reply is written and used', async () => {
     const { page, errors, context, close } = await open({ threaded: false });

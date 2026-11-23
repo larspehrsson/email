@@ -9,6 +9,7 @@ import { DRAG } from '../lib/platform';
 import { accountMark, accounts, folderById, foldersByAccount, mainView, selectedFolderId, selectFolder, setMainView } from '../state';
 import { FoldersIcon, PeopleIcon, RoleIcon, SidebarIcon } from './Icons';
 import { badgeFor, isAccountCollapsed, isInboxPath, roleFolders, SyncFooter, toggleAccount } from './Sidebar';
+import { msgDrag } from '../lib/messageDrag';
 
 const compact = (n: number) => (n > 99 ? '99+' : String(n));
 
@@ -24,7 +25,9 @@ function RailFolder(props: { f: Folder }) {
   return (
     <button
       class="rail-btn"
-      classList={{ selected: selectedFolderId() === props.f.id }}
+      classList={{ selected: selectedFolderId() === props.f.id, 'drop-target': msgDrag()?.targetId === props.f.id }}
+      data-folder-id={props.f.id}
+      data-account-id={props.f.accountId}
       title={tip()}
       aria-label={tip()}
       aria-current={selectedFolderId() === props.f.id ? 'page' : undefined}

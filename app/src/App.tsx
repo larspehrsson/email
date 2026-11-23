@@ -57,6 +57,7 @@ import { SenderPane } from './components/SenderPane';
 import { ContactsView } from './components/ContactsView';
 import { AddAccountModal, Onboarding } from './components/AddAccount';
 import { ContextMenuHost, markFolderRead } from './components/ContextMenu';
+import { MessageDragGhost } from './components/MessageDragGhost';
 import { AiAppsHost } from './components/AiApps';
 import { LinkPeek } from './components/LinkPeek';
 import { startGoogleSync } from './lib/googleContacts';
@@ -367,6 +368,7 @@ export function App() {
           <AiAppsHost />
           <LinkPeek />
           <ContextMenuHost />
+          <MessageDragGhost />
           <SourceHost />
           <ShortcutsHost />
           <SettingsHost />

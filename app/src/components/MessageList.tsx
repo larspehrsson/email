@@ -79,6 +79,7 @@ import { ViewMenuButton } from './ViewMenu';
 import { TagDots, tintStyle } from './Tags';
 import { climbToParent, FolderCrumbs, folderPathLabel } from './FolderSwitcher';
 import { registerListNav, runAction, runShortcut } from '../lib/actions';
+import { startMessageDrag } from '../lib/messageDrag';
 import { commandFor, hint } from '../lib/shortcuts';
 import { hideToast, showToast } from './Toast';
 import { badgeFor, railOrder } from './Sidebar';
@@ -1267,9 +1268,21 @@ export function MessageList(props: {
                       togglePick(item.index);
                       return;
                     }
+                    const it = m();
+                    const dragItems = it && multiPicked() && picked().has(it.id) ? [...picked()] : undefined;
                     anchorIdx = item.index;
                     setPicked([]);
                     selectIndex(item.index, false);
+                    if (it) {
+                      startMessageDrag(e, {
+                        accountId: props.folder.accountId,
+                        sourceFolderId: folderId,
+                        excludeFolderId: search ? ((it as MessageSummary).folderId ?? null) : folderId,
+                        threaded,
+                        rowId: it.id,
+                        items: dragItems,
+                      });
+                    }
                   }}
                   onDblClick={() => props.onOpen()}
                   onContextMenu={(e) => {

@@ -14,6 +14,7 @@ import { restartToUpdate, updateStatus } from '../lib/updates';
 import { showToast } from './Toast';
 import { toggleSidebar } from '../lib/layout';
 import { DRAG, platform } from '../lib/platform';
+import { msgDrag } from '../lib/messageDrag';
 
 export const ROLE_ORDER: Exclude<FolderRole, null>[] = [
   'inbox',
@@ -431,8 +432,10 @@ function FolderRow(props: { folder: Folder; depth: number; role?: boolean }) {
   return (
     <button
       class="folder"
-      classList={{ selected: selected(), role: !!props.role }}
+      classList={{ selected: selected(), role: !!props.role, 'drop-target': msgDrag()?.targetId === props.folder.id }}
       style={{ 'padding-left': `${12 + props.depth * 14 + 18}px` }}
+      data-folder-id={props.folder.id}
+      data-account-id={props.folder.accountId}
       onClick={() => selectFolder(props.folder.id)}
       onContextMenu={(e) => folderMenu(e, props.folder)}
       title={props.folder.path.join(' / ')}
@@ -460,8 +463,10 @@ function TreeItem(props: { node: TreeNode }) {
         tabIndex={0}
         aria-expanded={hasKids() ? open() : undefined}
         aria-selected={selected()}
-        classList={{ selected: selected(), container: !selectable() }}
+        classList={{ selected: selected(), container: !selectable(), 'drop-target': !!n().folder && msgDrag()?.targetId === n().folder!.id }}
         style={{ 'padding-left': `${12 + n().depth * 14}px` }}
+        data-folder-id={selectable() ? n().folder!.id : undefined}
+        data-account-id={selectable() ? n().folder!.accountId : undefined}
         onClick={() => {
           const f = n().folder;
           if (f && f.selectable) selectFolder(f.id);

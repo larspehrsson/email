@@ -1,6 +1,7 @@
 import { createEffect, on, onCleanup, onMount } from 'solid-js';
 import { flyout, RAIL_W, setFlyout } from '../lib/layout';
 import { folderById, selectedFolderId } from '../state';
+import { msgDrag } from '../lib/messageDrag';
 import { Sidebar } from './Sidebar';
 
 /**
@@ -27,7 +28,17 @@ export function Flyout(props: { width: number }) {
     const inside = (t: EventTarget | null) =>
       t instanceof Element && !!t.closest('.flyout, .rail, .modal-backdrop, .sync-popover, .move-picker, .view-menu');
     const onDown = (e: MouseEvent) => {
-      if (!inside(e.target)) close();
+      if (inside(e.target)) return;
+      // A press on a message row may become a drag into the flyout: decide on release.
+      if ((e.target as Element).closest?.('.list-scroll .row')) {
+        const up = () => {
+          window.removeEventListener('pointerup', up);
+          if (!msgDrag()) close();
+        };
+        window.addEventListener('pointerup', up);
+        return;
+      }
+      close();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || document.querySelector('.modal-backdrop')) return;
