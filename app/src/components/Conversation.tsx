@@ -15,7 +15,7 @@ import {
   takeConversationFocus,
 } from '../state';
 import { ForwardIcon, ImageIcon, PaperclipIcon, ReplyIcon } from './Icons';
-import { AddrList, AttachmentControl, Avatar, BodySkeleton, buildSrcdoc, PlainBody, ReaderEmpty } from './Reader';
+import { AddrList, AlwaysLoad, AttachmentControl, Avatar, BodySkeleton, buildSrcdoc, PlainBody, ReaderEmpty } from './Reader';
 import { DRAG } from '../lib/platform';
 import { CardActions, HeaderActions, type ActionTarget } from './Actions';
 import { pendingSnooze } from './Snooze';
@@ -286,9 +286,11 @@ function ExpandedCard(props: { m: MessageSummary; me: Me; folderTag?: string; ac
             Load images
           </button>
           <span class="dot-sep">·</span>
-          <button class="link-btn" title={`Always load images in mail from ${props.m.fromAddr}`} onClick={() => body.alwaysFromSender()}>
-            Always from this sender
-          </button>
+          <AlwaysLoad
+            addr={props.m.fromAddr}
+            domain={body.shown()?.d.senderDomain ?? null}
+            onPick={(who) => (who === 'domain' ? body.alwaysFromDomain() : body.alwaysFromSender())}
+          />
         </div>
       </Show>
       <div class="cm-body">

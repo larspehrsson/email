@@ -297,6 +297,7 @@ pub fn render(id: i64, raw: &[u8], date: i64) -> Option<MessageDetail> {
         None => t.into_owned(),
     });
     let has_remote_content = html.as_deref().is_some_and(has_remote);
+    let sender_domain = crate::icons::icon_domain(&from_addr);
 
     Some(MessageDetail {
         id,
@@ -310,6 +311,7 @@ pub fn render(id: i64, raw: &[u8], date: i64) -> Option<MessageDetail> {
         attachments,
         has_remote_content,
         remote_allowed: false,
+        sender_domain,
         tags: Vec::new(),
     })
 }

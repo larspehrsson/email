@@ -271,7 +271,8 @@ CREATE TABLE IF NOT EXISTS account_logos (
     data_url   TEXT NOT NULL
 );
 
--- Senders whose remote images always load ("Always load images from …"), lowercase addresses.
+-- Senders whose remote images always load ("Always load images from …"), lowercase addresses,
+-- or "@domain" for everyone there (and at its subdomains).
 CREATE TABLE IF NOT EXISTS remote_senders (
     addr  TEXT PRIMARY KEY,
     added INTEGER NOT NULL DEFAULT (unixepoch())
@@ -2923,12 +2924,15 @@ impl Store {
         Ok(())
     }
 
-    /// "Load images" chosen for this message, or always for its sender.
+    /// "Load images" chosen for this message, or always for its sender or the sender's domain
+    /// ("@papercut.com" takes ann@papercut.com and ann@mail.papercut.com, not ann@xpapercut.com).
     pub fn allow_remote(&self, id: i64) -> Result<bool> {
         Ok(self
             .rdb()
             .query_row(
-                "SELECT m.allow_remote != 0 OR EXISTS (SELECT 1 FROM remote_senders r WHERE r.addr = lower(m.from_addr))
+                "SELECT m.allow_remote != 0 OR EXISTS (SELECT 1 FROM remote_senders r WHERE r.addr = lower(m.from_addr)
+                   OR (substr(r.addr, 1, 1) = '@'
+                       AND substr(lower(m.from_addr), -length(r.addr)) IN (r.addr, '.' || substr(r.addr, 2))))
                  FROM messages m WHERE m.id=?1",
                 [id],
                 |r| r.get(0),
@@ -2970,7 +2974,7 @@ impl Store {
         Ok(())
     }
 
-    /// Always (or no longer) load remote images in mail from `addr`.
+    /// Always (or no longer) load remote images in mail from `addr` (or "@domain": everyone there).
     pub fn set_remote_sender(&self, addr: &str, on: bool) -> Result<()> {
         let addr = addr.trim().to_lowercase();
         if addr.is_empty() {
@@ -4857,6 +4861,19 @@ mod tests {
         assert_eq!(store.remote_senders().unwrap(), ["news@shop.com"]);
         store.set_remote_sender("NEWS@shop.com", false).unwrap();
         assert!(store.remote_senders().unwrap().is_empty());
+        // Everyone at a domain: its addresses and its subdomains', not a name that ends the same.
+        let more: Vec<HeaderRecord> = [(4u32, "ann@Y.com"), (5, "bo@mail.y.com"), (6, "cy@xy.com")]
+            .iter()
+            .map(|&(u, from)| HeaderRecord { from_addr: from.into(), message_id: Some(format!("r{u}@x")), ..rec(u, 0, &[]) })
+            .collect();
+        store.upsert_headers(acct.id, inbox, &more, &HashMap::new()).unwrap();
+        store.set_remote_sender("@y.com", true).unwrap();
+        for m in store.list_messages(inbox, 0, 10).unwrap().messages {
+            let from = store.message_from_addr(m.id).unwrap().unwrap();
+            let want = matches!(from.as_str(), "other@y.com" | "ann@Y.com" | "bo@mail.y.com");
+            assert_eq!(store.allow_remote(m.id).unwrap(), want, "{from}");
+        }
+        assert_eq!(store.remote_senders().unwrap(), ["@y.com"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

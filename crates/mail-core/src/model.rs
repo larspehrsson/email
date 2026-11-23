@@ -342,6 +342,9 @@ pub struct MessageDetail {
     pub has_remote_content: bool,
     /// The user chose "Load images" for this message before.
     pub remote_allowed: bool,
+    /// The sender's own domain ("papercut.com", from "ann@mail.papercut.com"), for "Always from
+    /// everyone at …"; None for mail services anyone has an address at (gmail.com…).
+    pub sender_domain: Option<String>,
     pub tags: Vec<String>,
 }
 

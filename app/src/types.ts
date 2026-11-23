@@ -152,6 +152,8 @@ export interface MessageDetail {
   hasRemoteContent: boolean;
   /** The user chose "Load images" for this message before. */
   remoteAllowed: boolean;
+  /** The sender's own domain, for "Everyone at …" (null for gmail.com and the like). */
+  senderDomain?: string | null;
   tags: string[];
 }
 
@@ -757,6 +759,7 @@ export interface CommandMap {
   message_in_folder: { args: { id: number; folderId: number | null }; ret: boolean };
   set_allow_remote: { args: { id: number; allow: boolean }; ret: void };
   allow_remote_sender: { args: { id: number }; ret: string };
+  allow_remote_domain: { args: { id: number }; ret: string };
   remote_senders: { args: undefined; ret: string[] };
   set_remote_sender: { args: { addr: string; on: boolean }; ret: void };
   update_password: { args: { accountId: number; password: string }; ret: void };

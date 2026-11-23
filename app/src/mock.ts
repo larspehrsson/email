@@ -617,6 +617,19 @@ export function createMockBackend(): Backend {
   const folderMsgs = new Map<number, MessageSummary[]>();
   const byId = new Map<number, MessageSummary>();
   const remoteAllowed = new Set<number>();
+  /** The sender's domain, as the core gives it: none for mail services anyone is at. */
+  const senderDomainOf = (addr: string): string | null => {
+    const d = addr.split('@')[1]?.toLowerCase() ?? '';
+    if (!d.includes('.') || /^(gmail|googlemail|outlook|hotmail|live|yahoo|icloud|me|hey)\.com$/.test(d)) return null;
+    return d.split('.').slice(-2).join('.');
+  };
+  /** Images always load from this address: it, or "@" its domain (or a parent of it). */
+  const remoteFromSender = (addr: string): boolean => {
+    const a = addr.toLowerCase();
+    if (remoteSenders.has(a)) return true;
+    const host = a.split('@')[1] ?? '';
+    return [...remoteSenders].some((r) => r.startsWith('@') && (host === r.slice(1) || host.endsWith(`.${r.slice(1)}`)));
+  };
   /** "Always from this sender": lowercase addresses */
   const remoteSenders = new Set<string>();
   /** resolves a pending mock browser sign-in as cancelled */
@@ -1120,7 +1133,8 @@ export function createMockBackend(): Backend {
       text,
       attachments: (md?.attachments ?? []).map((a) => ({ ...a })),
       hasRemoteContent,
-      remoteAllowed: remoteAllowed.has(m.id) || remoteSenders.has(m.fromAddr.toLowerCase()),
+      remoteAllowed: remoteAllowed.has(m.id) || remoteFromSender(m.fromAddr),
+      senderDomain: senderDomainOf(m.fromAddr),
     };
   }
 
@@ -1989,6 +2003,14 @@ export function createMockBackend(): Backend {
       if (!m) throw 'This message has no sender.';
       remoteSenders.add(m.fromAddr.toLowerCase());
       return m.fromAddr;
+    },
+    async allow_remote_domain({ id }) {
+      await sleep(3);
+      const m = byId.get(id);
+      const d = m && senderDomainOf(m.fromAddr);
+      if (!d) throw 'Anyone can have an address there: allow this sender instead.';
+      remoteSenders.add(`@${d}`);
+      return `@${d}`;
     },
     async remote_senders() {
       await sleep(3);

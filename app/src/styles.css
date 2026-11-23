@@ -6572,3 +6572,31 @@ body.dragging-message iframe {
   --card-solid: #073642;
   --card-solid-hover: #0b3f4c;
 }
+
+/* "Always load…" over blocked images: a menu that looks like the banner's links. */
+.remote-always {
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  padding: 0 14px 0 0;
+  cursor: pointer;
+  /* as wide as what it says (the options are longer) */
+  field-sizing: content;
+  max-width: 260px;
+  text-overflow: ellipsis;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 5px center, right 1px center;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+}
+.remote-always:hover {
+  text-decoration: underline;
+}
+.remote-always:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: 4px;
+}

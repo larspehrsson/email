@@ -144,6 +144,15 @@ export function createMessageBody(id: number) {
       wantRemote = true;
       void load();
     },
+    /** Always load images from everyone at the sender's domain (this message's now too). */
+    alwaysFromDomain() {
+      void api.allowRemoteDomain(id).then(() => {
+        cacheClear();
+        cacheMarkRemoteAllowed(id);
+        wantRemote = true;
+        void load();
+      }, () => {});
+    },
     /** Always load images from this sender (this message's now too). */
     alwaysFromSender() {
       void api.allowRemoteSender(id).then(() => {

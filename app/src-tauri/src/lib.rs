@@ -123,6 +123,11 @@ async fn allow_remote_sender(core: State<'_, Arc<Core>>, id: i64) -> Res<String>
 }
 
 #[tauri::command]
+async fn allow_remote_domain(core: State<'_, Arc<Core>>, id: i64) -> Res<String> {
+    core.allow_remote_from_domain(id).map_err(err)
+}
+
+#[tauri::command]
 async fn remote_senders(core: State<'_, Arc<Core>>) -> Res<Vec<String>> {
     core.remote_senders().map_err(err)
 }
@@ -1470,6 +1475,7 @@ pub fn run() {
             sender_folders,
             sender_icon,
             allow_remote_sender,
+            allow_remote_domain,
             account_logos,
             google_status,
             mcp_status,
