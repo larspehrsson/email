@@ -1688,7 +1688,7 @@ impl Core {
             Some(raw) => {
                 let mut detail = mime::render(id, &raw, self.store.message_date(id)?);
                 if let Some(d) = detail.as_mut() {
-                    d.remote_allowed = self.store.allow_remote(id)?;
+                    d.remote_allowed = self.store.allow_remote(id, d.sender_domain.is_some())?;
                     d.tags = self.store.message_tags(id)?;
                 }
                 // Attachments not downloaded yet are still listed, numbered after the stored ones.
@@ -1736,10 +1736,15 @@ impl Core {
     }
 
     /// Always load remote images in mail from everyone at this message's sender's domain;
-    /// returns it ("@papercut.com"). Not for gmail.com and the like: anyone can write from there.
+    /// returns it ("@papercut.com"). Only when the receiving server vouched that the message is
+    /// from there (`mime::verified_sender_domain`), and not for gmail.com and the like: anyone
+    /// can write from there.
     pub fn allow_remote_from_domain(&self, id: i64) -> Result<String> {
+        let raw = self.store.body(id)?.ok_or_else(|| anyhow!("This message isn't downloaded yet."))?;
+        let msg = mail_parser::MessageParser::default().parse(&raw).ok_or_else(|| anyhow!("This message can't be read."))?;
         let addr = self.store.message_from_addr(id)?.filter(|a| !a.trim().is_empty()).ok_or_else(|| anyhow!("This message has no sender."))?;
-        let domain = crate::icons::icon_domain(&addr).ok_or_else(|| anyhow!("Anyone can have an address there: allow this sender instead."))?;
+        let domain = mime::verified_sender_domain(&msg, &addr)
+            .ok_or_else(|| anyhow!("Nothing shows this message is really from that domain: allow this sender instead."))?;
         let entry = format!("@{domain}");
         self.store.set_remote_sender(&entry, true)?;
         Ok(entry)

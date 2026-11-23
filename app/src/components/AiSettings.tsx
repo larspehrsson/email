@@ -1,4 +1,5 @@
-import { createResource, createSignal, For, Show } from 'solid-js';
+import { Select } from './Select';
+import { createResource, createSignal, Show } from 'solid-js';
 import { api, errorMessage } from '../api';
 import { aiModel, MODEL_NAMES, setAiModel, startAi } from '../lib/ai';
 
@@ -97,9 +98,13 @@ export function AiSection() {
       <div class="st-field">
         <span class="st-field-label">Model</span>
         <span class="st-field-value">
-          <select class="st-input ai-model" aria-label="Model" value={model()} onChange={(e) => setAiModel(e.currentTarget.value)}>
-            <For each={status()?.models ?? Object.keys(MODEL_NAMES)}>{(m) => <option value={m}>{MODEL_NAMES[m] ?? m}</option>}</For>
-          </select>
+          <Select
+            class="ai-model"
+            label="Model"
+            value={model()}
+            options={(status()?.models ?? Object.keys(MODEL_NAMES)).map((m) => ({ value: m, label: MODEL_NAMES[m] ?? m }))}
+            onChange={(m) => setAiModel(m)}
+          />
         </span>
       </div>
       <p class="st-status" classList={{ error: !!msg()?.error }}>

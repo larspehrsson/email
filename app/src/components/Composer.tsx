@@ -1,3 +1,4 @@
+import { Select } from './Select';
 import { createEffect, createSelector, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
@@ -694,14 +695,14 @@ export function Composer() {
             when={accountList().length > 1}
             fallback={<span class="cmp-from">{from()?.email ?? ''}</span>}
           >
-            <select
+            <Select
               class="cmp-select"
-              aria-label="From"
-              value={String(c().accountId)}
-              onChange={(e) => changeAccount(Number(e.currentTarget.value))}
-            >
-              <For each={accountList()}>{(a) => <option value={String(a.id)}>{a.email}</option>}</For>
-            </select>
+              variant="plain"
+              label="From"
+              value={c().accountId}
+              options={accountList().map((a) => ({ value: a.id, label: a.email }))}
+              onChange={(id) => changeAccount(id)}
+            />
           </Show>
         </div>
         <div class="cmp-to">
@@ -783,25 +784,14 @@ export function Composer() {
         <div class="cmp-editor" classList={{ 'has-quote': !!c().quoteHtml || c().fwdAttachments.length > 0 }} ref={editorEl} />
         <Show when={sigs().signatures.length > 0 || c().signatureHtml}>
           <div class="cmp-sig" onMouseDown={(e) => e.stopPropagation()}>
-            <select
+            <Select
               class="cmp-sig-select"
-              aria-label="Signature"
-              title="Signature"
-              onChange={(e) => pickSignature(e.currentTarget.value ? Number(e.currentTarget.value) : null)}
-            >
-              {/* The chosen one marked on its option: the options are remade when the signatures
-                  change in Settings, and the select's own value would fall back to the first. */}
-              <option value="" selected={c().signatureId == null}>
-                No signature
-              </option>
-              <For each={sigs().signatures}>
-                {(s) => (
-                  <option value={String(s.id)} selected={c().signatureId === s.id}>
-                    {s.name}
-                  </option>
-                )}
-              </For>
-            </select>
+              variant="plain"
+              label="Signature"
+              value={c().signatureId ?? null}
+              options={[{ value: null, label: 'No signature' }, ...sigs().signatures.map((s) => ({ value: s.id as number | null, label: s.name }))]}
+              onChange={(id) => pickSignature(id)}
+            />
             <Show when={c().signatureHtml}>
               {/* Sanitized by the core when it was saved. */}
               <div class="cmp-sig-body" innerHTML={c().signatureHtml!} />

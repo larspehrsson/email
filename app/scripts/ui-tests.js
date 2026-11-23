@@ -56,6 +56,23 @@ const selected = (page) => page.locator('.folder-layer .row.selected .row-subjec
 const reader = (page) => page.locator('h1').first();
 
 /** Wait until `locator`'s text is `want` (or time out with what it was). */
+/** Choose `label` in one of our drop-downs (components/Select.tsx): `box` is its button. */
+async function choose(box, label) {
+  await box.click();
+  const menu = box.page().locator('.sel-menu');
+  await menu.getByRole('option', { name: label, exact: true }).click();
+  await menu.waitFor({ state: 'detached' });
+}
+/** The options of one of our drop-downs, opened and closed again. */
+async function optionsOf(box) {
+  await box.click();
+  const menu = box.page().locator('.sel-menu');
+  const all = await menu.getByRole('option').allTextContents();
+  await box.page().keyboard.press('Escape');
+  await menu.waitFor({ state: 'detached' });
+  return all.map((t) => t.trim());
+}
+
 async function hasText(locator, want, what) {
   const end = Date.now() + 3000;
   let got = null;
@@ -779,8 +796,8 @@ describe('themes', () => {
       const pick = (name) => page.locator('.st-theme', { has: page.getByText(name, { exact: true }) });
       assert.equal(await pick('Auto').getAttribute('aria-checked'), 'true', 'Auto to begin with');
       const auto = await bg();
-      await pick('Claude').click();
-      assert.deepEqual(await attrs(), ['claude', 'light']);
+      await pick('Paper').click();
+      assert.deepEqual(await attrs(), ['paper', 'light']);
       assert.equal(await bg(), 'rgb(240, 238, 230)');
       await pick('Solarized Dark').click();
       assert.deepEqual(await attrs(), ['solarized-dark', 'dark']);
@@ -798,7 +815,7 @@ describe('themes', () => {
       assert.deepEqual(await attrs(), ['solarized-light', 'light']);
       assert.equal(await bg(), 'rgb(238, 232, 213)');
       if (shot) {
-        for (const name of ['Light', 'Dark', 'Claude', 'Solarized Light', 'Solarized Dark']) {
+        for (const name of ['Light', 'Dark', 'Paper', 'Solarized Light', 'Solarized Dark']) {
           await page.keyboard.press('ControlOrMeta+,');
           await page.locator('.st-nav-item', { hasText: 'General' }).click();
           await pick(name).click();
@@ -1015,7 +1032,18 @@ describe('accounts', () => {
       await page.keyboard.press('Control+,');
       const acct = page.locator('.st-acct', { hasText: before[0] });
       await acct.locator('.st-mark-letter').fill('w');
-      await acct.locator('.st-swatch[title="Teal"]').click();
+      // One swatch, the chosen color; it opens the panel of them all, and a pick closes it.
+      assert.equal(await acct.locator('.st-swatch').count(), 1, 'only the chosen color shows');
+      await acct.locator('.st-color-btn').click();
+      await page.locator('.st-color-panel .st-swatch[title="Teal"]').click();
+      await page.locator('.st-color-panel').waitFor({ state: 'detached' });
+      await acct.locator('.st-color-btn[title="Marker color: Teal"]').waitFor({ timeout: 3000 });
+      // Esc closes the panel only, not Settings.
+      await acct.locator('.st-color-btn').click();
+      await page.locator('.st-color-panel').waitFor();
+      await page.keyboard.press('Escape');
+      await page.locator('.st-color-panel').waitFor({ state: 'detached' });
+      assert.equal(await acct.count(), 1, 'Settings still open');
       await page.waitForTimeout(300);
       await page.keyboard.press('Escape');
       const dot = page.locator('.sidebar .account', { hasText: before[0] }).locator('.acct-dot');
@@ -1308,7 +1336,9 @@ describe('signatures', () => {
       await page.keyboard.type('/L');
       await page.waitForTimeout(700);
       assert.deepEqual(await page.locator('.sig-item').allTextContents(), ['Work', 'Short']);
-      await page.locator('select.sig-default').first().selectOption({ label: 'Work' });
+      // Work: the first account's new messages.
+      await page.locator('.sig-item', { hasText: 'Work' }).click();
+      await page.locator('.sig-use input[type="checkbox"]').first().check();
       await page.waitForTimeout(200);
       await page.keyboard.press('Escape');
       const popup = context.waitForEvent('page');
@@ -1319,10 +1349,11 @@ describe('signatures', () => {
       assert.equal((await w.locator('.cmp-sig-body').textContent()).trim(), 'Lars Pehrsson, Example AB');
       // The picker shows the one in use (not "No signature").
       await w.waitForTimeout(300);
-      assert.equal(await w.locator('select.cmp-sig-select').evaluate((e) => e.options[e.selectedIndex]?.text), 'Work');
-      await w.locator('select.cmp-sig-select').selectOption({ label: 'Short' });
+      const sigBox = w.locator('.sel.cmp-sig-select');
+      assert.equal(await sigBox.locator('.sel-text').textContent(), 'Work');
+      await choose(sigBox, 'Short');
       await hasText(w.locator('.cmp-sig-body'), '/L', 'switched');
-      await w.locator('select.cmp-sig-select').selectOption({ label: 'No signature' });
+      await choose(sigBox, 'No signature');
       await w.waitForTimeout(100);
       assert.equal(await w.locator('.cmp-sig-body').count(), 0, 'taken off');
       assert.deepEqual(errors, []);
@@ -1344,23 +1375,44 @@ describe('signature defaults', () => {
         await page.locator('.sig-name').fill(name);
         await page.waitForTimeout(650);
       }
-      const selects = page.locator('select.sig-default');
-      assert.ok((await selects.count()) >= 4, 'two accounts, two choices each');
-      const shown = () => selects.evaluateAll((els) => els.map((e) => e.options[e.selectedIndex]?.text));
-      await selects.nth(0).selectOption({ label: 'Home' });
+      // Each signature's boxes: [account 1 new, account 1 replies, account 2 new, account 2 replies].
+      const boxes = page.locator('.sig-use input[type="checkbox"]');
+      const checked = () => boxes.evaluateAll((els) => els.slice(0, 4).map((e) => e.checked));
+      const show = async (name) => {
+        await page.locator('.sig-item', { hasText: name }).click();
+        await page.waitForTimeout(150);
+      };
+      await show('Home');
+      assert.ok((await boxes.count()) >= 4, 'two accounts, two choices each');
+      await boxes.nth(0).check();
       await page.waitForTimeout(250);
-      await selects.nth(1).selectOption({ label: 'Short' });
+      await boxes.nth(3).check();
       await page.waitForTimeout(250);
-      await selects.nth(2).selectOption({ label: 'Work' });
+      await show('Short');
+      await boxes.nth(1).check();
       await page.waitForTimeout(250);
-      await selects.nth(3).selectOption({ label: 'Home' });
+      await show('Work');
+      // Where another signature is the default, it says which.
+      assert.match(await page.locator('.sig-use-cell').nth(0).textContent(), /now Home/);
+      await boxes.nth(2).check();
       await page.waitForTimeout(400);
-      assert.deepEqual((await shown()).slice(0, 4), ['Home', 'Short', 'Work', 'Home']);
+      assert.deepEqual(await checked(), [false, false, true, false]);
+      await show('Home');
+      assert.deepEqual(await checked(), [true, false, false, true]);
+      await show('Short');
+      assert.deepEqual(await checked(), [false, true, false, false]);
+      // The list shows where each is used.
+      assert.equal(await page.locator('.sig-item', { hasText: 'Home' }).locator('.acct-dot').count(), 2);
+      // Taking an account's default for one signature takes it from the other.
+      await boxes.nth(0).check();
+      await page.waitForTimeout(400);
+      await show('Home');
+      assert.deepEqual(await checked(), [false, false, false, true]);
       // Renaming a signature (the list reloads) changes no one's choice either.
-      await page.locator('.sig-item', { hasText: 'Work' }).click();
+      await show('Work');
       await page.locator('.sig-name').fill('Work 2');
       await page.waitForTimeout(800);
-      assert.deepEqual((await shown()).slice(0, 4), ['Home', 'Short', 'Work 2', 'Home']);
+      assert.deepEqual(await checked(), [false, false, true, false]);
       assert.deepEqual(errors, []);
     } finally {
       await close();
@@ -1387,7 +1439,7 @@ describe('signature html', () => {
       await page.locator('.confirm-backdrop').waitFor();
       await page.locator('.confirm-backdrop .btn', { hasText: 'Cancel' }).click();
       assert.equal(await page.locator('textarea.sig-html').count(), 1, 'still HTML');
-      await page.locator('select.sig-default').first().selectOption({ label: 'Signature' });
+      await page.locator('.sig-use input[type="checkbox"]').first().check();
       await page.waitForTimeout(200);
       await page.keyboard.press('Escape');
       const popup = context.waitForEvent('page');
@@ -1478,7 +1530,7 @@ describe('signature pictures', () => {
       // (ProseMirror puts spacer <img>s of its own around inline nodes: count pictures.)
       await page.waitForFunction(() => document.querySelectorAll('.sig-editor img[src^="data:"]').length === 2);
       await page.waitForTimeout(800);
-      await page.locator('select.sig-default').first().selectOption({ label: 'Signature' });
+      await page.locator('.sig-use input[type="checkbox"]').first().check();
       await page.waitForTimeout(200);
       await page.keyboard.press('Escape');
       const popup = context.waitForEvent('page');
@@ -1615,12 +1667,10 @@ describe('images', () => {
       await fromSender.nth(0).click();
       const banner = page.locator('.reader .remote-banner');
       await banner.waitFor();
-      const always = banner.locator('select.remote-always');
-      assert.deepEqual(
-        await always.locator('option').allTextContents(),
-        ['Always load…', 'From news@lumengoods.com', 'From everyone at lumengoods.com'],
-      );
-      await always.selectOption('sender');
+      const always = banner.locator('.sel.remote-always');
+      assert.equal((await always.textContent()).trim(), 'Always load…');
+      assert.deepEqual(await optionsOf(always), ['From news@lumengoods.com', 'From everyone at lumengoods.com']);
+      await choose(always, 'From news@lumengoods.com');
       await page.waitForTimeout(500);
       assert.equal(await banner.count(), 0, 'loaded');
       await fromSender.nth(1).click();
@@ -1651,7 +1701,7 @@ describe('images from a domain', () => {
       await rows.nth(0).click();
       const banner = page.locator('.reader .remote-banner');
       await banner.waitFor();
-      await banner.locator('select.remote-always').selectOption('domain');
+      await choose(banner.locator('.sel.remote-always'), 'From everyone at lumengoods.com');
       await page.waitForTimeout(500);
       assert.equal(await banner.count(), 0, 'loaded');
       await rows.nth(1).click();
@@ -1748,9 +1798,9 @@ describe('google contacts', () => {
       assert.equal(await page.locator('.ct-google-more').count(), 0);
       await page.locator('.ct-google-link').waitFor();
       await page.locator('[aria-label="New contact"]').click();
-      const saveIn = page.locator('select.ct-save-in');
+      const saveIn = page.locator('.sel.ct-save-in');
       await saveIn.waitFor();
-      assert.equal(await saveIn.locator('option').count(), 2, 'this computer, or the Google account');
+      assert.equal((await optionsOf(saveIn)).length, 2, 'this computer, or the Google account');
       await page.keyboard.press('Escape');
       // Disconnect: its contacts leave the address book.
       await page.keyboard.press('ControlOrMeta+,');
@@ -1829,7 +1879,7 @@ describe('contact groups', () => {
       // A new contact goes where you're looking.
       await source('Kolleger').click();
       await page.locator('[aria-label="New contact"]').click();
-      assert.equal(await page.locator('select.ct-save-in').inputValue(), '1');
+      assert.match(await page.locator('.sel.ct-save-in .sel-text').textContent(), /^Google Contacts/);
       await page.keyboard.press('Escape');
       // Kept for next time.
       await page.reload();

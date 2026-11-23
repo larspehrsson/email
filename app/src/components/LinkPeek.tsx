@@ -22,7 +22,12 @@ function show(a: Element, area: DOMRect, sender: string | null, offset = { x: 0,
   // A place in the message, or nowhere: is it there?
   let targetExists = false;
   if (href.startsWith('#') && href.length > 1) {
-    const id = decodeURIComponent(href.slice(1));
+    let id = href.slice(1);
+    try {
+      id = decodeURIComponent(id);
+    } catch {
+      /* "#%zz": look for it as written */
+    }
     const doc = a.ownerDocument;
     targetExists = !!doc.getElementById(id) || doc.getElementsByName(id).length > 0;
   }
@@ -101,7 +106,7 @@ export function LinkPeek() {
           };
         };
         return (
-          <div class="link-peek" classList={{ warn: !!p().info.warning, note: !p().info.warning && !!p().info.note }} style={view()} role="status" aria-live="polite">
+          <div class="link-peek" classList={{ warn: !!p().info.warning }} style={view()} role="status" aria-live="polite">
             <div class="lp-url" title={p().info.url}>
               <span class="lp-dim">{p().info.before}</span>
               <span class="lp-host">{p().info.host}</span>

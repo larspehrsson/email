@@ -297,7 +297,7 @@ pub fn render(id: i64, raw: &[u8], date: i64) -> Option<MessageDetail> {
         None => t.into_owned(),
     });
     let has_remote_content = html.as_deref().is_some_and(has_remote);
-    let sender_domain = crate::icons::icon_domain(&from_addr);
+    let sender_domain = verified_sender_domain(&msg, &from_addr);
 
     Some(MessageDetail {
         id,
@@ -313,6 +313,57 @@ pub fn render(id: i64, raw: &[u8], date: i64) -> Option<MessageDetail> {
         remote_allowed: false,
         sender_domain,
         tags: Vec::new(),
+    })
+}
+
+/// The sender's domain ("acme.com", the registered part), when the receiving server vouched
+/// for it: its Authentication-Results say DMARC passed for the From domain, or DKIM passed for a
+/// signature by it. Only the topmost Authentication-Results counts, the one the user's own
+/// provider added on arrival: the ones below it could have been written by the sender. None for
+/// gmail.com and the like (anyone has an address there), and when nothing vouches for it: a From
+/// address is easy to make up, and "everyone at acme.com" mustn't let a made-up one in.
+pub fn verified_sender_domain(msg: &mail_parser::Message, from_addr: &str) -> Option<String> {
+    let domain = crate::icons::icon_domain(from_addr)?;
+    // In order from the top (header_raw would give the last one).
+    let results = msg.headers_raw().find(|(name, _)| name.eq_ignore_ascii_case("Authentication-Results"))?.1;
+    auth_results_vouch(results, &domain).then_some(domain)
+}
+
+/// Whether an Authentication-Results value (RFC 8601) has a DMARC or DKIM pass for `domain`
+/// (or one of its subdomains).
+fn auth_results_vouch(results: &str, domain: &str) -> bool {
+    // Comments in parentheses can say anything: leave them out.
+    let mut plain = String::with_capacity(results.len());
+    let mut depth = 0u32;
+    for c in results.chars() {
+        match c {
+            '(' => depth += 1,
+            ')' if depth > 0 => depth -= 1,
+            _ if depth == 0 => plain.push(c),
+            _ => {}
+        }
+    }
+    let ours = |v: &str| {
+        let v = v.trim().trim_matches('"');
+        let host = v.rsplit_once('@').map_or(v, |(_, d)| d);
+        crate::icons::icon_domain(&format!("x@{host}")).as_deref() == Some(domain)
+    };
+    // The first part names the server that checked; the results follow.
+    plain.split(';').skip(1).any(|result| {
+        let mut words = result.split_whitespace();
+        let Some((method, outcome)) = words.next().and_then(|w| w.split_once('=')) else {
+            return false;
+        };
+        if !outcome.eq_ignore_ascii_case("pass") {
+            return false;
+        }
+        let props: Vec<(&str, &str)> = words.filter_map(|w| w.split_once('=')).collect();
+        let prop = |k: &str| props.iter().find(|(n, _)| n.eq_ignore_ascii_case(k)).map(|&(_, v)| v);
+        match method.to_ascii_lowercase().as_str() {
+            "dmarc" => prop("header.from").is_some_and(ours),
+            "dkim" => prop("header.d").or_else(|| prop("header.i")).is_some_and(ours),
+            _ => false,
+        }
     })
 }
 
@@ -572,6 +623,31 @@ fn has_remote(html: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sender_domain_counts_only_when_the_receiving_server_vouched() {
+        let msg = |headers: &str| format!("{headers}From: Ann <ann@mail.example.com>\r\nTo: john@example.org\r\nSubject: Hi\r\n\r\nHello\r\n");
+        let domain = |raw: &str| verified_sender_domain(&MessageParser::default().parse(raw.as_bytes()).unwrap(), "ann@mail.example.com");
+        // DMARC passed for the From domain (Gmail's wording, a comment with a ; in it).
+        let gmail = "Authentication-Results: mx.google.com;\r\n       dkim=pass header.i=@other.example header.s=s1;\r\n       spf=pass (google.com: x; y) smtp.mailfrom=bounce@other.example;\r\n       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=mail.example.com\r\n";
+        assert_eq!(domain(&msg(gmail)).as_deref(), Some("example.com"));
+        // DKIM by the domain itself (Microsoft's wording, no spaces after ;).
+        let outlook = "Authentication-Results: spf=fail smtp.mailfrom=x.example; dkim=pass (signature was verified) header.d=example.com;dmarc=none action=none header.from=mail.example.com;\r\n";
+        assert_eq!(domain(&msg(outlook)).as_deref(), Some("example.com"));
+        // Passes only for someone else's domain, a look-alike, or failed: nothing vouches.
+        for bad in [
+            "Authentication-Results: mx.example.net; dkim=pass header.d=sendgrid.example; dmarc=fail header.from=mail.example.com\r\n",
+            "Authentication-Results: mx.example.net; dmarc=pass header.from=xexample.com\r\n",
+            "Authentication-Results: mx.example.net; dkim=fail header.d=example.com\r\n",
+            "Authentication-Results: mx.example.net (dmarc=pass header.from=example.com); spf=pass\r\n",
+            "",
+        ] {
+            assert_eq!(domain(&msg(bad)), None, "{bad}");
+        }
+        // Only the topmost counts: one below it may be the sender's own.
+        let forged = format!("Authentication-Results: mx.example.net; dmarc=fail header.from=mail.example.com\r\n{}", gmail);
+        assert_eq!(domain(&msg(&forged)), None);
+    }
 
     #[test]
     fn html_references_in_subjects() {

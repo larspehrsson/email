@@ -1,3 +1,4 @@
+import { Select } from './Select';
 import { batch, createEffect, createMemo, createResource, createSignal, For, Index, on, onCleanup, onMount, Show } from 'solid-js';
 import { api, errorMessage, type Card, type ContactDay, type Labeled } from '../api';
 import { cards, emptyCard, loadCards, reloadCards } from '../lib/addressBook';
@@ -298,15 +299,16 @@ export function ContactsView() {
                   when={f().id === 0 && (googleStatus()?.links.length ?? 0) > 0}
                   fallback={<span class="ct-where-text">{f().google != null ? `Google Contacts · ${googleEmail(f().google!)}` : 'This computer'}</span>}
                 >
-                  <select
-                    class="st-input ct-save-in"
-                    aria-label="Save in"
-                    value={String(f().google ?? '')}
-                    onChange={(e) => set({ google: e.currentTarget.value ? Number(e.currentTarget.value) : null })}
-                  >
-                    <option value="">This computer</option>
-                    <For each={googleStatus()?.links ?? []}>{(l) => <option value={String(l.accountId)}>Google Contacts · {l.googleEmail}</option>}</For>
-                  </select>
+                  <Select
+                    class="ct-save-in"
+                    label="Save in"
+                    value={f().google ?? null}
+                    options={[
+                      { value: null, label: 'This computer' },
+                      ...(googleStatus()?.links ?? []).map((l) => ({ value: l.accountId as number | null, label: `Google Contacts · ${l.googleEmail}` })),
+                    ]}
+                    onChange={(google) => set({ google })}
+                  />
                 </Show>
               </div>
               <label class="ct-field">

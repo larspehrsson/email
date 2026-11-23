@@ -4238,14 +4238,8 @@ html.macos .app.rail-mode .search-bar {
   font-size: 13.5px;
   color: var(--text-2);
 }
-.cmp-select {
-  font: inherit;
+.sel.cmp-select {
   font-size: 13.5px;
-  color: var(--text);
-  background: transparent;
-  border: none;
-  padding: 0;
-  outline: none;
 }
 .cmp-to {
   position: relative;
@@ -4442,20 +4436,13 @@ html.macos .app.rail-mode .search-bar {
   margin: 4px 0 14px;
   cursor: default;
 }
-.cmp-sig-select {
-  font: inherit;
+.sel.cmp-sig-select {
+  height: 22px;
   font-size: 12px;
   color: var(--text-3);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  padding: 1px 2px;
-  margin-left: -3px;
-  outline: none;
 }
-.cmp-sig-select:hover,
-.cmp-sig-select:focus-visible {
-  border-color: var(--sep-strong);
+.sel.cmp-sig-select:hover,
+.sel.cmp-sig-select.open {
   color: var(--text-2);
 }
 .cmp-sig-body {
@@ -4539,9 +4526,6 @@ html.macos .app.rail-mode .search-bar {
 /* borderless composer inputs: the caret is the focus indication */
 .addr-input:focus-visible,
 .cmp-subject:focus-visible,
-.cmp-select:focus-visible {
-  box-shadow: none;
-}
 /* the reply quote's "•••" pill: same look as the reader's (lib/quotes.ts) */
 .cmp-quote-pill {
   display: inline-flex;
@@ -4987,6 +4971,10 @@ body.dragging-message * {
 }
 .st-group-title {
   margin: 14px 0 2px;
+}
+/* The titles of a settings page's parts and of an account's groups look the same. */
+.st-group-title,
+.st-sect-title {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -5088,11 +5076,6 @@ body.dragging-message * {
 }
 .st-sect-title {
   margin: 12px 0 8px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--text-3);
 }
 .st-theme {
   display: flex;
@@ -5193,10 +5176,47 @@ body.dragging-message * {
   font-weight: 700;
 }
 /* Automatic and the 11 colours: two even rows of six, at any width. */
-.st-swatches {
+/* The marker's color: the chosen one, opening a panel of them all (Settings.tsx: MarkColor). */
+.st-color-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 5px 3px 3px;
+  border-radius: 14px;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.st-color-btn:hover,
+.st-color-btn[aria-expanded='true'] {
+  background: var(--bg-hover);
+}
+.st-color-btn svg {
+  transform: rotate(90deg);
+}
+.st-swatch.big {
+  width: 22px;
+  height: 22px;
+  font-size: 10px;
+  line-height: 22px;
+  outline: none;
+}
+.st-color-panel {
+  position: fixed;
+  z-index: 1000;
   display: grid;
-  grid-template-columns: repeat(6, 18px);
-  gap: 6px;
+  grid-template-columns: repeat(7, 20px);
+  gap: 8px;
+  padding: 10px;
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  border: 1px solid var(--sep);
+  box-shadow: var(--shadow-card);
+  animation: fade-in 120ms var(--ease);
+}
+.st-color-panel .st-swatch {
+  width: 20px;
+  height: 20px;
+  line-height: 20px;
 }
 .st-swatch {
   width: 18px;
@@ -5275,6 +5295,9 @@ body.dragging-message * {
   padding-right: 12px;
 }
 .sig-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   text-align: left;
   font-size: 13px;
   padding: 5px 8px;
@@ -5283,6 +5306,20 @@ body.dragging-message * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.sig-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sig-item-dots {
+  flex: none;
+  display: flex;
+  gap: 2px;
+}
+.sig-item-dots .acct-dot {
+  font-size: 0;
 }
 .sig-item:hover {
   background: var(--bg-hover);
@@ -5335,26 +5372,53 @@ body.dragging-message * {
   margin: 8px 0 0;
   font-size: 13px;
 }
-.sig-defaults-head {
-  margin: 6px 0 8px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-2);
-}
-.sig-defaults {
+/* Under the signature: the accounts it's the default for (SignatureSettings.tsx). */
+.sig-use {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 170px 170px;
-  gap: 6px 10px;
+  grid-template-columns: minmax(0, max-content) max-content max-content;
+  gap: 6px 22px;
   align-items: center;
+  margin-top: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--sep);
   font-size: 13px;
 }
-.sig-acct {
+.sig-use-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.sig-use-col {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.sig-use-acct {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.sig-use-acct > span:last-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.sig-default {
-  width: 100%;
+.sig-use-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  cursor: pointer;
+}
+.sig-use-other {
+  min-width: 76px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The sender pane: everything from the sender on screen, beside the reader */
@@ -5514,7 +5578,7 @@ body.dragging-message * {
 .st-input.ai-key {
   width: 300px;
 }
-.st-input.ai-model {
+.sel.ai-model {
   width: 300px;
 }
 .fmt-ai {
@@ -5580,14 +5644,15 @@ body.dragging-message * {
   font-size: 12px;
   color: var(--text-3);
 }
-.ai-lang {
-  font: inherit;
-  font-size: 12px;
+/* "Translate…": a Select drawn like the chips beside it. */
+.sel.ai-lang {
+  height: 24px;
+  margin-left: 0;
+  padding: 0 7px 0 9px;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 550;
   color: var(--text-2);
-  background: transparent;
-  border: 1px solid var(--sep-strong);
-  border-radius: 12px;
-  padding: 2px 6px;
 }
 .ai-result {
   margin-top: 10px;
@@ -6346,10 +6411,6 @@ body.dragging-message * {
   font-weight: 600;
   white-space: normal;
 }
-.link-peek.note {
-  border-color: var(--warning, #d08a00);
-  background: color-mix(in srgb, var(--warning, #d08a00) 10%, var(--bg-elev));
-}
 .link-peek .lp-note {
   margin-top: 3px;
   color: var(--text-2);
@@ -6453,8 +6514,8 @@ body.dragging-message iframe {
    Each overrides the colour tokens above; light and dark come from the scheme's own blocks.
    ========================================================================== */
 
-/* Claude: warm paper and Claude's orange; follows the system's light or dark. */
-:root[data-theme='claude'] {
+/* Paper: warm paper with a terracotta accent; follows the system's light or dark. */
+:root[data-theme='paper'] {
   --bg: #faf9f5;
   --bg-sidebar: #f0eee6;
   --bg-list: #faf9f5;
@@ -6482,7 +6543,7 @@ body.dragging-message iframe {
   --card-solid: #fffefb;
   --card-solid-hover: #f6f4ee;
 }
-:root[data-theme='claude'][data-scheme='dark'] {
+:root[data-theme='paper'][data-scheme='dark'] {
   --bg: #262624;
   --bg-sidebar: #1f1e1d;
   --bg-list: #262624;
@@ -6573,30 +6634,115 @@ body.dragging-message iframe {
   --card-solid-hover: #0b3f4c;
 }
 
-/* "Always load…" over blocked images: a menu that looks like the banner's links. */
-.remote-always {
-  appearance: none;
-  -webkit-appearance: none;
-  border: none;
-  background: transparent;
-  color: var(--accent);
+
+/* ==========================================================================
+   Select (components/Select.tsx): our own drop-down, in place of the system's <select>.
+   ========================================================================== */
+.sel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
   font: inherit;
-  padding: 0 14px 0 0;
+  font-size: 13px;
+  color: var(--text);
   cursor: pointer;
-  /* as wide as what it says (the options are longer) */
-  field-sizing: content;
-  max-width: 260px;
+  text-align: left;
+}
+.sel:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.sel-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
-  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
-  background-position: right 5px center, right 1px center;
-  background-size: 4px 4px;
-  background-repeat: no-repeat;
+  white-space: nowrap;
 }
-.remote-always:hover {
-  text-decoration: underline;
+.sel > svg {
+  flex: none;
+  transform: rotate(90deg);
+  color: var(--text-3);
+  transition: transform 120ms var(--ease);
 }
-.remote-always:focus-visible {
+.sel.open > svg {
+  transform: rotate(-90deg);
+}
+.sel.placeholder .sel-text {
+  color: var(--text-3);
+}
+/* A box, like the secondary buttons: in Settings and forms. */
+.sel-field {
+  height: 30px;
+  padding: 0 9px 0 11px;
+  border-radius: 8px;
+  border: 1px solid var(--sep-strong);
+  background: var(--bg-reader);
+}
+.sel-field:hover:not(:disabled),
+.sel-field.open {
+  background: var(--bg-hover);
+}
+.sel-field:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
-  border-radius: 4px;
+}
+/* Like a link: over blocked images. */
+.sel-link {
+  color: var(--accent);
+  gap: 3px;
+}
+.sel-link > svg {
+  color: currentColor;
+}
+.sel-link:hover .sel-text {
+  text-decoration: underline;
+}
+/* Text and a chevron: a tight row (the composer's From, its signature). */
+.sel-plain {
+  height: 26px;
+  padding: 0 6px;
+  margin-left: -6px;
+  border-radius: 6px;
+}
+.sel-plain:hover:not(:disabled),
+.sel-plain.open {
+  background: var(--bg-hover);
+}
+.sel-link:focus-visible,
+.sel-plain:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: 6px;
+}
+.sel-menu {
+  z-index: 1000;
+  min-width: 140px;
+  max-width: min(420px, calc(100vw - 16px));
+  max-height: min(360px, calc(100vh - 40px));
+  overflow-y: auto;
+  transform-origin: top left;
+}
+.sel-menu .vm-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sel-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.sel-item:disabled:hover {
+  background: none;
+  color: var(--text);
+}
+.sel-item.action {
+  padding-left: 10px;
+}
+.sel-heading {
+  padding-left: 8px;
+}
+.sel.ct-save-in {
+  width: 100%;
 }

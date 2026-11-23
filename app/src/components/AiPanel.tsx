@@ -1,3 +1,4 @@
+import { Select } from './Select';
 import { createResource, createSignal, For, onCleanup, Show } from 'solid-js';
 import { api, errorMessage, type AiRequest, type AiTask } from '../api';
 import { startAi, type AiRun } from '../lib/ai';
@@ -127,20 +128,18 @@ export function AiPanel(props: {
                 </button>
               )}
             </For>
-            <select
-              class="ai-lang"
-              aria-label="Translate into"
+            <Select
+              class="ai-lang chip-toggle ai-chip"
+              variant="plain"
+              label="Translate into"
+              action
+              placeholder="Translate…"
+              heading="Translate into"
               disabled={running()}
-              value=""
-              onChange={(e) => {
-                const language = e.currentTarget.value;
-                e.currentTarget.value = '';
-                if (language) void go({ kind: 'translate', language });
-              }}
-            >
-              <option value="">Translate…</option>
-              <For each={LANGUAGES}>{(l) => <option value={l}>{l}</option>}</For>
-            </select>
+              value={null}
+              options={LANGUAGES.map((l) => ({ value: l, label: l }))}
+              onChange={(language) => void go({ kind: 'translate', language })}
+            />
           </div>
         </Show>
         <Show when={running() || text() || msg()}>

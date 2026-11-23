@@ -112,7 +112,7 @@ export function describeLink(href: string, text: string, ctx: LinkContext = {}):
   if (from && /^https?:$/.test(u.protocol) && !info.warning) {
     const theirs = siteOf(from);
     const link = siteOf(host);
-    if (theirs.includes('.') && !sameSite(theirs, link)) info.note = `Not the sender’s site: this came from ${theirs}.`;
+    if (theirs.includes('.') && !sameSite(theirs, link)) info.note = `Not the sender’s site. The message is from ${theirs}.`;
   }
   return info;
 }

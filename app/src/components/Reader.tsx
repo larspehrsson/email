@@ -1,3 +1,4 @@
+import { Select } from './Select';
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, Show, Switch } from 'solid-js';
 import { api, errorMessage, type Addr, type Attachment, type MessageDetail } from '../api';
 import { AttachmentControl } from './Attachments';
@@ -80,24 +81,24 @@ function HtmlFrame(props: { doc: string; sender: string }) {
 // ------------------------------------------------------------- small pieces
 
 /** Over blocked images: always load them, from this sender or from everyone at its domain
- *  (no domain for gmail.com and the like). A menu, so the banner stays one short line. */
+ *  (only when the receiving server vouched the message is from there, and not for gmail.com and
+ *  the like). A menu, so the banner stays one short line. */
 export function AlwaysLoad(props: { addr: string; domain: string | null; onPick: (who: 'sender' | 'domain') => void }) {
   return (
-    <select
+    <Select
       class="remote-always"
-      aria-label="Always load images"
-      onChange={(e) => {
-        const v = e.currentTarget.value;
-        e.currentTarget.value = '';
-        if (v === 'sender' || v === 'domain') props.onPick(v);
-      }}
-    >
-      <option value="" disabled selected>
-        Always load…
-      </option>
-      <option value="sender">From {props.addr}</option>
-      <Show when={props.domain}>{(d) => <option value="domain">From everyone at {d()}</option>}</Show>
-    </select>
+      variant="link"
+      action
+      label="Always load images"
+      placeholder="Always load…"
+      heading="Always load images"
+      value={null}
+      options={[
+        { value: 'sender' as const, label: `From ${props.addr}` },
+        ...(props.domain ? [{ value: 'domain' as const, label: `From everyone at ${props.domain}` }] : []),
+      ]}
+      onChange={(who) => props.onPick(who)}
+    />
   );
 }
 

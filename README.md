@@ -23,14 +23,13 @@ page:
 
 Installing a newer build over an older one upgrades it; your mail and settings stay.
 
-**Updates come by themselves** when the build you installed has them (builds of a repository
-with the update signing key, see **Updates** in [DEVELOPING](docs/DEVELOPING.md)): shortly
-after Email starts and every six hours it looks for a newer build, downloads it in the
-background, and **Restart to update** appears at the bottom of the sidebar. Settings ›
-Troubleshooting › Updates turns the looking off, or looks now. (The `.deb` and `.rpm` get
-updated too, asking for your password.) A build without the key, such as one from a
-repository that doesn't have it or one built on your own computer, doesn't update itself: to
-update, install the newer one the same way.
+**Updates come by themselves** (if Settings › Troubleshooting › Updates says your copy doesn't
+update itself, it's from before updates were turned on: install a newer one by hand once): shortly after Email starts and every six hours it looks for a newer build,
+downloads it in the background, and **Restart to update** appears at the bottom of the
+sidebar. Settings › Troubleshooting › Updates turns the looking off, or looks now. (The `.deb`
+and `.rpm` get updated too, asking for your password.) A copy you build yourself, or one from
+a fork without the update signing key (**Updates** in [DEVELOPING](docs/DEVELOPING.md)),
+doesn't update itself: install the newer one the same way.
 
 ## Adding your accounts
 
@@ -116,8 +115,8 @@ about it: why wasn't this marked as spam, is it genuine, who really sent it.
 your mail (Settings › AI apps; off until you turn it on; deleting and sending always ask you
 first).
 
-**Themes:** Settings › General › Theme: Auto (the system's light or dark), Light, Dark, Claude
-(warm paper and orange, light or dark with the system), Solarized Light and Solarized Dark.
+**Themes:** Settings › General › Theme: Auto (the system's light or dark), Light, Dark, Paper
+(warm paper with a terracotta accent, light or dark with the system), Solarized Light and Solarized Dark.
 Messages themselves stay on white, as they were written.
 
 **Sender pictures** beside each message (off until you choose a level in Settings › General;
@@ -146,7 +145,8 @@ between them and Enter opens or closes one.
 
 **And also:** notifications for new mail, email links from your browser opening a new message
 (Settings › General › Make Email the default), your own order and markers for accounts, and
-images in messages blocked until you choose to load them. Pictures too wide for the reader
+images in messages blocked until you choose to load them (for one message, or always from a
+sender or from everyone at their company). Pictures too wide for the reader
 shrink to fit; click one to see it at its actual size. Marking mail as spam or not spam
 also teaches your provider's spam filter.
 

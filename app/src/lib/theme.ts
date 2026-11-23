@@ -5,11 +5,11 @@ import { loadPref, savePref } from './format';
 
 // The app's colours: Settings › General › Theme. A theme is a set of colour tokens in styles.css
 // (`:root[data-theme=…]`) and a scheme, light or dark (`data-scheme`, which the stylesheet's
-// dark rules follow). Auto and Claude follow the system's light or dark; the others are fixed.
+// dark rules follow). Auto and Paper follow the system's light or dark; the others are fixed.
 // Kept in localStorage, which every window of the app shares: index.html applies it before the
 // first paint, and the other windows hear of a change by the `storage` event.
 
-export type ThemeId = 'auto' | 'light' | 'dark' | 'claude' | 'solarized-light' | 'solarized-dark';
+export type ThemeId = 'auto' | 'light' | 'dark' | 'paper' | 'solarized-light' | 'solarized-dark';
 type Scheme = 'light' | 'dark';
 
 export interface ThemeInfo {
@@ -27,7 +27,7 @@ export const THEMES: ThemeInfo[] = [
   { id: 'auto', label: 'Auto', scheme: null, swatch: ['#f3f3f5', '#ffffff', '#0a6cff'], darkSwatch: ['#161618', '#1c1c1f', '#3d8bff'] },
   { id: 'light', label: 'Light', scheme: 'light', swatch: ['#f3f3f5', '#ffffff', '#0a6cff'] },
   { id: 'dark', label: 'Dark', scheme: 'dark', swatch: ['#161618', '#1c1c1f', '#3d8bff'] },
-  { id: 'claude', label: 'Claude', scheme: null, swatch: ['#f0eee6', '#faf9f5', '#c96442'], darkSwatch: ['#1f1e1d', '#262624', '#d97757'] },
+  { id: 'paper', label: 'Paper', scheme: null, swatch: ['#f0eee6', '#faf9f5', '#c96442'], darkSwatch: ['#1f1e1d', '#262624', '#d97757'] },
   { id: 'solarized-light', label: 'Solarized Light', scheme: 'light', swatch: ['#eee8d5', '#fdf6e3', '#268bd2'] },
   { id: 'solarized-dark', label: 'Solarized Dark', scheme: 'dark', swatch: ['#00212b', '#002b36', '#268bd2'] },
 ];

@@ -9,13 +9,14 @@ import { accounts } from '../state';
 import { loadSignatures, pictureForSignature, reloadSignatures, setDefaultsHere, sigs } from '../lib/signatures';
 import { confirmDialog } from './Actions';
 import { MOD } from '../lib/shortcuts';
+import { AccountDot } from './FolderSwitcher';
 
 /** HTML the simple editor can't keep (colours, fonts, tables, layout attributes). */
 const needsHtml = (html: string) => /<(table|font|center|style)\b|\sstyle\s*=|\s(bgcolor|color|face|align|valign|cellpadding)\s*=/i.test(html);
 import { ImageIcon } from './Icons';
 
 // Settings › Signatures: the list on the left, the one chosen on the right (saved as it's
-// typed, like a draft), and each account's defaults below.
+// typed, like a draft), with the accounts it's the default for under it.
 
 export function SignaturesSection() {
   const [current, setCurrent] = createSignal<number | null>(null);
@@ -204,6 +205,8 @@ export function SignaturesSection() {
   }
 
   const defaults = (accountId: number) => sigs().defaults.find((d) => d.accountId === accountId);
+  /** The accounts a signature is a default for (new messages, replies or both). */
+  const usedBy = (id: number) => (accounts() ?? []).filter((a) => defaults(a.id)?.newId === id || defaults(a.id)?.replyId === id);
   async function setDefault(accountId: number, which: 'newId' | 'replyId', id: number | null) {
     const d = defaults(accountId);
     const next = { newId: d?.newId ?? null, replyId: d?.replyId ?? null, [which]: id };
@@ -244,7 +247,11 @@ export function SignaturesSection() {
                 classList={{ on: current() === s.id }}
                 onClick={() => void select(s.id)}
               >
-                {s.name}
+                <span class="sig-item-name">{s.name}</span>
+                {/* the accounts it's a default for */}
+                <span class="sig-item-dots" aria-hidden="true">
+                  <For each={usedBy(s.id)}>{(a) => <AccountDot account={a} size={10} />}</For>
+                </span>
               </button>
             )}
           </For>
@@ -334,51 +341,53 @@ export function SignaturesSection() {
             <div class="sig-preview" innerHTML={savedHtml()} />
           </Show>
           <Show when={current() == null}>
-            <p class="st-muted sig-none">No signatures yet. Add one, then choose where it’s used below.</p>
+            <p class="st-muted sig-none">No signatures yet. Add one, then choose the accounts it’s for.</p>
+          </Show>
+          <Show when={current()}>
+            {(id) => (
+              <div class="sig-use" role="group" aria-label="Use this signature by default">
+                <span class="sig-use-title">Use for</span>
+                <span class="sig-use-col">New messages</span>
+                <span class="sig-use-col">Replies and forwards</span>
+                <For each={accounts() ?? []}>
+                  {(a) => (
+                    <>
+                      <span class="sig-use-acct" title={a.email}>
+                        <AccountDot account={a} size={12} />
+                        <span>{a.email}</span>
+                      </span>
+                      <For each={['newId', 'replyId'] as const}>
+                        {(which) => {
+                          const on = () => defaults(a.id)?.[which] === id();
+                          // Another signature is the default there now: this one would take its place.
+                          const other = () => {
+                            const o = defaults(a.id)?.[which];
+                            return o != null && o !== id() ? sigs().signatures.find((x) => x.id === o)?.name : undefined;
+                          };
+                          return (
+                            <label class="sig-use-cell" title={other() ? `Instead of ${other()}` : undefined}>
+                              <input
+                                type="checkbox"
+                                checked={on()}
+                                aria-label={`${a.email}: ${which === 'newId' ? 'new messages' : 'replies and forwards'}`}
+                                onChange={(e) => void setDefault(a.id, which, e.currentTarget.checked ? id() : null)}
+                              />
+                              <Show when={other()}>{(n) => <span class="sig-use-other">now {n()}</span>}</Show>
+                            </label>
+                          );
+                        }}
+                      </For>
+                    </>
+                  )}
+                </For>
+              </div>
+            )}
           </Show>
         </div>
       </div>
       <p class="st-status" classList={{ error: !!msg() }}>
         {msg() ?? ''}
       </p>
-      <h4 class="sig-defaults-head">Use by default</h4>
-      <div class="sig-defaults">
-        <span class="st-field-label" />
-        <span class="st-field-label">New messages</span>
-        <span class="st-field-label">Replies and forwards</span>
-        <For each={accounts() ?? []}>
-          {(a) => (
-            <>
-              <span class="sig-acct" title={a.email}>
-                {a.email}
-              </span>
-              <For each={['newId', 'replyId'] as const}>
-                {(which) => (
-                  // Each option says whether it's the one chosen: the options are made anew
-                  // whenever the signatures reload (a rename, another account's choice), and a
-                  // select's own value would fall back to the first of them.
-                  <select
-                    class="st-input sig-default"
-                    aria-label={`${a.email}: ${which === 'newId' ? 'new messages' : 'replies and forwards'}`}
-                    onChange={(e) => void setDefault(a.id, which, e.currentTarget.value ? Number(e.currentTarget.value) : null)}
-                  >
-                    <option value="" selected={(defaults(a.id)?.[which] ?? null) === null}>
-                      None
-                    </option>
-                    <For each={sigs().signatures}>
-                      {(s) => (
-                        <option value={String(s.id)} selected={defaults(a.id)?.[which] === s.id}>
-                          {s.name}
-                        </option>
-                      )}
-                    </For>
-                  </select>
-                )}
-              </For>
-            </>
-          )}
-        </For>
-      </div>
     </div>
   );
 }

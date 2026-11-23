@@ -1,4 +1,5 @@
 import { createEffect, createResource, createSignal, For, Match, onCleanup, onMount, Show, Switch, type JSX } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import { AiAppsSection } from './AiApps';
 import { GoogleClientNote, GoogleContactsField } from './GoogleContacts';
 import { pictureLevel, setPictureLevel, type PictureLevel } from '../lib/senderIcons';
@@ -268,6 +269,103 @@ function KeyboardSection() {
 const PROVIDER: Record<string, string> = { gmail: 'Gmail', outlook: 'Outlook', imap: 'IMAP' };
 
 /** The account's marker: a letter and a colour, each automatic unless set; saved as changed. */
+/** The marker's color: one swatch, the chosen color, that opens a panel of the others. */
+function MarkColor(props: { account: Account; onPick: (color: string | null) => void }) {
+  const [open, setOpen] = createSignal(false);
+  const [at, setAt] = createSignal({ top: 0, left: 0 });
+  let btn!: HTMLButtonElement;
+  let panel: HTMLDivElement | undefined;
+  const mark = () => accountMark(props.account);
+  const chosen = () => MARK_COLORS.find((c) => c.name === props.account.markColor);
+  const colorOf = (c: (typeof MARK_COLORS)[number]) => `hsl(${c.hue} ${c.sat}% 52%)`;
+  const toggle = () => {
+    const r = btn.getBoundingClientRect();
+    setAt({ top: r.bottom + 6, left: r.left });
+    setOpen((v) => !v);
+  };
+  const choose = (color: string | null) => {
+    setOpen(false);
+    props.onPick(color);
+    btn.focus();
+  };
+  createEffect(() => {
+    if (!open()) return;
+    queueMicrotask(() => panel?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus());
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!panel?.contains(t) && !btn.contains(t)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // Only the panel closes, not Settings.
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+      btn.focus();
+    };
+    const close = () => setOpen(false);
+    document.addEventListener('mousedown', onDown, true);
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('resize', close);
+    document.addEventListener('scroll', close, true);
+    onCleanup(() => {
+      document.removeEventListener('mousedown', onDown, true);
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('resize', close);
+      document.removeEventListener('scroll', close, true);
+    });
+  });
+  return (
+    <>
+      <button
+        ref={btn}
+        type="button"
+        class="st-color-btn"
+        aria-haspopup="true"
+        aria-expanded={open()}
+        aria-label={`Marker color: ${chosen()?.label ?? 'Automatic'}`}
+        title={`Marker color: ${chosen()?.label ?? 'Automatic'}`}
+        onClick={toggle}
+      >
+        <span class="st-swatch big" classList={{ auto: !chosen() }} style={{ background: chosen() ? colorOf(chosen()!) : mark().autoColor }}>
+          {chosen() ? '' : 'A'}
+        </span>
+        <ChevronIcon size={10} />
+      </button>
+      <Show when={open()}>
+        <Portal>
+          <div ref={panel} class="st-color-panel" style={{ top: `${at().top}px`, left: `${at().left}px` }} role="radiogroup" aria-label="Marker color">
+            <button
+              class="st-swatch auto"
+              role="radio"
+              aria-checked={!props.account.markColor}
+              title="Automatic: a color unlike the other accounts'"
+              aria-label="Automatic"
+              style={{ background: mark().autoColor }}
+              onClick={() => choose(null)}
+            >
+              A
+            </button>
+            <For each={MARK_COLORS}>
+              {(c) => (
+                <button
+                  class="st-swatch"
+                  role="radio"
+                  aria-checked={props.account.markColor === c.name}
+                  title={c.label}
+                  aria-label={c.label}
+                  style={{ background: colorOf(c) }}
+                  onClick={() => choose(c.name)}
+                />
+              )}
+            </For>
+          </div>
+        </Portal>
+      </Show>
+    </>
+  );
+}
+
 function MarkField(props: { account: Account; onError: (text: string) => void }) {
   const mark = () => accountMark(props.account);
   const save = async (letter: string | null, color: string | null) => {
@@ -298,31 +396,7 @@ function MarkField(props: { account: Account; onError: (text: string) => void })
           void save(l || null, props.account.markColor);
         }}
       />
-      <span class="st-swatches" role="radiogroup" aria-label="Marker colour">
-        <button
-          class="st-swatch auto"
-          role="radio"
-          aria-checked={!props.account.markColor}
-          title="Automatic: a colour unlike the other accounts'"
-          style={{ background: mark().autoColor }}
-          onClick={() => pick(null)}
-        >
-          A
-        </button>
-        <For each={MARK_COLORS}>
-          {(c) => (
-            <button
-              class="st-swatch"
-              role="radio"
-              aria-checked={props.account.markColor === c.name}
-              title={c.label}
-              aria-label={c.label}
-              style={{ background: `hsl(${c.hue} ${c.sat}% 52%)` }}
-              onClick={() => pick(c.name)}
-            />
-          )}
-        </For>
-      </span>
+      <MarkColor account={props.account} onPick={pick} />
       {/* or a picture of its own, in the same marker */}
       <span class="st-mark-pic st-field-action">
         <Show when={accountLogo(props.account.id)}>
@@ -946,7 +1020,7 @@ function TroubleshootingSection() {
       <Field label="Updates">
         <Show
           when={updateStatus()?.supported}
-          fallback={<span class="st-muted">This copy was built on this computer and doesn’t update itself; copies installed from the GitHub releases do.</span>}
+          fallback={<span class="st-muted">This copy doesn’t update itself: it was built on this computer, or before updates were turned on. Copies installed from the GitHub releases now do.</span>}
         >
           <label class="st-check">
             <input type="checkbox" checked={autoUpdates()} onChange={(e) => setAutoUpdates(e.currentTarget.checked)} />
@@ -1020,6 +1094,8 @@ function Panel() {
       // A dialog opened over Settings (Export, Remove account…) closes first, on its own.
       const top = [...document.querySelectorAll('.modal-backdrop')].pop();
       if (top && top !== card.parentElement) return;
+      // So do the marker's color panel (MarkColor) and a drop-down's menu (Select).
+      if (document.querySelector('.st-color-panel, .sel-menu')) return;
       e.preventDefault();
       e.stopPropagation();
       if (presetMenu()) setPresetMenu(false);
