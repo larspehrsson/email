@@ -15,6 +15,7 @@ import { showToast } from './Toast';
 import { toggleSidebar } from '../lib/layout';
 import { DRAG, platform } from '../lib/platform';
 import { msgDrag } from '../lib/messageDrag';
+import { favoriteIds } from '../lib/favorites';
 
 export const ROLE_ORDER: Exclude<FolderRole, null>[] = [
   'inbox',
@@ -83,6 +84,13 @@ export function roleFolders(folders: Folder[]): Folder[] {
       const rb = ROLE_ORDER.indexOf(b.role ?? 'inbox');
       return ra - rb || collator.compare(a.displayName, b.displayName);
     });
+}
+
+/** Pinned folders, in the order they were added; ones that no longer exist are skipped. */
+export function favoriteFolders(): Folder[] {
+  return favoriteIds()
+    .map((id) => folderById(id))
+    .filter((f): f is Folder => !!f && f.selectable);
 }
 
 /** Every selectable folder in the rail's order: accounts as arranged, each one's special folders,
@@ -427,8 +435,9 @@ function Badge(props: { n: number }) {
   );
 }
 
-function FolderRow(props: { folder: Folder; depth: number; role?: boolean }) {
+function FolderRow(props: { folder: Folder; depth: number; role?: boolean; fav?: boolean }) {
   const selected = () => selectedFolderId() === props.folder.id;
+  const acct = () => (accounts() ?? []).find((a) => a.id === props.folder.accountId);
   return (
     <button
       class="folder"
@@ -438,12 +447,15 @@ function FolderRow(props: { folder: Folder; depth: number; role?: boolean }) {
       data-account-id={props.folder.accountId}
       onClick={() => selectFolder(props.folder.id)}
       onContextMenu={(e) => folderMenu(e, props.folder)}
-      title={props.folder.path.join(' / ')}
+      title={props.fav ? `${props.folder.path.join(' / ')}\n${acct()?.email ?? ''}` : props.folder.path.join(' / ')}
     >
       <span class="folder-icon">
         <RoleIcon role={props.folder.role ?? (isInboxPath(props.folder) ? 'inbox' : null)} />
       </span>
       <span class="folder-name">{props.folder.displayName}</span>
+      <Show when={props.fav && (accounts() ?? []).length > 1}>
+        <span class="folder-sub">{acct()?.displayName || acct()?.email}</span>
+      </Show>
       <Badge n={badgeFor(props.folder)} />
     </button>
   );
@@ -717,7 +729,20 @@ export function Sidebar(props: { flyout?: boolean }) {
         </span>
       </div>
       <div class="sidebar-scroll">
-        <Show when={contacts()} fallback={<For each={accounts() ?? []}>{(a, i) => <AccountSection account={a} index={i()} />}</For>}>
+        <Show
+          when={contacts()}
+          fallback={
+            <>
+              <Show when={favoriteFolders().length > 0}>
+                <section class="favorites" aria-label="Favorite folders">
+                  <div class="fav-head">Favorites</div>
+                  <For each={favoriteFolders()}>{(f) => <FolderRow folder={f} depth={0} role={!!f.role || isInboxPath(f)} fav />}</For>
+                </section>
+              </Show>
+              <For each={accounts() ?? []}>{(a, i) => <AccountSection account={a} index={i()} />}</For>
+            </>
+          }
+        >
           <ContactSources class="ct-sources-sidebar" />
         </Show>
       </div>

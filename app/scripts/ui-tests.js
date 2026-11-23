@@ -2040,6 +2040,56 @@ describe('drag to folder', () => {
   });
 });
 
+describe('favorite folders', () => {
+  test('right-click pins a folder above the accounts; it stays after a reload; unpinning removes it', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      assert.equal(await page.locator('.sidebar .favorites').count(), 0, 'none to begin with');
+      await page.locator('.sidebar .account .folder', { hasText: 'Receipts' }).first().click({ button: 'right' });
+      await page.locator('.ctx-menu .vm-item', { hasText: 'Add to favorites' }).click();
+      const fav = page.locator('.sidebar .favorites .folder', { hasText: 'Receipts' });
+      await fav.waitFor();
+      const favBox = await page.locator('.sidebar .favorites').boundingBox();
+      const acctBox = await page.locator('.sidebar .account').first().boundingBox();
+      assert.ok(favBox.y < acctBox.y, 'favorites sit above the accounts');
+      assert.ok((await fav.locator('.folder-sub').textContent()).length > 0, 'with more than one account, the row says whose it is');
+      await fav.click();
+      await page.waitForSelector('.folder-layer .row');
+      assert.equal(await fav.evaluate((e) => e.classList.contains('selected')), true, 'the pinned row opens the folder');
+      await page.reload();
+      await page.waitForSelector('.sidebar .favorites .folder');
+      assert.match(await page.locator('.sidebar .favorites .folder').first().textContent(), /Receipts/, 'remembered');
+      await page.locator('.sidebar .favorites .folder').first().click({ button: 'right' });
+      await page.locator('.ctx-menu .vm-item', { hasText: 'Remove from favorites' }).click();
+      await page.waitForSelector('.sidebar .favorites', { state: 'detached' });
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('the rail shows pinned folders above the account markers', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.locator('.sidebar .account .folder', { hasText: 'Receipts' }).first().click({ button: 'right' });
+      await page.locator('.ctx-menu .vm-item', { hasText: 'Add to favorites' }).click();
+      await page.locator('.sidebar .favorites .folder').waitFor();
+      await page.locator('.sidebar [aria-label="Collapse sidebar"]').click();
+      const railFav = page.locator('.rail-favs .rail-btn');
+      await railFav.first().waitFor();
+      const favBox = await page.locator('.rail-favs').boundingBox();
+      const acctBox = await page.locator('.rail-acct').first().boundingBox();
+      assert.ok(favBox.y < acctBox.y, 'above the accounts in the rail too');
+      await railFav.first().click();
+      await page.waitForSelector('.folder-layer .row');
+      assert.equal(await railFav.first().evaluate((e) => e.classList.contains('selected')), true);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('writing help', () => {
   test('without a key it says where to add one; with one, a reply is written and used', async () => {
     const { page, errors, context, close } = await open({ threaded: false });
