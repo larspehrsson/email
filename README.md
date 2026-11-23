@@ -23,9 +23,14 @@ page:
 
 Installing a newer build over an older one upgrades it; your mail and settings stay.
 
-The builds here don't update themselves yet: to update, install the newer one the same way.
-(Email can update itself when it's built with an update signing key: **Updates** in
-[DEVELOPING](docs/DEVELOPING.md).)
+**Updates come by themselves** when the build you installed has them (builds of a repository
+with the update signing key, see **Updates** in [DEVELOPING](docs/DEVELOPING.md)): shortly
+after Email starts and every six hours it looks for a newer build, downloads it in the
+background, and **Restart to update** appears at the bottom of the sidebar. Settings ›
+Troubleshooting › Updates turns the looking off, or looks now. (The `.deb` and `.rpm` get
+updated too, asking for your password.) A build without the key, such as one from a
+repository that doesn't have it or one built on your own computer, doesn't update itself: to
+update, install the newer one the same way.
 
 ## Adding your accounts
 

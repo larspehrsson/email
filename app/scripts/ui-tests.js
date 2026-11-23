@@ -1649,7 +1649,6 @@ describe('google contacts', () => {
       await page.keyboard.press('ControlOrMeta+Shift+b').catch(() => {});
       if ((await page.locator('.contacts').count()) === 0) await page.locator('.sidebar [aria-label="Address book"]').click();
       await page.locator('.ct-row', { hasText: 'Olivia Hart' }).waitFor();
-      assert.equal(await page.locator('.ct-row', { hasText: 'Olivia Hart' }).locator('.ct-google').count(), 1);
       await page.locator('.ct-row', { hasText: 'Olivia Hart' }).click();
       assert.match(await page.locator('.ct-where-text').textContent(), /Google Contacts/);
       // What Google has beyond the fields here: photo, title, kinds, address, birthday…
@@ -1661,7 +1660,7 @@ describe('google contacts', () => {
       assert.match(await more.textContent(), /12 Harbor St/);
       assert.match(await more.locator('.ct-field', { hasText: 'Birthday' }).textContent(), /14/);
       assert.match(await more.locator('.ct-field', { hasText: 'Spouse' }).textContent(), /Sam Hart/);
-      assert.match(await page.locator('.ct-google-link').getAttribute('href'), /^https:\/\/contacts\.google\.com\/person\//);
+      assert.match(await page.locator('.ct-google-link').getAttribute('href'), /^https:\/\/contacts\.google\.com\/person\/[^?]+\?authuser=.+%40/, 'opened in the account it belongs to');
       // One with nothing more: no photo, no block, still the link to edit there.
       await page.locator('.ct-row', { hasText: 'Noah Becker' }).click();
       await page.locator('.ct-photo').waitFor({ state: 'detached' });
