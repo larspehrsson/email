@@ -414,9 +414,9 @@ function GraphField(props: { account: Account; onMessage: (m: { text: string; er
   );
 }
 
-function Field(props: { label: string; children: JSX.Element }) {
+function Field(props: { label: string; class?: string; children: JSX.Element }) {
   return (
-    <div class="st-field">
+    <div class={props.class ? `st-field ${props.class}` : 'st-field'}>
       <span class="st-field-label">{props.label}</span>
       <span class="st-field-value">{props.children}</span>
     </div>
@@ -869,9 +869,10 @@ function GeneralSection() {
 function RemoteSenders() {
   const [list, { refetch }] = createResource(() => api.remoteSenders().catch(() => [] as string[]));
   return (
-    <Field label="Remote images">
+    <Field label="Remote images" class="st-field-top st-divided">
       <Show when={(list() ?? []).length > 0} fallback={<span class="st-muted">No one yet. “Always from this sender” over a message’s blocked images adds them.</span>}>
         <ul class="st-remote-senders">
+          <li class="st-muted">Always loaded in mail from:</li>
           <For each={list()}>
             {(addr) => (
               <li>

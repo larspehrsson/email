@@ -5077,6 +5077,15 @@ body.dragging-message * {
 .st-sect > .st-field + .st-field {
   margin-top: 8px;
 }
+/* A line between two settings of one part (a long one under it starts at the top). */
+.st-sect > .st-field.st-divided {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--sep);
+}
+.st-field.st-field-top > .st-field-value {
+  align-items: flex-start;
+}
 .st-sect-title {
   margin: 12px 0 8px;
   font-size: 11px;
