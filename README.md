@@ -100,7 +100,7 @@ come first when you type an address.
 
 **Everything from a sender** at a glance: Ctrl/⌘+2 opens a panel beside the message with all
 the mail from whoever sent it, in every folder. Select them all (Ctrl/⌘+A) and delete or archive
-at once — the quickest way to clear out a newsletter.
+at once — the quickest way to clear out a newsletter; the next message opens in its place.
 
 ![The sender panel beside a message, three messages picked](docs/screenshots/sender.png)
 
@@ -120,7 +120,9 @@ for mail in Spam.
 them) to delete, move, mark or tag them together, or forward them as attachments.
 
 **Getting around:** fold the sidebar into a slim rail (Ctrl/⌘+1), or jump to any folder in any
-account by typing its name (Ctrl/⌘+G).
+account by typing its name (Ctrl/⌘+G). Right-click a folder › Add to favorites to keep it at the
+top, above the accounts. Drag messages onto a folder to move them there (Undo in the message
+that follows).
 
 ![The sidebar as a rail, with all folders slid out](docs/screenshots/rail.png)
 ![The folder switcher](docs/screenshots/goto.png)

@@ -8,23 +8,27 @@ import { flyout, setFlyout, toggleSidebar } from '../lib/layout';
 import { DRAG } from '../lib/platform';
 import { accountMark, accounts, folderById, foldersByAccount, mainView, selectedFolderId, selectFolder, setMainView } from '../state';
 import { FoldersIcon, PeopleIcon, RoleIcon, SidebarIcon } from './Icons';
-import { badgeFor, isAccountCollapsed, isInboxPath, roleFolders, SyncFooter, toggleAccount } from './Sidebar';
+import { badgeFor, favoriteFolders, isAccountCollapsed, isInboxPath, roleFolders, SyncFooter, toggleAccount } from './Sidebar';
+import { msgDrag } from '../lib/messageDrag';
 
 const compact = (n: number) => (n > 99 ? '99+' : String(n));
 
-function RailFolder(props: { f: Folder }) {
+function RailFolder(props: { f: Folder; acct?: string }) {
   const n = () => badgeFor(props.f);
   const tip = () => {
     const f = props.f;
     const parts = [f.displayName];
     if (f.unread > 0) parts.push(`${fmtNum(f.unread)} unread`);
     parts.push(`${fmtNum(f.total)} total`);
+    if (props.acct) parts.push(props.acct);
     return parts.join(' · ');
   };
   return (
     <button
       class="rail-btn"
-      classList={{ selected: selectedFolderId() === props.f.id }}
+      classList={{ selected: selectedFolderId() === props.f.id, 'drop-target': msgDrag()?.targetId === props.f.id }}
+      data-folder-id={props.f.id}
+      data-account-id={props.f.accountId}
       title={tip()}
       aria-label={tip()}
       aria-current={selectedFolderId() === props.f.id ? 'page' : undefined}
@@ -115,6 +119,13 @@ export function Rail() {
         </button>
       </div>
       <div class="rail-scroll">
+        <Show when={favoriteFolders().length > 0}>
+          <div class="rail-favs" aria-label="Favorite folders">
+            <For each={favoriteFolders()}>
+              {(f) => <RailFolder f={f} acct={(accounts() ?? []).find((a) => a.id === f.accountId)?.email} />}
+            </For>
+          </div>
+        </Show>
         <For each={accounts() ?? []}>{(a) => <RailAccount account={a} />}</For>
       </div>
       <SyncFooter compact />

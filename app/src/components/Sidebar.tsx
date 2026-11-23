@@ -1,4 +1,5 @@
 import { batch, createEffect, createMemo, createSignal, For, Match, onCleanup, Show, Switch, untrack } from 'solid-js';
+import { favoriteFolders } from '../lib/favorites';
 import { folderMenu } from './ContextMenu';
 import { hint } from '../lib/shortcuts';
 import { createStore } from 'solid-js/store';
@@ -14,6 +15,7 @@ import { restartToUpdate, updateStatus } from '../lib/updates';
 import { showToast } from './Toast';
 import { toggleSidebar } from '../lib/layout';
 import { DRAG, platform } from '../lib/platform';
+import { msgDrag } from '../lib/messageDrag';
 
 export const ROLE_ORDER: Exclude<FolderRole, null>[] = [
   'inbox',
@@ -83,6 +85,8 @@ export function roleFolders(folders: Folder[]): Folder[] {
       return ra - rb || collator.compare(a.displayName, b.displayName);
     });
 }
+
+export { favoriteFolders };
 
 /** Every selectable folder in the rail's order: accounts as arranged, each one's special folders,
  *  then its tree depth first (collapsed or not). */
@@ -426,21 +430,27 @@ function Badge(props: { n: number }) {
   );
 }
 
-function FolderRow(props: { folder: Folder; depth: number; role?: boolean }) {
+function FolderRow(props: { folder: Folder; depth: number; role?: boolean; fav?: boolean }) {
   const selected = () => selectedFolderId() === props.folder.id;
+  const acct = () => (accounts() ?? []).find((a) => a.id === props.folder.accountId);
   return (
     <button
       class="folder"
-      classList={{ selected: selected(), role: !!props.role }}
+      classList={{ selected: selected(), role: !!props.role, 'drop-target': msgDrag()?.targetId === props.folder.id }}
       style={{ 'padding-left': `${12 + props.depth * 14 + 18}px` }}
+      data-folder-id={props.folder.id}
+      data-account-id={props.folder.accountId}
       onClick={() => selectFolder(props.folder.id)}
       onContextMenu={(e) => folderMenu(e, props.folder)}
-      title={props.folder.path.join(' / ')}
+      title={props.fav ? `${props.folder.path.join(' / ')}\n${acct()?.email ?? ''}` : props.folder.path.join(' / ')}
     >
       <span class="folder-icon">
         <RoleIcon role={props.folder.role ?? (isInboxPath(props.folder) ? 'inbox' : null)} />
       </span>
       <span class="folder-name">{props.folder.displayName}</span>
+      <Show when={props.fav && (accounts() ?? []).length > 1}>
+        <span class="folder-sub">{acct()?.displayName || acct()?.email}</span>
+      </Show>
       <Badge n={badgeFor(props.folder)} />
     </button>
   );
@@ -460,8 +470,10 @@ function TreeItem(props: { node: TreeNode }) {
         tabIndex={0}
         aria-expanded={hasKids() ? open() : undefined}
         aria-selected={selected()}
-        classList={{ selected: selected(), container: !selectable() }}
+        classList={{ selected: selected(), container: !selectable(), 'drop-target': !!n().folder && msgDrag()?.targetId === n().folder!.id }}
         style={{ 'padding-left': `${12 + n().depth * 14}px` }}
+        data-folder-id={selectable() ? n().folder!.id : undefined}
+        data-account-id={selectable() ? n().folder!.accountId : undefined}
         onClick={() => {
           const f = n().folder;
           if (f && f.selectable) selectFolder(f.id);
@@ -712,7 +724,20 @@ export function Sidebar(props: { flyout?: boolean }) {
         </span>
       </div>
       <div class="sidebar-scroll">
-        <Show when={contacts()} fallback={<For each={accounts() ?? []}>{(a, i) => <AccountSection account={a} index={i()} />}</For>}>
+        <Show
+          when={contacts()}
+          fallback={
+            <>
+              <Show when={favoriteFolders().length > 0}>
+                <section class="favorites" aria-label="Favorite folders">
+                  <div class="fav-head">Favorites</div>
+                  <For each={favoriteFolders()}>{(f) => <FolderRow folder={f} depth={0} role={!!f.role || isInboxPath(f)} fav />}</For>
+                </section>
+              </Show>
+              <For each={accounts() ?? []}>{(a, i) => <AccountSection account={a} index={i()} />}</For>
+            </>
+          }
+        >
           <ContactSources class="ct-sources-sidebar" />
         </Show>
       </div>

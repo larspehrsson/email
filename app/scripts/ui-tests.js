@@ -1411,6 +1411,7 @@ describe('sender pane', () => {
     const { page, errors, close } = await open({ threaded: false });
     try {
       await page.locator('.folder-layer .row').first().click();
+      const openId = await page.locator('.folder-layer .row.selected').getAttribute('data-id');
       const from = (await page.locator('.folder-layer .row.selected .row-from').textContent()).trim();
       await page.keyboard.press('ControlOrMeta+2');
       await hasText(page.locator('.sp-name'), from, 'the sender of the message on screen');
@@ -1435,21 +1436,78 @@ describe('sender pane', () => {
       await page.keyboard.press('Delete');
       if (picked > 1) await page.locator('.confirm-backdrop .btn.danger').click();
       await page.locator('.toast', { hasText: 'Deleted' }).waitFor();
-      await page.waitForFunction(
-        (n) => {
-          const t = document.querySelector('.sp-all')?.textContent ?? '';
-          return Number((t.includes(' of ') ? t.split(' of ')[1] : t).replace(/[^\d]/g, '')) === n;
-        },
-        before - picked,
-      );
+      // The overview moves on to the next email instead of going blank.
+      assert.equal(await page.locator('.reader-empty').count(), 0, 'a message is still open');
+      assert.equal(await page.locator('.folder-layer .row.selected').count(), 1, 'the next row is selected');
+      assert.notEqual(await page.locator('.folder-layer .row.selected').getAttribute('data-id'), openId);
+      // The pane follows the open message: it now shows the next email's sender.
+      await page.waitForFunction(() => {
+        const name = document.querySelector('.sp-name')?.textContent?.trim();
+        const from = document.querySelector('.folder-layer .row.selected .row-from')?.textContent?.trim();
+        return !!name && !!from && name === from;
+      });
       await page.locator('.toast button', { hasText: 'Undo' }).click();
       await page.waitForFunction((n) => {
         const t = document.querySelector('.sp-all')?.textContent ?? '';
         return Number((t.includes(' of ') ? t.split(' of ')[1] : t).replace(/[^\d]/g, '')) === n;
       }, before);
+      // Undo opens the deleted message again, where it was.
+      await page.waitForFunction((id) => document.querySelector('.folder-layer .row.selected')?.dataset.id === id, openId);
       // Off again, remembered.
       await page.keyboard.press('ControlOrMeta+2');
       assert.equal(await page.locator('.sender-pane').count(), 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('deleting just the open one opens the next email; Undo goes back', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.locator('.folder-layer .row').first().click();
+      const openId = await page.locator('.folder-layer .row.selected').getAttribute('data-id');
+      await page.keyboard.press('ControlOrMeta+2');
+      await page.locator('.sp-row.current').waitFor();
+      await page.locator('.sp-row.current').click();
+      assert.equal(await page.locator('.sp-row.on').count(), 1, 'only the open one picked');
+      await page.keyboard.press('Delete');
+      await page.locator('.toast', { hasText: 'Deleted 1 message' }).waitFor();
+      await page.waitForFunction((gone) => {
+        const sel = document.querySelector('.folder-layer .row.selected');
+        return !!sel && sel.dataset.id !== gone;
+      }, openId);
+      assert.equal(await page.locator('.reader-empty').count(), 0, 'the next email is open, not a blank reader');
+      await page.locator('.toast button', { hasText: 'Undo' }).click();
+      await page.waitForFunction((id) => document.querySelector('.folder-layer .row.selected')?.dataset.id === id, openId);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('conversations: deleting the open one from the panel never blanks the overview', async () => {
+    const { page, errors, close } = await open({ threaded: true });
+    try {
+      await page.locator('.folder-layer .row').first().click();
+      const openId = await page.locator('.folder-layer .row.selected').getAttribute('data-id');
+      await page.keyboard.press('ControlOrMeta+2');
+      await page.locator('.sp-row.current').waitFor();
+      await page.locator('.sp-row.current').click();
+      await page.keyboard.press('ControlOrMeta+a');
+      await page.waitForFunction(() => document.querySelectorAll('.sp-row.on').length > 0);
+      const picked = await page.locator('.sp-row.on').count();
+      await page.keyboard.press('Delete');
+      if (picked > 1) await page.locator('.confirm-backdrop .btn.danger').click();
+      await page.locator('.toast', { hasText: 'Deleted' }).waitFor();
+      await page.waitForTimeout(400);
+      assert.ok((await page.locator('.folder-layer .row').count()) > 0, 'other conversations remain');
+      assert.equal(await page.locator('.reader-empty').count(), 0, 'still reading, not blank');
+      const sel = page.locator('.folder-layer .row.selected');
+      assert.equal(await sel.count(), 1);
+      // The conversation went entirely: the next one is open. Some of it left: it stays open.
+      const stillThere = await page.locator(`.folder-layer .row[data-id="${openId}"]`).count();
+      if (!stillThere) assert.notEqual(await sel.getAttribute('data-id'), openId);
       assert.deepEqual(errors, []);
     } finally {
       await close();
@@ -1950,6 +2008,194 @@ describe('several messages', () => {
   });
 });
 
+describe('drag to folder', () => {
+  const rows = (page) => page.locator('.folder-layer .row');
+  const drag = async (page, row, target) => {
+    const rb = await row.boundingBox();
+    const tb = await target.boundingBox();
+    await page.mouse.move(rb.x + rb.width / 2, rb.y + rb.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(tb.x + tb.width / 2, tb.y + tb.height / 2, { steps: 12 });
+  };
+
+  test('released over a message body, the drag ends there: a later click on a folder moves nothing', async () => {
+    const { page, errors, close } = await open({ threaded: false, query: '&picture' });
+    try {
+      await page.locator('.folder-layer .row', { hasText: 'picture as the body' }).first().click();
+      const body = page.locator('.reader iframe').first();
+      await page.frameLocator('.reader iframe').first().locator('img').waitFor();
+      const id = await rows(page).first().getAttribute('data-id');
+      await drag(page, rows(page).first(), body);
+      await page.locator('.drag-ghost').waitFor();
+      await page.mouse.up();
+      await page.locator('.drag-ghost').waitFor({ state: 'detached' });
+      await page.locator('.sidebar .folder', { hasText: 'Receipts' }).first().click();
+      await page.waitForTimeout(500);
+      assert.equal(await page.locator('.toast', { hasText: /Moved/ }).count(), 0, 'nothing moved');
+      assert.equal(await page.locator(`.folder-layer .row[data-id="${id}"]`).count() + 1 > 0, true);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('Esc cancels a drag into the folder panel, which stays open', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press('ControlOrMeta+1');
+      await page.waitForSelector('.app.rail-mode');
+      await page.keyboard.press('ControlOrMeta+Shift+1');
+      const flyout = page.locator('div.flyout');
+      await flyout.waitFor();
+      // from the row's right end: the panel covers the list's left part
+      const rb = await rows(page).first().boundingBox();
+      const tb = await flyout.locator('.folder', { hasText: 'Receipts' }).first().boundingBox();
+      await page.mouse.move(rb.x + rb.width - 30, rb.y + rb.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(tb.x + tb.width / 2, tb.y + tb.height / 2, { steps: 12 });
+      await page.locator('.drag-ghost').waitFor();
+      await page.keyboard.press('Escape');
+      await page.locator('.drag-ghost').waitFor({ state: 'detached' });
+      await page.mouse.up();
+      await page.waitForTimeout(300);
+      assert.equal(await flyout.count(), 1, 'the panel stays');
+      assert.equal(await page.locator('.toast', { hasText: /Moved/ }).count(), 0, 'nothing moved');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('a message dragged onto a folder moves there, with Undo', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const id = await rows(page).first().getAttribute('data-id');
+      const target = page.locator('.sidebar .folder', { hasText: 'Receipts' }).first();
+      await drag(page, rows(page).first(), target);
+      await page.locator('.drag-ghost.ok').waitFor();
+      assert.match(await page.locator('.drag-ghost').textContent(), /1\s*message/);
+      assert.equal(await target.evaluate((e) => e.classList.contains('drop-target')), true, 'the folder lights up');
+      await page.mouse.up();
+      await page.locator('.toast', { hasText: 'Moved to Receipts' }).waitFor();
+      await page.waitForFunction((gone) => ![...document.querySelectorAll('.folder-layer .row')].some((e) => e.dataset.id === gone), id);
+      assert.equal(await page.locator('.drag-ghost').count(), 0);
+      await page.locator('.toast button', { hasText: 'Undo' }).click();
+      await page.waitForFunction((back) => [...document.querySelectorAll('.folder-layer .row')].some((e) => e.dataset.id === back), id);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('rows picked together drag together; a conversation drags its messages', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const ids = await rows(page).evaluateAll((els) => els.slice(0, 2).map((e) => e.dataset.id));
+      await rows(page).nth(0).click();
+      await rows(page).nth(1).click({ modifiers: ['ControlOrMeta'] });
+      await page.locator('.multi-pane').waitFor();
+      const target = page.locator('.sidebar .folder', { hasText: 'Work' }).first();
+      await drag(page, rows(page).first(), target);
+      assert.match(await page.locator('.drag-ghost').textContent(), /2\s*messages/);
+      await page.mouse.up();
+      await page.locator('.toast', { hasText: 'Moved 2 messages to Work' }).waitFor();
+      await page.waitForFunction((gone) => gone.every((id) => ![...document.querySelectorAll('.folder-layer .row')].some((e) => e.dataset.id === id)), ids);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('a conversation dragged to a folder moves its messages', async () => {
+    const { page, errors, close } = await open({ threaded: true });
+    try {
+      const target = page.locator('.sidebar .folder', { hasText: 'Personal' }).first();
+      await drag(page, rows(page).first(), target);
+      await page.locator('.drag-ghost.ok').waitFor();
+      await page.mouse.up();
+      await page.locator('.toast').filter({ hasText: /Moved (\d+ messages )?to Personal/ }).waitFor();
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test("Escape cancels; another account's folder refuses the drop", async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const id = await rows(page).first().getAttribute('data-id');
+      const target = page.locator('.sidebar .folder', { hasText: 'Receipts' }).first();
+      await drag(page, rows(page).first(), target);
+      await page.locator('.drag-ghost').waitFor();
+      await page.keyboard.press('Escape');
+      assert.equal(await page.locator('.drag-ghost').count(), 0, 'cancelled');
+      await page.mouse.up();
+      // The second account's Inbox: not a target for this account's mail.
+      const other = page.locator('.sidebar .account').nth(1).locator('.folder', { hasText: 'Inbox' }).first();
+      await drag(page, rows(page).first(), other);
+      assert.equal(await page.locator('.drag-ghost.ok').count(), 0, 'no drop offered');
+      assert.equal(await other.evaluate((e) => e.classList.contains('drop-target')), false);
+      await page.mouse.up();
+      await page.waitForTimeout(300);
+      assert.equal(await page.locator('.toast', { hasText: 'Moved' }).count(), 0, 'nothing moved');
+      assert.equal(await rows(page).first().getAttribute('data-id'), id, 'the row stays');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('favorite folders', () => {
+  test('right-click pins a folder above the accounts; it stays after a reload; unpinning removes it', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      assert.equal(await page.locator('.sidebar .favorites').count(), 0, 'none to begin with');
+      await page.locator('.sidebar .account .folder', { hasText: 'Receipts' }).first().click({ button: 'right' });
+      await page.locator('.ctx-menu .vm-item', { hasText: 'Add to favorites' }).click();
+      const fav = page.locator('.sidebar .favorites .folder', { hasText: 'Receipts' });
+      await fav.waitFor();
+      const favBox = await page.locator('.sidebar .favorites').boundingBox();
+      const acctBox = await page.locator('.sidebar .account').first().boundingBox();
+      assert.ok(favBox.y < acctBox.y, 'favorites sit above the accounts');
+      assert.ok((await fav.locator('.folder-sub').textContent()).length > 0, 'with more than one account, the row says whose it is');
+      await fav.click();
+      await page.waitForSelector('.folder-layer .row');
+      assert.equal(await fav.evaluate((e) => e.classList.contains('selected')), true, 'the pinned row opens the folder');
+      await page.reload();
+      await page.waitForSelector('.sidebar .favorites .folder');
+      assert.match(await page.locator('.sidebar .favorites .folder').first().textContent(), /Receipts/, 'remembered');
+      await page.locator('.sidebar .favorites .folder').first().click({ button: 'right' });
+      await page.locator('.ctx-menu .vm-item', { hasText: 'Remove from favorites' }).click();
+      await page.waitForSelector('.sidebar .favorites', { state: 'detached' });
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('the rail shows pinned folders above the account markers', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.locator('.sidebar .account .folder', { hasText: 'Receipts' }).first().click({ button: 'right' });
+      await page.locator('.ctx-menu .vm-item', { hasText: 'Add to favorites' }).click();
+      await page.locator('.sidebar .favorites .folder').waitFor();
+      await page.locator('.sidebar [aria-label="Collapse sidebar"]').click();
+      const railFav = page.locator('.rail-favs .rail-btn');
+      await railFav.first().waitFor();
+      const favBox = await page.locator('.rail-favs').boundingBox();
+      const acctBox = await page.locator('.rail-acct').first().boundingBox();
+      assert.ok(favBox.y < acctBox.y, 'above the accounts in the rail too');
+      await railFav.first().click();
+      await page.waitForSelector('.folder-layer .row');
+      assert.equal(await railFav.first().evaluate((e) => e.classList.contains('selected')), true);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('writing help', () => {
   test('without a key it says where to add one; with one, a reply is written and used', async () => {
     const { page, errors, context, close } = await open({ threaded: false });
@@ -2047,6 +2293,44 @@ describe('address book', () => {
       w.on('pageerror', (e) => errors.push(e.message));
       await w.locator('input[aria-label="To"]').fill('acm');
       await hasText(w.locator('.addr-sugg-row .sugg-name').first(), `${from} (work)`, 'found by company, first, under its own name');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('contact pictures', () => {
+  test("the overview shows each contact's picture, as the mail list does", async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.evaluate(() => {
+        localStorage.setItem('ui.senderPictures', 'true');
+        localStorage.setItem(
+          'mock.cards',
+          JSON.stringify([
+            { id: 1, name: 'Olivia Hart', emails: ['olivia.hart@example.com'], phones: [], company: 'Fabrikam', notes: '', google: 1, groups: [] },
+            { id: 2, name: 'Noah Becker', emails: ['noah@beckers.dev'], phones: [], company: '', notes: '', google: null, groups: [] },
+          ]),
+        );
+      });
+      await page.reload();
+      await page.waitForSelector('.folder-layer .row');
+      await page.locator('button[aria-label="Address book"]').click();
+      const olivia = page.locator('.ct-row', { hasText: 'Olivia Hart' });
+      await olivia.waitFor();
+      await olivia.locator('.avatar.pic img').waitFor();
+      assert.match(await olivia.locator('.avatar img').getAttribute('src'), /^data:image\//, 'her Google photo');
+      const noah = page.locator('.ct-row', { hasText: 'Noah Becker' });
+      assert.equal(await noah.locator('.avatar').textContent(), 'NB', 'initials when there is no photo');
+      assert.equal(await noah.locator('.avatar img').count(), 0);
+      // Pictures off: the rows go back to text only, like the mail list.
+      await page.evaluate(() => localStorage.setItem('ui.senderPictures', 'false'));
+      await page.reload();
+      await page.waitForSelector('.folder-layer .row');
+      await page.locator('button[aria-label="Address book"]').click();
+      await page.locator('.ct-row', { hasText: 'Olivia Hart' }).waitFor();
+      assert.equal(await page.locator('.ct-row .avatar').count(), 0, 'no avatars with pictures off');
       assert.deepEqual(errors, []);
     } finally {
       await close();

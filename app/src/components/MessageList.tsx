@@ -79,6 +79,7 @@ import { ViewMenuButton } from './ViewMenu';
 import { TagDots, tintStyle } from './Tags';
 import { climbToParent, FolderCrumbs, folderPathLabel } from './FolderSwitcher';
 import { registerListNav, runAction, runShortcut } from '../lib/actions';
+import { startMessageDrag } from '../lib/messageDrag';
 import { commandFor, hint } from '../lib/shortcuts';
 import { hideToast, showToast } from './Toast';
 import { badgeFor, railOrder } from './Sidebar';
@@ -992,6 +993,16 @@ export function MessageList(props: {
       refresh() {
         model.invalidate();
       },
+      rowsAfter(id, n) {
+        const at = model.indexOfId(id);
+        const out: number[] = [];
+        for (let i = at + 1; at >= 0 && out.length < n; i++) {
+          const r = model.row(i);
+          if (!r) break;
+          out.push(r.id);
+        }
+        return out;
+      },
       removeMany(items) {
         const gone = new Set(items);
         const at: number[] = [];
@@ -1269,9 +1280,24 @@ export function MessageList(props: {
                       togglePick(item.index);
                       return;
                     }
+                    const it = m();
+                    const dragItems = it && multiPicked() && picked().has(it.id) ? [...picked()] : undefined;
                     anchorIdx = item.index;
                     setPicked([]);
                     selectIndex(item.index, false);
+                    if (it) {
+                      // A search result moves from its own folder (and account), not the one
+                      // the search started in.
+                      const own = search ? folderById((it as MessageSummary).folderId) : undefined;
+                      startMessageDrag(e, {
+                        accountId: own?.accountId ?? props.folder.accountId,
+                        sourceFolderId: own?.id ?? folderId,
+                        excludeFolderId: search ? ((it as MessageSummary).folderId ?? null) : folderId,
+                        threaded,
+                        rowId: it.id,
+                        items: dragItems,
+                      });
+                    }
                   }}
                   onDblClick={() => props.onOpen()}
                   onContextMenu={(e) => {

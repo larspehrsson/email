@@ -458,6 +458,30 @@ body.resizing iframe {
   text-overflow: ellipsis;
 }
 
+/* Pinned folders above the accounts (right-click → Add to favorites). */
+.favorites {
+  padding: 2px 0 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--sep);
+}
+.fav-head {
+  padding: 8px 14px 4px 16px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+/* Which account a pinned folder belongs to, when there's more than one. */
+.folder-sub {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
 /* Unread count: the same blue pill as on the rail (.rail-badge), a size up. */
 .badge {
   flex: none;
@@ -3182,6 +3206,18 @@ html.macos .rail-top {
   border-top: 1px solid var(--sep);
   margin: 0 8px;
 }
+.rail-favs {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 2px 0 6px;
+  margin: 0 8px 2px;
+  border-bottom: 1px solid var(--sep);
+}
+.rail-favs .rail-btn {
+  color: var(--away-accent-icon, var(--accent));
+}
 .rail-marker {
   position: relative;
   width: 36px;
@@ -4863,6 +4899,58 @@ body.dragging-account * {
   -webkit-user-select: none;
 }
 
+/* Dragging messages onto a folder (lib/messageDrag.ts). */
+body.dragging-message,
+body.dragging-message * {
+  cursor: grabbing !important;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.folder.drop-target,
+.rail-btn.drop-target {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.folder.drop-target .folder-name {
+  font-weight: 600;
+}
+.drag-ghost {
+  position: fixed;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px 5px 8px;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--sep);
+  box-shadow: var(--shadow-card);
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 550;
+  pointer-events: none;
+  transition: border-color 100ms, box-shadow 100ms;
+}
+.drag-ghost.ok {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), var(--shadow-card);
+  color: var(--text);
+}
+.drag-ghost-icon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.drag-ghost-count {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
 /* Settings › Accounts / Troubleshooting */
 .st-acct {
   margin-bottom: 12px;
@@ -5512,10 +5600,10 @@ body.dragging-account * {
 }
 .ct-row {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
+  gap: 10px;
   width: 100%;
-  padding: 7px 10px;
+  padding: 6px 10px;
   border-radius: 7px;
   text-align: left;
 }
@@ -5525,7 +5613,21 @@ body.dragging-account * {
 .ct-row.on {
   background: var(--sel-folder-bg);
 }
+.ct-avatar {
+  flex: none;
+}
+.ct-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
 .ct-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 13.5px;
   font-weight: 500;
   color: var(--text);
@@ -5534,6 +5636,10 @@ body.dragging-account * {
   color: var(--sel-folder-fg);
 }
 .ct-sub {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 12px;
   color: var(--text-3);
 }
@@ -6175,4 +6281,10 @@ body.dragging-account * {
 .ct-google-link {
   padding-top: 2px;
   font-size: 12.5px;
+}
+
+/* While a message is dragged the message bodies (iframes) take no pointer events: a release
+   over one would never reach the drag, which would then end on the next click anywhere. */
+body.dragging-message iframe {
+  pointer-events: none;
 }
