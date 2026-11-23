@@ -111,10 +111,11 @@ about it: why wasn't this marked as spam, is it genuine, who really sent it.
 your mail (Settings › AI apps; off until you turn it on; deleting and sending always ask you
 first).
 
-**Sender pictures** beside each message (View options; off until you turn them on): the person's
-own photo when they're one of your Google contacts with one, else their company's logo or
-website icon, or initials. Logos are only looked up for companies you correspond with, never
-for mail in Spam.
+**Sender pictures** beside each message (off until you choose a level in Settings › General;
+View options turns them on and off): the person's own photo when they're one of your Google
+contacts with one, else their company's logo or website icon, or initials. You choose how far
+they go: your contacts' photos only, also companies you write to, or all senders (never for
+mail in Spam).
 
 **Several at once:** Ctrl/⌘-click or Shift-click messages in the list (or Ctrl/⌘+A for all of
 them) to delete, move, mark or tag them together, or forward them as attachments.
@@ -145,8 +146,9 @@ also teaches your provider's spam filter.
 - **Your mail stays on your computer.** It goes nowhere but your mail servers, except what you
   ask for: writing help and questions about a message (to Anthropic, with your own key) and
   Google Contacts sync. Sender pictures, if you turn them on, are looked up from the sender's
-  own domain, once, and only for domains where you've written to someone or have someone in
-  your address book: a stranger's mail never makes your computer contact them. Your mail is
+  own domain, once; at the "companies you write to" level only for domains where you've written
+  to someone or have someone in your address book, so a stranger's mail never makes your
+  computer contact them. Your mail is
   stored in `~/.local/share/dev.mailclient.desktop/` on Linux,
   `~/Library/Application Support/dev.mailclient.desktop/` on macOS and
   `%APPDATA%\dev.mailclient.desktop\` on Windows.

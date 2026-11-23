@@ -162,45 +162,39 @@ export function RemoveDialog(props: { account: Acct; onClose: () => void; onExpo
   );
 }
 
-/** The account card's Export row and Remove link (rows passed in: the card's own layout). */
-export function AccountTools(props: {
-  account: Acct;
-  Field: (p: { label: string; children: JSX.Element }) => JSX.Element;
-}) {
+/** The account card's action row, at its foot: Export (or an export's progress) and Remove. */
+export function AccountTools(props: { account: Acct }) {
   const [dialog, setDialog] = createSignal<'export' | 'remove' | null>(null);
   const mine = () => (exportNow()?.accountId === props.account.id ? exportNow() : null);
-  const F = props.Field;
   return (
     <>
-      <F label="Export">
+      <div class="st-acct-actions">
         <Show
           when={mine()}
           fallback={
-            <>
-              <span class="st-muted">Its mail as mbox files, for other apps or a backup.</span>
-              <button class="link-btn st-field-action" disabled={!!exportNow()} onClick={() => setDialog('export')}>
-                Export…
-              </button>
-            </>
+            <button
+              class="link-btn"
+              disabled={!!exportNow()}
+              title="Its mail as mbox files, for other apps or a backup"
+              onClick={() => setDialog('export')}
+            >
+              Export…
+            </button>
           }
         >
           {(s) => (
-            <>
-              <span class="st-muted">
-                Exporting · {s().total > 0 ? `${fmtNum(s().done)} / ${fmtNum(s().total)}` : 'starting…'}
-              </span>
-              <button class="link-btn st-field-action" onClick={cancelExport}>
+            <span class="st-acct-exporting">
+              <span class="st-muted">Exporting · {s().total > 0 ? `${fmtNum(s().done)} / ${fmtNum(s().total)}` : 'starting…'}</span>
+              <button class="link-btn" onClick={cancelExport}>
                 Stop
               </button>
-            </>
+            </span>
           )}
         </Show>
-      </F>
-      <F label="">
         <button class="link-btn danger-link" onClick={() => setDialog('remove')}>
           Remove account…
         </button>
-      </F>
+      </div>
       <Show when={dialog() === 'export'}>
         <ExportDialog account={props.account} onClose={() => setDialog(null)} />
       </Show>

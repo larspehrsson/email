@@ -138,7 +138,8 @@ export const api = {
   contactDetails: (cardId: number): Promise<ContactDetails | null> => call('contact_details', { cardId }),
   setAccountLogo: (accountId: number, dataUrl: string | null): Promise<void> => call('set_account_logo', { accountId, dataUrl }),
   /** A sender's picture (data: URL) from their domain; null when there's none. */
-  senderIcon: (addr: string): Promise<string | null> => call('sender_icon', { addr }),
+  /** `scope`: whose pictures may be looked up (Settings › General › Sender pictures). */
+  senderIcon: (addr: string, scope: 'contacts' | 'known' | 'all'): Promise<string | null> => call('sender_icon', { addr, scope }),
   /** Where these messages' senders' mail is kept, most first (the Move list's order). */
   senderFolders: (messageIds: number[]): Promise<{ folderId: number; count: number }[]> => call('sender_folders', { messageIds }),
   /** The messages behind several picked rows, with their state. */

@@ -730,6 +730,43 @@ describe('search', () => {
   });
 });
 
+describe('settings layout', () => {
+  test('accounts open one at a time; Sender pictures in General is the View option', async () => {
+    const { page, errors, close } = await open({ threaded: false, query: '&many' });
+    try {
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'Accounts' }).click();
+      const cards = page.locator('.st-acct');
+      await cards.first().waitFor();
+      const open = () => page.locator('.st-acct.open').count();
+      assert.equal(await open(), 1, 'the account being viewed, open');
+      assert.ok((await cards.count()) > 2);
+      // closed ones say what they hold
+      await page.waitForFunction(() => /messages? ·/.test(document.querySelectorAll('.st-acct:not(.open) .st-acct-sum')[0]?.textContent ?? ''));
+      await cards.nth(2).locator('.st-acct-head').click();
+      assert.equal(await open(), 1, 'one at a time');
+      assert.equal(await cards.nth(2).evaluate((e) => e.classList.contains('open')), true);
+      for (const g of ['You', 'Server', 'On this computer']) await cards.nth(2).locator('.st-group-title', { hasText: g }).waitFor();
+      await cards.nth(2).locator('.st-acct-head').click();
+      assert.equal(await open(), 0, 'and closed again');
+      // General › Sender pictures: a level, Off to begin with; View options' switch goes back to it
+      await page.locator('.st-nav-item', { hasText: 'General' }).click();
+      const level = (name) => page.locator('.st-level', { hasText: name }).locator('input[type=radio]');
+      assert.equal(await level('Off').isChecked(), true);
+      await level('Your contacts’ photos').check();
+      assert.equal(await page.evaluate(() => localStorage.getItem('ui.senderPictureLevel')), '"contacts"');
+      await level('Off').check();
+      await page.keyboard.press('Escape');
+      await page.locator('button[aria-label="View options"]').first().click();
+      await page.locator('.vm-item', { hasText: 'Sender pictures' }).click();
+      assert.equal(await page.evaluate(() => localStorage.getItem('ui.senderPictureLevel')), '"contacts"', 'back to the level chosen');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('mac title band', () => {
   test('with the sidebar folded, the rail top is the colour of the search row beside it', async () => {
     const { page, errors, close } = await open({ threaded: false, query: '&mac' });
@@ -820,7 +857,9 @@ describe('accounts', () => {
       const who = (await page.locator('.sidebar .account-name').allTextContents())[1];
       const exportIt = async () => {
         await page.keyboard.press('Control+,');
-        await page.locator('.st-acct', { hasText: who }).getByRole('button', { name: 'Export…' }).click();
+        const card = page.locator('.st-acct', { hasText: who });
+        if (!(await card.evaluate((e) => e.classList.contains('open')))) await card.locator('.st-acct-head').click();
+        await card.getByRole('button', { name: 'Export…' }).click();
         await page.getByRole('button', { name: 'Choose folder and export…' }).click();
         await page.waitForSelector('.acct-dialog', { state: 'detached' });
         await page.keyboard.press('Escape');
@@ -851,6 +890,7 @@ describe('accounts', () => {
       const who = before[1];
       await page.keyboard.press('Control+,');
       const card = page.locator('.st-acct', { hasText: who });
+      await card.locator('.st-acct-head').click(); // closed: only the account being viewed starts open
       // Esc closes a dialog over Settings, not Settings
       await card.getByRole('button', { name: 'Remove account…' }).click();
       await page.waitForSelector('.acct-dialog');
@@ -868,7 +908,7 @@ describe('accounts', () => {
       await page.waitForFunction(() => /Exporting .* \d+ \/ 40/.test(document.querySelector('.sf-summary')?.getAttribute('title') ?? ''));
       await page.locator('.toast', { hasText: /Exported 40 messages to/ }).waitFor({ timeout: 8000 });
       assert.match(await page.locator('.toast').textContent(), /Show in folder/);
-      await card.getByText('Its mail as mbox files').waitFor();
+      await card.getByRole('button', { name: 'Export…' }).waitFor();
 
       // remove: says what goes and what stays; then it's gone
       await card.getByRole('button', { name: 'Remove account…' }).click();
@@ -1593,7 +1633,7 @@ describe('google contacts', () => {
       await page.keyboard.press('ControlOrMeta+,');
       await page.locator('.st-nav-item', { hasText: 'Accounts' }).click();
       const field = page.locator('.st-acct').first().locator('.gc');
-      await field.getByRole('button', { name: 'Connect Google Contacts…' }).click();
+      await field.getByRole('button', { name: 'Connect…' }).click();
       // No client yet: asked for it.
       await field.locator('input[aria-label="Google client ID"]').fill('not-a-client');
       await field.getByRole('button', { name: 'Save' }).click();
@@ -1638,7 +1678,7 @@ describe('google contacts', () => {
       await page.locator('.st-acct').first().locator('.gc').getByRole('button', { name: 'Disconnect' }).click();
       // (The question comes over Settings.)
       await page.locator('.confirm-backdrop .btn', { hasText: 'Disconnect' }).click();
-      await page.locator('.st-acct').first().getByRole('button', { name: 'Connect Google Contacts…' }).waitFor();
+      await page.locator('.st-acct').first().getByRole('button', { name: 'Connect…' }).waitFor();
       const cards = await page.evaluate(() => JSON.parse(localStorage.getItem('mock.cards') ?? '[]'));
       assert.ok(!cards.some((c) => c.google != null), 'their cards went');
       assert.deepEqual(errors, []);
@@ -1771,6 +1811,15 @@ describe('sender pictures', () => {
       await page.evaluate(() => localStorage.setItem('ui.senderPictures', 'true'));
       await page.reload();
       assert.equal(await pictureOf('GitHub'), '#24292f', 'the company\'s logo');
+      // Contacts' photos only: no company logos.
+      await page.evaluate(() => localStorage.setItem('ui.senderPictureLevel', '"contacts"'));
+      await page.reload();
+      await page.fill('.search-field input', 'GitHub');
+      await page.locator('.search-layer .row', { hasText: 'GitHub' }).first().waitFor();
+      await page.waitForTimeout(400);
+      assert.equal(await page.locator('.search-layer .row', { hasText: 'GitHub' }).first().locator('.row-avatar img').count(), 0, 'initials');
+      await page.evaluate(() => localStorage.setItem('ui.senderPictureLevel', '"known"'));
+      await page.reload();
       // Their address on a Google contact with a photo (pictures are asked for once a run).
       await page.evaluate(() =>
         localStorage.setItem(

@@ -117,23 +117,26 @@ export function GoogleContactsField(props: { account: Account }) {
               />
             }
           >
-            <span class="st-muted">Not connected.</span>
-            <button class="btn secondary st-field-action" disabled={!!busy()} onClick={() => void connect()}>
-              Connect Google Contacts…
-            </button>
+            <span class="gc-line">
+              <span class="st-muted">Not connected</span>
+              <button class="link-btn st-field-action" disabled={!!busy()} onClick={() => void connect()}>
+                Connect…
+              </button>
+            </span>
           </Show>
         }
       >
         {(l) => (
           <span class="gc-linked">
-            <span>
-              {l().googleEmail} · {l().count} {l().count === 1 ? 'contact' : 'contacts'}
-              <Show when={l().synced && !l().error}> · synced {ago(l().synced!)}</Show>
+            <span class="gc-line">
+            <span class="st-oneline">
+              {l().count} {l().count === 1 ? 'contact' : 'contacts'}
+              <Show when={l().googleEmail.toLowerCase() !== props.account.email.toLowerCase()}> of {l().googleEmail}</Show>
+              <Show when={l().synced && !l().error}>
+                <span class="st-muted"> · synced {ago(l().synced!)}</span>
+              </Show>
             </span>
-            <Show when={l().error}>
-              <span class="st-status error gc-error">{l().error}</span>
-            </Show>
-            <span class="gc-actions">
+            <span class="gc-actions st-field-action">
               <Show
                 when={/connect again/i.test(l().error ?? '')}
                 fallback={
@@ -150,6 +153,10 @@ export function GoogleContactsField(props: { account: Account }) {
                 Disconnect
               </button>
             </span>
+            </span>
+            <Show when={l().error}>
+              <span class="st-status error gc-error">{l().error}</span>
+            </Show>
           </span>
         )}
       </Show>

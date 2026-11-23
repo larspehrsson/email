@@ -559,8 +559,8 @@ struct FolderCount {
 
 /// A sender's picture (data: URL) from their domain, kept or looked up now; null: none.
 #[tauri::command]
-async fn sender_icon(core: State<'_, Arc<Core>>, addr: String) -> Res<Option<String>> {
-    core.sender_icon(&addr).await.map_err(err)
+async fn sender_icon(core: State<'_, Arc<Core>>, addr: String, scope: Option<mail_core::icons::PictureScope>) -> Res<Option<String>> {
+    core.sender_icon(&addr, scope.unwrap_or(mail_core::icons::PictureScope::Known)).await.map_err(err)
 }
 
 /// Where these messages' senders' mail is kept, most first (the Move list's order).

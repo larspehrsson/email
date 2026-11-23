@@ -1666,7 +1666,7 @@ export function createMockBackend(): Backend {
       }
       return order.slice(offset, offset + limit);
     },
-    async sender_icon({ addr }) {
+    async sender_icon({ addr, scope }) {
       await sleep(20);
       // A Google contact's own photo comes first.
       const a = addr.trim().toLowerCase();
@@ -1674,6 +1674,9 @@ export function createMockBackend(): Backend {
         const photo = c.emails.some((e) => e.toLowerCase() === a) ? contactPhoto(c) : null;
         if (photo) return photo;
       }
+      // Contacts' photos only: no logos. (The demo has no "written to" bookkeeping: its
+      // companies count as known.)
+      if (scope === 'contacts') return null;
       // Companies in the demo have a logo (made up here); people and free mail don't.
       const LOGOS: Record<string, [string, string]> = {
         'github.com': ['#24292f', 'G'],

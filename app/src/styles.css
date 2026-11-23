@@ -4953,16 +4953,87 @@ body.dragging-message * {
 
 /* Settings › Accounts / Troubleshooting */
 .st-acct {
-  margin-bottom: 12px;
-  padding: 12px 16px 10px;
+  margin-bottom: 10px;
   border: 1px solid var(--sep);
   border-radius: 10px;
 }
+.st-acct.open {
+  padding-bottom: 12px;
+}
+/* The card's head: opens and closes it (one account open at a time). */
 .st-acct-head {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 6px;
+  width: 100%;
+  padding: 11px 16px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.st-acct-head:hover {
+  background: var(--bg-subtle);
+}
+.st-acct.open .st-acct-head {
+  border-radius: 10px 10px 0 0;
+  border-bottom: 1px solid var(--sep);
+}
+.st-acct-sum {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--text-3);
+  text-align: right;
+}
+.st-acct-type {
+  flex: none;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.st-acct-chev {
+  flex: none;
+  display: grid;
+  color: var(--text-3);
+  transition: transform 120ms var(--ease);
+}
+.st-acct.open .st-acct-chev {
+  transform: rotate(90deg);
+}
+/* A titled group of rows in an open card ("You", "Server"…). */
+.st-group {
+  padding: 0 16px;
+}
+.st-group-title {
+  margin: 14px 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.st-acct-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.st-acct-exporting {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.st-acct-foot {
+  margin-top: 10px;
+  padding: 10px 16px 0;
+  border-top: 1px solid var(--sep);
+  font-size: 13px;
 }
 .st-acct-head .acct-dot {
   margin-right: 0;
@@ -5010,6 +5081,34 @@ body.dragging-message * {
 .st-note-action {
   font-size: inherit;
 }
+/* A row whose value is several lines (a group of choices): its label at the top. */
+.st-field-top {
+  align-items: start;
+  padding-top: 7px;
+}
+.st-levels {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 6px;
+}
+.st-level {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+.st-level input {
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+.st-level-note {
+  display: block;
+  margin-top: 1px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-3);
+}
 .st-acct-note {
   margin: 2px 0 6px 140px;
   font-size: 12px;
@@ -5039,9 +5138,10 @@ body.dragging-message * {
   text-transform: uppercase;
   font-weight: 700;
 }
+/* Automatic and the 11 colours: two even rows of six, at any width. */
 .st-swatches {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(6, 18px);
   gap: 6px;
 }
 .st-swatch {
@@ -5087,7 +5187,7 @@ body.dragging-message * {
   padding: 0 12px;
 }
 .st-acct-msg {
-  margin: 4px 0 0;
+  margin: 4px 16px 0;
   font-size: 12.5px;
   color: var(--text-3);
 }
@@ -5902,6 +6002,7 @@ body.dragging-message * {
 
 /* Google Contacts (Settings › Accounts, the address book) */
 .gc {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -5911,6 +6012,14 @@ body.dragging-message * {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
+}
+/* one line: what's linked (or that nothing is), its actions at the right */
+.gc-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 .gc-actions {
   display: inline-flex;

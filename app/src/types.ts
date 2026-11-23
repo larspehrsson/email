@@ -710,7 +710,7 @@ export interface CommandMap {
   };
   selection_info: { args: { folderId: number; items: number[]; threaded: boolean }; ret: SelectionInfo };
   sender_folders: { args: { messageIds: number[] }; ret: { folderId: number; count: number }[] };
-  sender_icon: { args: { addr: string }; ret: string | null };
+  sender_icon: { args: { addr: string; scope?: 'contacts' | 'known' | 'all' }; ret: string | null };
   account_logos: { args: undefined; ret: { accountId: number; dataUrl: string }[] };
   google_status: { args: undefined; ret: GoogleStatus };
   contact_details: { args: { cardId: number }; ret: ContactDetails | null };

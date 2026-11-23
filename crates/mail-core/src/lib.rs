@@ -829,15 +829,17 @@ impl Core {
     /// The picture for a sender's address (a data: URL): their own when they're a Google
     /// contact with a photo, else their domain's, from what's kept or looked up now (see
     /// `icons`). None: no picture (a shared mail service, or the domain has none).
-    pub async fn sender_icon(&self, addr: &str) -> Result<Option<String>> {
+    pub async fn sender_icon(&self, addr: &str, scope: icons::PictureScope) -> Result<Option<String>> {
         match self.contact_photo(addr).await {
             Ok(Some(photo)) => return Ok(Some(photo)),
             Ok(None) => {}
             Err(e) => tracing::warn!("contact photo for a sender: {e:#}"),
         }
         let Some(domain) = icons::icon_domain(addr) else { return Ok(None) };
-        if !self.known_domain(&domain)? {
-            return Ok(None);
+        match scope {
+            icons::PictureScope::Contacts => return Ok(None),
+            icons::PictureScope::Known if !self.known_domain(&domain)? => return Ok(None),
+            _ => {}
         }
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
         if let Some((icon, fetched)) = self.store.sender_icon(&domain)? {
@@ -1885,8 +1887,11 @@ mod picture_tests {
         assert!(!core.known_domain("spam.example").unwrap());
         // Nothing is looked up for a stranger: no picture, and no network (the domain doesn't
         // exist, so a lookup would only fail; the cache shows none was tried).
-        assert_eq!(core.sender_icon("deals@news.example.net").await.unwrap(), None);
+        assert_eq!(core.sender_icon("deals@news.example.net", icons::PictureScope::Known).await.unwrap(), None);
         assert!(core.store.sender_icon("example.net").unwrap().is_none(), "not even tried");
+        // Contacts' photos only: not even a domain the user writes to is looked up.
+        assert_eq!(core.sender_icon("jane@corp.example.org", icons::PictureScope::Contacts).await.unwrap(), None);
+        assert!(core.store.sender_icon("example.org").unwrap().is_none(), "not tried");
         // Someone in the address book: their domain is known.
         core.store.save_card(addressbook::Card { name: "Sam".into(), emails: vec!["sam@shop.example.com".into()], ..Default::default() }).unwrap();
         assert!(core.known_domain("example.com").unwrap());

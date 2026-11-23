@@ -1,6 +1,7 @@
 import { createEffect, createResource, createSignal, For, Match, onCleanup, onMount, Show, Switch, type JSX } from 'solid-js';
 import { AiAppsSection } from './AiApps';
 import { GoogleClientNote, GoogleContactsField } from './GoogleContacts';
+import { pictureLevel, setPictureLevel, type PictureLevel } from '../lib/senderIcons';
 import { accountLogo, logoFromFile, setAccountLogo } from '../lib/accountLogos';
 import {
   bindKey,
@@ -20,7 +21,7 @@ import {
 } from '../lib/shortcuts';
 import { ChevronIcon, CloseIcon } from './Icons';
 import { api, errorMessage, events, type Account, type AccountDetails, type AccountStorage, type AttachmentCounts } from '../api';
-import { accountMark, accounts, notifyInUse, notifyNewMail, reloadAccounts, setAddingAccount, setNotifyInUse, setNotifyNewMail } from '../state';
+import { accountMark, accounts, notifyInUse, notifyNewMail, reloadAccounts, setAddingAccount, setNotifyInUse, setNotifyNewMail, folderById, selectedFolderId } from '../state';
 import { MARK_COLORS } from '../lib/accountMarks';
 import { AccountTools } from './AccountTools';
 import { fmtNum, fmtSize, loadPref, savePref, smartDate } from '../lib/format';
@@ -279,7 +280,6 @@ function MarkField(props: { account: Account; onError: (text: string) => void })
   const pick = (color: string | null) => void save(props.account.markLetter, color);
   let picInput!: HTMLInputElement;
   return (
-    <>
     <Field label="Marker">
       <input
         class="st-input st-mark-letter"
@@ -322,10 +322,11 @@ function MarkField(props: { account: Account; onError: (text: string) => void })
           )}
         </For>
       </span>
-    </Field>
-    <Field label="Picture">
-      <span class="st-mark-pic">
-        <AccountDot account={props.account} size={22} />
+      {/* or a picture of its own, in the same marker */}
+      <span class="st-mark-pic st-field-action">
+        <Show when={accountLogo(props.account.id)}>
+          <AccountDot account={props.account} size={22} />
+        </Show>
         <button class="link-btn" onClick={() => picInput.click()}>
           {accountLogo(props.account.id) ? 'Change picture…' : 'Use a picture…'}
         </button>
@@ -351,7 +352,6 @@ function MarkField(props: { account: Account; onError: (text: string) => void })
         />
       </span>
     </Field>
-    </>
   );
 }
 
@@ -452,22 +452,21 @@ function recountSoon() {
   }, 1000);
 }
 
-function AccountCard(props: { d: AccountDetails }) {
+function AccountCard(props: { d: AccountDetails; open: boolean; onToggle: () => void }) {
   const stored = () => storage()?.find((s) => s.accountId === props.d.id);
   const [keep, setKeep] = createSignal(props.d.keepAttachments);
   const counts = () => attachmentCounts()?.find((x) => x.accountId === props.d.id);
   const [removing, setRemoving] = createSignal(false);
-  /** Where this account's attachments are: still to download (and the cost), or here. */
-  const offlineNote = () => {
+  /** After "Keep attachments", in brackets: what keeping costs, what's coming down, or what's
+   *  here; nothing while counting or when no message has attachments. */
+  const offlineSize = () => {
     const c = counts();
-    if (!c) return '\u00a0'; // counting: the line is there already
-    if (removing()) return `Removing the attachments of ${fmtNum(c.kept)} ${c.kept === 1 ? 'message' : 'messages'}…`;
-    const of = (n: number, bytes: number) => `${fmtNum(n)} ${n === 1 ? 'message' : 'messages'} (about ${fmtSize(bytes)})`;
-    const here = `${fmtSize(c.keptBytes)} of attachments from ${fmtNum(c.kept)} ${c.kept === 1 ? 'message' : 'messages'} are on this computer.`;
-    if (keep()) return c.missing > 0 ? `Downloading the attachments of ${of(c.missing, c.missingBytes)}.` : c.kept > 0 ? here : 'No messages with attachments.';
+    if (!c) return '';
+    if (removing()) return 'removing…';
+    if (keep()) return c.missing > 0 ? `downloading ${fmtSize(c.missingBytes)}` : c.kept > 0 ? `${fmtSize(c.keptBytes)} here` : '';
     // Not kept: what's here can be removed (a separate step); otherwise what keeping would cost.
-    if (c.kept > 0) return here;
-    return c.missing > 0 ? `Enable to download the attachments of ${of(c.missing, c.missingBytes)}.` : 'No messages with attachments.';
+    if (c.kept > 0) return `${fmtSize(c.keptBytes)} here`;
+    return c.missing > 0 ? `about ${fmtSize(c.missingBytes)}` : '';
   };
   const remove = () => {
     setRemoving(true);
@@ -524,12 +523,27 @@ function AccountCard(props: { d: AccountDetails }) {
       setBusy(false);
     }
   };
+  const summary = () => {
+    const st = stored();
+    return st ? `${fmtNum(st.messages)} ${st.messages === 1 ? 'message' : 'messages'} · ${fmtSize(st.localBytes)} local` : '';
+  };
+  const connected = () => account()?.provider === 'gmail' || account()?.auth === 'microsoft';
   return (
-    <section class="st-acct">
-      <div class="st-acct-head">
+    <section class="st-acct" classList={{ open: props.open }}>
+      {/* The head opens and closes the card; closed, it says what's stored. */}
+      <button class="st-acct-head" aria-expanded={props.open} onClick={props.onToggle}>
         <Show when={account()}>{(a) => <AccountDot account={a()} size={20} />}</Show>
         <span class="st-acct-email">{props.d.email}</span>
-      </div>
+        <span class="st-acct-sum">
+          <Show when={!props.open}>{summary()}</Show>
+        </span>
+        <span class="st-acct-type">{PROVIDER[props.d.provider] ?? props.d.provider}</span>
+        <span class="st-acct-chev" aria-hidden="true">
+          <ChevronIcon size={12} />
+        </span>
+      </button>
+      <Show when={props.open}>
+        <Group title="You">
       <Field label="Your name">
         <Show
           when={editingName()}
@@ -566,17 +580,8 @@ function AccountCard(props: { d: AccountDetails }) {
         </Show>
       </Field>
       <Show when={account()}>{(a) => <MarkField account={a()} onError={(text) => setMsg({ text, error: true })} />}</Show>
-      <Show when={account()?.provider === 'gmail' ? account() : undefined}>
-        {(a) => (
-          <Field label="Google Contacts">
-            <GoogleContactsField account={a()} />
-          </Field>
-        )}
-      </Show>
-      <Show when={account()?.auth === 'microsoft' ? account() : undefined}>
-        {(a) => <GraphField account={a()} onMessage={setMsg} />}
-      </Show>
-      <Field label="Type">{PROVIDER[props.d.provider] ?? props.d.provider}</Field>
+        </Group>
+        <Group title="Server">
       <Field label="Incoming (IMAP)">
         {props.d.imapHost}:{props.d.imapPort}
       </Field>
@@ -613,6 +618,8 @@ function AccountCard(props: { d: AccountDetails }) {
           </form>
         </Show>
       </Field>
+        </Group>
+        <Group title="On this computer">
       <Field label="Storage">
         {/* the row is there from the start; its text arrives when counted */}
         <span class="st-oneline">
@@ -649,21 +656,48 @@ function AccountCard(props: { d: AccountDetails }) {
             }}
           />
           Keep attachments on this computer
+          <Show when={offlineSize()}>
+            <span class="st-muted">({offlineSize()})</span>
+          </Show>
         </label>
-      </Field>
-      <p class="st-acct-note">
-        {offlineNote()}
         {/* removing is its own step, offered only once attachments aren't kept */}
         <Show when={!keep() && !removing() && (counts()?.kept ?? 0) > 0}>
-          {' · '}
-          <button class="link-btn st-note-action" onClick={remove}>
+          <button class="link-btn st-field-action" onClick={remove}>
             Remove
           </button>
         </Show>
-      </p>
-      <AccountTools account={props.d} Field={Field} />
-      <Show when={msg()}>{(m) => <p class="st-acct-msg" classList={{ error: !!m().error }}>{m().text}</p>}</Show>
+      </Field>
+        </Group>
+        <Show when={connected()}>
+          <Group title="Connected">
+            <Show when={account()?.provider === 'gmail' ? account() : undefined}>
+              {(a) => (
+                <Field label="Google Contacts">
+                  <GoogleContactsField account={a()} />
+                </Field>
+              )}
+            </Show>
+            <Show when={account()?.auth === 'microsoft' ? account() : undefined}>
+              {(a) => <GraphField account={a()} onMessage={setMsg} />}
+            </Show>
+          </Group>
+        </Show>
+        <Show when={msg()}>{(m) => <p class="st-acct-msg" classList={{ error: !!m().error }}>{m().text}</p>}</Show>
+        <div class="st-acct-foot">
+          <AccountTools account={props.d} />
+        </div>
+      </Show>
     </section>
+  );
+}
+
+/** A titled group of an account card's rows. */
+function Group(props: { title: string; children: JSX.Element }) {
+  return (
+    <div class="st-group">
+      <div class="st-group-title">{props.title}</div>
+      {props.children}
+    </div>
   );
 }
 
@@ -678,6 +712,10 @@ function AccountsSection() {
     recountTimer = undefined;
     void unlisten.then((un) => un());
   });
+  // One account open at a time: the one being viewed to begin with (or the only one).
+  const [openId, setOpenId] = createSignal<number | null>(
+    folderById(selectedFolderId())?.accountId ?? (accounts()?.length === 1 ? accounts()![0]!.id : null),
+  );
   // in the user's order (as in the sidebar)
   const ordered = () => {
     const d = details() ?? [];
@@ -685,7 +723,9 @@ function AccountsSection() {
   };
   return (
     <div class="st-body">
-      <For each={ordered()}>{(d) => <AccountCard d={d} />}</For>
+      <For each={ordered()}>
+        {(d) => <AccountCard d={d} open={openId() === d.id} onToggle={() => setOpenId(openId() === d.id ? null : d.id)} />}
+      </For>
       <Show when={details.error}>
         <p class="st-acct-msg error">{errorMessage(details.error)}</p>
       </Show>
@@ -695,6 +735,22 @@ function AccountsSection() {
 }
 
 // ------------------------------------------------------------- troubleshooting
+
+/** Settings › General › Sender pictures: each level, and what it looks up. */
+const PICTURE_LEVELS: { id: PictureLevel; label: string; note: string }[] = [
+  { id: 'off', label: 'Off', note: 'Initials only.' },
+  { id: 'contacts', label: 'Your contacts’ photos', note: 'Your Google contacts’ own photos. No sender’s website is contacted.' },
+  {
+    id: 'known',
+    label: 'And companies you write to',
+    note: 'Also the logos of companies where you’ve written to someone, or have someone in your address book, from their own website, once.',
+  },
+  {
+    id: 'all',
+    label: 'All senders',
+    note: 'Also any sender’s company logo (never for mail in Spam). Looking one up tells that company’s server your mail was shown.',
+  },
+];
 
 function GeneralSection() {
   const [status, { refetch }] = createResource(() => api.defaultMailStatus().catch(() => null));
@@ -737,6 +793,24 @@ function GeneralSection() {
         </Field>
       </Show>
       <RemoteSenders />
+      {/* How far pictures may be looked up: each level contacts more senders' websites. View
+          options switches between Off and the level chosen here. */}
+      <div class="st-field st-field-top">
+        <span class="st-field-label">Sender pictures</span>
+        <div class="st-levels" role="radiogroup" aria-label="Sender pictures">
+          <For each={PICTURE_LEVELS}>
+            {(l) => (
+              <label class="st-level">
+                <input type="radio" name="picture-level" checked={pictureLevel() === l.id} onChange={() => setPictureLevel(l.id)} />
+                <span>
+                  {l.label}
+                  <span class="st-level-note">{l.note}</span>
+                </span>
+              </label>
+            )}
+          </For>
+        </div>
+      </div>
     </div>
   );
 }

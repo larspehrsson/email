@@ -14,6 +14,20 @@ use anyhow::{Context, Result, anyhow, bail};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
+/// Whose pictures may be looked up (the user's choice, Settings › General › Sender pictures).
+/// Looking a domain's picture up contacts it, so the wider the scope the more senders can tell
+/// their mail was shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PictureScope {
+    /// Google contacts' own photos only: no sender's domain is contacted.
+    Contacts,
+    /// And the domains the user corresponds with (`Core::known_domain`).
+    Known,
+    /// And any sender's domain.
+    All,
+}
+
 /// A picture: its MIME type and bytes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Icon {
