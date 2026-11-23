@@ -1735,6 +1735,16 @@ impl Core {
         Ok(addr)
     }
 
+    /// Always load remote images in mail from everyone at this message's sender's domain;
+    /// returns it ("@papercut.com"). Not for gmail.com and the like: anyone can write from there.
+    pub fn allow_remote_from_domain(&self, id: i64) -> Result<String> {
+        let addr = self.store.message_from_addr(id)?.filter(|a| !a.trim().is_empty()).ok_or_else(|| anyhow!("This message has no sender."))?;
+        let domain = crate::icons::icon_domain(&addr).ok_or_else(|| anyhow!("Anyone can have an address there: allow this sender instead."))?;
+        let entry = format!("@{domain}");
+        self.store.set_remote_sender(&entry, true)?;
+        Ok(entry)
+    }
+
     pub fn remote_senders(&self) -> Result<Vec<String>> {
         self.store.remote_senders()
     }

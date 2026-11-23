@@ -815,12 +815,12 @@ function GeneralSection() {
   );
 }
 
-/** Senders whose remote images always load ("Always from this sender" in the reader). */
+/** Senders (and "@domain"s) whose remote images always load ("Always load…" in the reader). */
 function RemoteSenders() {
   const [list, { refetch }] = createResource(() => api.remoteSenders().catch(() => [] as string[]));
   return (
     <Field label="Images always load from">
-      <Show when={(list() ?? []).length > 0} fallback={<span class="st-muted">No one yet. “Always from this sender” over a message’s blocked images adds them.</span>}>
+      <Show when={(list() ?? []).length > 0} fallback={<span class="st-muted">No one yet. “Always load…” over a message’s blocked images adds a sender, or everyone at its domain.</span>}>
         <ul class="st-remote-senders">
           <For each={list()}>
             {(addr) => (

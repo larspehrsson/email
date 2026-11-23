@@ -1567,7 +1567,12 @@ describe('images', () => {
       await fromSender.nth(0).click();
       const banner = page.locator('.reader .remote-banner');
       await banner.waitFor();
-      await banner.getByRole('button', { name: 'Always from this sender' }).click();
+      const always = banner.locator('select.remote-always');
+      assert.deepEqual(
+        await always.locator('option').allTextContents(),
+        ['Always load…', 'From news@lumengoods.com', 'From everyone at lumengoods.com'],
+      );
+      await always.selectOption('sender');
       await page.waitForTimeout(500);
       assert.equal(await banner.count(), 0, 'loaded');
       await fromSender.nth(1).click();
@@ -1580,6 +1585,34 @@ describe('images', () => {
       await page.locator('.st-remote-senders .link-btn').first().click();
       await page.waitForTimeout(200);
       assert.equal(await page.locator('.st-remote-senders li').count(), 0, 'removed');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('images from a domain', () => {
+  test('everyone at the sender\u2019s domain: listed as @domain in Settings', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.fill('.search-field input', 'from:lumengoods');
+      await page.waitForSelector('.search-layer .row');
+      await page.waitForTimeout(400);
+      const rows = page.locator('.search-layer .row');
+      await rows.nth(0).click();
+      const banner = page.locator('.reader .remote-banner');
+      await banner.waitFor();
+      await banner.locator('select.remote-always').selectOption('domain');
+      await page.waitForTimeout(500);
+      assert.equal(await banner.count(), 0, 'loaded');
+      await rows.nth(1).click();
+      await page.waitForTimeout(800);
+      assert.equal(await page.locator('.reader .remote-banner').count(), 0, 'the next one too');
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'General' }).click();
+      await page.locator('.st-remote-senders li').first().waitFor();
+      assert.match(await page.locator('.st-remote-senders').textContent(), /@lumengoods\.com/);
       assert.deepEqual(errors, []);
     } finally {
       await close();

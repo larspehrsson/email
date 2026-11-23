@@ -79,6 +79,28 @@ function HtmlFrame(props: { doc: string }) {
 
 // ------------------------------------------------------------- small pieces
 
+/** Over blocked images: always load them, from this sender or from everyone at its domain
+ *  (no domain for gmail.com and the like). A menu, so the banner stays one short line. */
+export function AlwaysLoad(props: { addr: string; domain: string | null; onPick: (who: 'sender' | 'domain') => void }) {
+  return (
+    <select
+      class="remote-always"
+      aria-label="Always load images"
+      onChange={(e) => {
+        const v = e.currentTarget.value;
+        e.currentTarget.value = '';
+        if (v === 'sender' || v === 'domain') props.onPick(v);
+      }}
+    >
+      <option value="" disabled selected>
+        Always load…
+      </option>
+      <option value="sender">From {props.addr}</option>
+      <Show when={props.domain}>{(d) => <option value="domain">From everyone at {d()}</option>}</Show>
+    </select>
+  );
+}
+
 export { Avatar } from './Avatar';
 import { Avatar } from './Avatar';
 
@@ -446,20 +468,18 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
                   Load images
                 </button>
                 <span class="dot-sep">·</span>
-                <button
-                  class="link-btn"
-                  title={`Always load images in mail from ${h().from.addr}`}
-                  onClick={() => {
+                <AlwaysLoad
+                  addr={h().from.addr}
+                  domain={ready()?.d.senderDomain ?? null}
+                  onPick={(who) => {
                     const id = readerMessageId();
                     if (id == null) return;
-                    void api.allowRemoteSender(id).then(() => {
+                    void (who === 'domain' ? api.allowRemoteDomain(id) : api.allowRemoteSender(id)).then(() => {
                       cacheClear();
                       allowRemoteFor(id);
                     }, () => {});
                   }}
-                >
-                  Always from this sender
-                </button>
+                />
               </div>
             </Show>
             <div class="reader-body">

@@ -290,6 +290,8 @@ export const api = {
   setAllowRemote: (id: number, allow: boolean): Promise<void> => call('set_allow_remote', { id, allow }),
   /** Always load images in mail from this message's sender; the address. */
   allowRemoteSender: (id: number): Promise<string> => call('allow_remote_sender', { id }),
+  /** Always load images in mail from everyone at the sender's domain; returns "@domain". */
+  allowRemoteDomain: (id: number): Promise<string> => call('allow_remote_domain', { id }),
   /** Senders whose images always load. */
   remoteSenders: (): Promise<string[]> => call('remote_senders', undefined),
   setRemoteSender: (addr: string, on: boolean): Promise<void> => call('set_remote_sender', { addr, on }),
