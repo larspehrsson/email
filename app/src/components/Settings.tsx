@@ -2,6 +2,7 @@ import { createEffect, createResource, createSignal, For, Match, onCleanup, onMo
 import { AiAppsSection } from './AiApps';
 import { GoogleClientNote, GoogleContactsField } from './GoogleContacts';
 import { pictureLevel, setPictureLevel, type PictureLevel } from '../lib/senderIcons';
+import { setTheme, theme, THEMES } from '../lib/theme';
 import { accountLogo, logoFromFile, setAccountLogo } from '../lib/accountLogos';
 import {
   bindKey,
@@ -752,6 +753,16 @@ const PICTURE_LEVELS: { id: PictureLevel; label: string; note: string }[] = [
   },
 ];
 
+/** A theme in miniature: its sidebar, its page, and a line in its accent. */
+function ThemeSwatch(props: { colors: [string, string, string] }) {
+  return (
+    <span class="st-tp" style={{ background: props.colors[1] }}>
+      <span class="st-tp-side" style={{ background: props.colors[0] }} />
+      <span class="st-tp-sel" style={{ background: props.colors[2] }} />
+    </span>
+  );
+}
+
 function GeneralSection() {
   const [status, { refetch }] = createResource(() => api.defaultMailStatus().catch(() => null));
   const [msg, setMsg] = createSignal<string | null>(null);
@@ -766,6 +777,29 @@ function GeneralSection() {
   };
   return (
     <div class="st-body">
+      <div class="st-field st-field-top">
+        <span class="st-field-label">Theme</span>
+        <div class="st-themes" role="radiogroup" aria-label="Theme">
+          <For each={THEMES}>
+            {(t) => (
+              <button
+                type="button"
+                role="radio"
+                class="st-theme"
+                classList={{ on: theme() === t.id }}
+                aria-checked={theme() === t.id}
+                onClick={() => setTheme(t.id)}
+              >
+                <span class="st-theme-preview" classList={{ split: !!t.darkSwatch }} aria-hidden="true">
+                  <ThemeSwatch colors={t.swatch} />
+                  <Show when={t.darkSwatch}>{(d) => <ThemeSwatch colors={d()} />}</Show>
+                </span>
+                <span class="st-theme-label">{t.label}</span>
+              </button>
+            )}
+          </For>
+        </div>
+      </div>
       <Field label="Default mail app">
         <Show when={status()} fallback={<span class="st-muted">…</span>}>
           {(s) => (

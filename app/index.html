@@ -9,6 +9,15 @@
          (components/ComposeWindow.tsx takes it away once the composer is drawn in its place).
          Same layout and colours as the composer's top (styles.css: .cmp-bar, .cmp-row). -->
     <script>
+      // The theme chosen in Settings, before the first paint (lib/theme.ts keeps it up to date).
+      (function () {
+        var t = 'auto';
+        try { t = JSON.parse(localStorage.getItem('ui.theme')) || 'auto'; } catch (e) {}
+        var fixed = { light: 'light', dark: 'dark', 'solarized-light': 'light', 'solarized-dark': 'dark' }[t];
+        var dark = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.dataset.scheme = fixed || (dark ? 'dark' : 'light');
+        if (t === 'claude' || t === 'solarized-light' || t === 'solarized-dark') document.documentElement.dataset.theme = t;
+      })();
       if (window.__EMAIL_WINDOW === 'compose' || /[?&]compose=/.test(location.search))
         document.documentElement.classList.add('booting-compose');
     </script>
@@ -24,10 +33,12 @@
       #boot .boot-rows { padding: 0 28px; }
       #boot .boot-tools { height: 40px; }
       #boot .boot-row { height: 40px; box-sizing: border-box; display: flex; align-items: center; border-bottom: 1px solid rgba(0, 0, 0, 0.085); }
-      @media (prefers-color-scheme: dark) {
-        html.booting-compose, html.booting-compose body, html.booting-compose #boot { background: #1f1f22; color: #7f7f88; }
-        #boot .boot-bar, #boot .boot-row { border-color: rgba(255, 255, 255, 0.075); }
-      }
+      html[data-scheme='dark'].booting-compose, html[data-scheme='dark'].booting-compose body, html[data-scheme='dark'].booting-compose #boot { background: #1f1f22; color: #7f7f88; }
+      html[data-scheme='dark'] #boot .boot-bar, html[data-scheme='dark'] #boot .boot-row { border-color: rgba(255, 255, 255, 0.075); }
+      html[data-theme='claude'].booting-compose, html[data-theme='claude'].booting-compose body, html[data-theme='claude'].booting-compose #boot { background: #faf9f5; }
+      html[data-theme='claude'][data-scheme='dark'].booting-compose, html[data-theme='claude'][data-scheme='dark'].booting-compose body, html[data-theme='claude'][data-scheme='dark'].booting-compose #boot { background: #2a2a27; }
+      html[data-theme='solarized-light'].booting-compose, html[data-theme='solarized-light'].booting-compose body, html[data-theme='solarized-light'].booting-compose #boot { background: #fdf6e3; }
+      html[data-theme='solarized-dark'].booting-compose, html[data-theme='solarized-dark'].booting-compose body, html[data-theme='solarized-dark'].booting-compose #boot { background: #002b36; }
     </style>
   </head>
   <body>

@@ -767,6 +767,54 @@ describe('settings layout', () => {
   });
 });
 
+describe('themes', () => {
+  test('a theme picked in General colours the app, and is kept', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const shot = process.env.THEME_SHOTS;
+      const bg = () => page.evaluate(() => getComputedStyle(document.querySelector('.pane-sidebar')).backgroundColor);
+      const attrs = () => page.evaluate(() => [document.documentElement.dataset.theme ?? null, document.documentElement.dataset.scheme]);
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'General' }).click();
+      const pick = (name) => page.locator('.st-theme', { has: page.getByText(name, { exact: true }) });
+      assert.equal(await pick('Auto').getAttribute('aria-checked'), 'true', 'Auto to begin with');
+      const auto = await bg();
+      await pick('Claude').click();
+      assert.deepEqual(await attrs(), ['claude', 'light']);
+      assert.equal(await bg(), 'rgb(240, 238, 230)');
+      await pick('Solarized Dark').click();
+      assert.deepEqual(await attrs(), ['solarized-dark', 'dark']);
+      assert.equal(await bg(), 'rgb(0, 33, 43)');
+      // The dark rules follow the theme, not only the system: the dark colour of the plain Dark.
+      await pick('Dark').click();
+      assert.deepEqual(await attrs(), [null, 'dark']);
+      assert.equal(await bg(), 'rgb(22, 22, 24)');
+      await pick('Auto').click();
+      assert.equal(await bg(), auto);
+      // Kept: it's there from the first paint after a reload.
+      await pick('Solarized Light').click();
+      await page.reload();
+      await page.waitForSelector('.folder-layer .row');
+      assert.deepEqual(await attrs(), ['solarized-light', 'light']);
+      assert.equal(await bg(), 'rgb(238, 232, 213)');
+      if (shot) {
+        for (const name of ['Light', 'Dark', 'Claude', 'Solarized Light', 'Solarized Dark']) {
+          await page.keyboard.press('ControlOrMeta+,');
+          await page.locator('.st-nav-item', { hasText: 'General' }).click();
+          await pick(name).click();
+          await page.screenshot({ path: `${shot}/settings-${name.replace(' ', '-')}.png` });
+          await page.keyboard.press('Escape');
+          await page.waitForTimeout(200);
+          await page.screenshot({ path: `${shot}/app-${name.replace(' ', '-')}.png` });
+        }
+      }
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('mac title band', () => {
   test('with the sidebar folded, the rail top is the colour of the search row beside it', async () => {
     const { page, errors, close } = await open({ threaded: false, query: '&mac' });

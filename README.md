@@ -116,6 +116,10 @@ about it: why wasn't this marked as spam, is it genuine, who really sent it.
 your mail (Settings › AI apps; off until you turn it on; deleting and sending always ask you
 first).
 
+**Themes:** Settings › General › Theme: Auto (the system's light or dark), Light, Dark, Claude
+(warm paper and orange, light or dark with the system), Solarized Light and Solarized Dark.
+Messages themselves stay on white, as they were written.
+
 **Sender pictures** beside each message (off until you choose a level in Settings › General;
 View options turns them on and off): the person's own photo when they're one of your Google
 contacts with one, else their company's logo or website icon, or initials. You choose how far
