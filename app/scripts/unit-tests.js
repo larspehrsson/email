@@ -223,7 +223,7 @@ test('an email’s text for the prompt leaves out its CSS and scripts', () => {
   assert.equal(htmlToText(html, parse), 'Hi&bye\n- one\nDone');
 });
 
-import { describeLink, textHost } from '../src/lib/linkCheck.ts';
+import { describeLink, siteOf, textHost } from '../src/lib/linkCheck.ts';
 
 test('a link shows where it goes: the site apart from the rest', () => {
   const l = describeLink('https://www.facebook.com/login/?next=x', 'Log in');
@@ -252,4 +252,29 @@ test('look-alike letters and bare addresses are called out', () => {
   assert.match(l.host, /^xn--/);
   assert.match(l.warning, /international letters/);
   assert.match(describeLink('http://192.168.1.20/login', 'Log in').warning, /bare internet address/);
+});
+
+test('a link to a place that isn\u2019t in the message goes nowhere, and says so', () => {
+  const dead = describeLink('#unsubscribe', 'opsige abonnementet', { targetExists: false });
+  assert.match(dead.before, /Goes nowhere \(#unsubscribe\)/);
+  assert.match(dead.warning, /doesn.t lead anywhere/);
+  assert.match(describeLink('#', 'Unsubscribe').warning, /doesn.t lead anywhere/);
+  const there = describeLink('#top', 'Back to top', { targetExists: true });
+  assert.equal(there.warning, null);
+  assert.match(there.before, /A place in this message/);
+});
+
+test('a link to another site than the sender\u2019s gets a note', () => {
+  assert.equal(siteOf('mail.shop.example.co.uk'), 'example.co.uk');
+  assert.equal(siteOf('news.example.com'), 'example.com');
+  const other = describeLink('https://parcellink-track.example/x', 'Track', { sender: 'jessica@jkp.invid.se' });
+  assert.match(other.note, /invid\.se/);
+  assert.equal(other.warning, null);
+  // The sender's own site, or a part of it: nothing to say.
+  assert.equal(describeLink('https://www.example.com/a', 'Read', { sender: 'news@mail.example.com' }).note, null);
+  // No sender known, or not a web link: no note.
+  assert.equal(describeLink('https://other.example/', 'Read').note, null);
+  assert.equal(describeLink('mailto:a@other.example', 'Write', { sender: 'b@example.com' }).note, null);
+  // A warning says more; the note isn't added to it.
+  assert.equal(describeLink('http://evil.example/', 'facebook.com', { sender: 'x@facebook.com' }).note, null);
 });

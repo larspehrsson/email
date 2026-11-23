@@ -58,7 +58,7 @@ ${extraCss}
  * allow-scripts). The email itself still can't run code: the sanitiser removes scripts, event
  * handlers and javascript: links, and the document's CSP has script-src 'none'.
  */
-function HtmlFrame(props: { doc: string }) {
+function HtmlFrame(props: { doc: string; sender: string }) {
   let host!: HTMLDivElement;
   createEffect(() => {
     const f = document.createElement('iframe');
@@ -69,7 +69,7 @@ function HtmlFrame(props: { doc: string }) {
     f.srcdoc = props.doc;
     f.addEventListener('load', () => {
       forwardFrameKeys(f);
-      watchFrameLinks(f);
+      watchFrameLinks(f, props.sender);
       if (f.contentDocument) zoomableImages(f.contentDocument);
     });
     host.replaceChildren(f);
@@ -166,10 +166,10 @@ function QuoteNodes(props: { nodes: QNode[] }) {
   );
 }
 
-export function PlainBody(props: { text: string }) {
+export function PlainBody(props: { text: string; sender?: string }) {
   const res = createMemo(() => analyzePlain(props.text));
   return (
-    <div class="plain" tabIndex={-1}>
+    <div class="plain" tabIndex={-1} data-sender={props.sender}>
       <QuoteNodes nodes={res().head} />
       <Show when={res().collapsed}>
         {(c) => (
@@ -481,8 +481,8 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
                 </Match>
                 <Match when={ready()}>
                   {(d) => (
-                    <Show when={d().d.html} fallback={<PlainBody text={d().d.text ?? ''} />}>
-                      {(html) => <HtmlFrame doc={buildSrcdoc(html(), d().remote)} />}
+                    <Show when={d().d.html} fallback={<PlainBody text={d().d.text ?? ''} sender={h().from.addr} />}>
+                      {(html) => <HtmlFrame doc={buildSrcdoc(html(), d().remote)} sender={h().from.addr} />}
                     </Show>
                   )}
                 </Match>

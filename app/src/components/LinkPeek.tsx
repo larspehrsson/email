@@ -16,28 +16,36 @@ interface Peek {
 
 const [peek, setPeek] = createSignal<Peek | null>(null);
 
-function show(a: Element, area: DOMRect, offset = { x: 0, y: 0 }) {
-  const href = a.getAttribute('href');
-  if (!href || href.startsWith('#')) return setPeek(null);
+function show(a: Element, area: DOMRect, sender: string | null, offset = { x: 0, y: 0 }) {
+  const href = a.getAttribute('href')?.trim();
+  if (!href) return setPeek(null);
+  // A place in the message, or nowhere: is it there?
+  let targetExists = false;
+  if (href.startsWith('#') && href.length > 1) {
+    const id = decodeURIComponent(href.slice(1));
+    const doc = a.ownerDocument;
+    targetExists = !!doc.getElementById(id) || doc.getElementsByName(id).length > 0;
+  }
   // The resolved address, as a click would open it.
-  const url = (a as HTMLAnchorElement).href || href;
+  const url = href.startsWith('#') ? href : (a as HTMLAnchorElement).href || href;
   const r = a.getBoundingClientRect();
   const link = new DOMRect(r.left + offset.x, r.top + offset.y, r.width, r.height);
-  setPeek({ info: describeLink(url, a.textContent ?? ''), area, link });
+  setPeek({ info: describeLink(url, a.textContent ?? '', { sender, targetExists }), area, link });
 }
 
 export function hidePeek() {
   setPeek(null);
 }
 
-/** The links inside a message frame: call once its document has loaded. */
-export function watchFrameLinks(frame: HTMLIFrameElement) {
+/** The links inside a message frame: call once its document has loaded. `sender` is the
+ *  message's From address, to say when a link goes to another site. */
+export function watchFrameLinks(frame: HTMLIFrameElement, sender: string | null = null) {
   const doc = frame.contentDocument;
   if (!doc) return;
   const linkOf = (t: EventTarget | null) => (t && 'closest' in (t as Element) ? (t as Element).closest('a[href]') : null);
   const at = (a: Element) => {
     const area = frame.getBoundingClientRect();
-    show(a, area, { x: area.left, y: area.top });
+    show(a, area, sender, { x: area.left, y: area.top });
   };
   doc.addEventListener('mouseover', (e) => {
     const a = linkOf(e.target);
@@ -63,7 +71,9 @@ export function peekHandlers(area: string) {
   return {
     onMouseEnter: (e: MouseEvent) => {
       const a = e.currentTarget as Element;
-      show(a, (a.closest(area) ?? a).getBoundingClientRect());
+      // The sender, from the message body around it (PlainBody's data-sender).
+      const sender = a.closest('[data-sender]')?.getAttribute('data-sender') ?? null;
+      show(a, (a.closest(area) ?? a).getBoundingClientRect(), sender);
     },
     onMouseLeave: () => setPeek(null),
   };
@@ -91,13 +101,14 @@ export function LinkPeek() {
           };
         };
         return (
-          <div class="link-peek" classList={{ warn: !!p().info.warning }} style={view()} role="status" aria-live="polite">
+          <div class="link-peek" classList={{ warn: !!p().info.warning, note: !p().info.warning && !!p().info.note }} style={view()} role="status" aria-live="polite">
             <div class="lp-url" title={p().info.url}>
               <span class="lp-dim">{p().info.before}</span>
               <span class="lp-host">{p().info.host}</span>
               <span class="lp-dim">{p().info.after}</span>
             </div>
             <Show when={p().info.warning}>{(w) => <div class="lp-warn">⚠︎ {w()}</div>}</Show>
+            <Show when={!p().info.warning && p().info.note}>{(n) => <div class="lp-note">{n()}</div>}</Show>
           </div>
         );
       }}

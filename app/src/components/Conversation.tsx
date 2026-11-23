@@ -42,7 +42,7 @@ const CARD_FRAME_CSS = 'html{overflow:hidden}body{padding:4px 20px 20px}';
  * email can't run code: it's sanitised and the document's CSP has script-src 'none' (see
  * `buildSrcdoc`). Built imperatively so sandbox + srcdoc are set before attachment.
  */
-export function AutoHeightFrame(props: { doc: string }) {
+export function AutoHeightFrame(props: { doc: string; sender?: string }) {
   let host!: HTMLDivElement;
   createEffect(() => {
     const f = document.createElement('iframe');
@@ -96,7 +96,7 @@ export function AutoHeightFrame(props: { doc: string }) {
       const doc = f.contentDocument;
       if (!doc) return;
       forwardFrameKeys(f);
-      watchFrameLinks(f);
+      watchFrameLinks(f, props.sender ?? null);
       zoomableImages(doc, () => measure());
       last = -1;
       measure();
@@ -304,8 +304,8 @@ function ExpandedCard(props: { m: MessageSummary; me: Me; folderTag?: string; ac
           </Match>
           <Match when={body.shown()}>
             {(s) => (
-              <Show when={s().d.html} fallback={<PlainBody text={s().d.text ?? ''} />}>
-                {(html) => <AutoHeightFrame doc={buildSrcdoc(html(), s().remote, CARD_FRAME_CSS)} />}
+              <Show when={s().d.html} fallback={<PlainBody text={s().d.text ?? ''} sender={props.m.fromAddr} />}>
+                {(html) => <AutoHeightFrame doc={buildSrcdoc(html(), s().remote, CARD_FRAME_CSS)} sender={props.m.fromAddr} />}
               </Show>
             )}
           </Match>
