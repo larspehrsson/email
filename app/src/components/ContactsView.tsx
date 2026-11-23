@@ -166,6 +166,13 @@ export function ContactsView() {
   const addresses = () => (form()?.emails ?? []).map((e) => e.trim()).filter(Boolean);
   const googleEmail = (accountId: number) =>
     googleStatus()?.links.find((l) => l.accountId === accountId)?.googleEmail ?? accounts()?.find((a) => a.id === accountId)?.email ?? 'Google';
+  // The browser may be signed in to several Google accounts: open the contact in the one it's in.
+  const googleHref = (href: string) => {
+    const g = form()?.google;
+    if (g == null) return href;
+    const email = googleEmail(g);
+    return email.includes('@') ? `${href}?authuser=${encodeURIComponent(email)}` : href;
+  };
   function write() {
     const f = form();
     if (!f || !addresses().length) return;
@@ -246,9 +253,6 @@ export function ContactsView() {
                 <span class="ct-row-text">
                   <span class="ct-name">
                     {c.name || c.company || c.emails[0]}
-                    <Show when={c.google != null}>
-                      <span class="ct-google" title={`Google Contacts: ${googleEmail(c.google!)}`}>G</span>
-                    </Show>
                   </span>
                   <span class="ct-sub">
                     <For each={chips(c)}>{(g) => <span class="ct-chip" classList={{ star: g.resource === STARRED }}>{g.name}</span>}</For>
@@ -433,7 +437,7 @@ export function ContactsView() {
                 {(href) => (
                   <div class="ct-field ct-ro">
                     <span />
-                    <a class="ct-google-link" href={href()} target="_blank" rel="noopener noreferrer">
+                    <a class="ct-google-link" href={googleHref(href())} target="_blank" rel="noopener noreferrer">
                       Edit more in Google Contacts ↗
                     </a>
                   </div>
