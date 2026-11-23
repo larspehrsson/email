@@ -5063,10 +5063,27 @@ body.dragging-message * {
 }
 .st-themes {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-  flex: 1;
-  min-width: 0;
+  max-width: 440px;
+  padding-bottom: 4px;
+}
+/* A settings page in titled parts (SettingsGroup), a line between them. */
+.st-sect + .st-sect {
+  margin-top: 18px;
+  padding-top: 4px;
+  border-top: 1px solid var(--sep);
+}
+.st-sect > .st-field + .st-field {
+  margin-top: 8px;
+}
+.st-sect-title {
+  margin: 12px 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-3);
 }
 .st-theme {
   display: flex;
