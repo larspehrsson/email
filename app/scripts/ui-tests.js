@@ -2096,13 +2096,29 @@ describe('drag to folder', () => {
       await page.keyboard.press('ControlOrMeta+Shift+1');
       const flyout = page.locator('div.flyout');
       await flyout.waitFor();
-      // from the row's right end: the panel covers the list's left part
-      const rb = await rows(page).first().boundingBox();
+      // The panel slides open: measure once it has stopped.
+      await page.waitForFunction(() => {
+        const f = document.querySelector('div.flyout');
+        const x = f?.getBoundingClientRect().right;
+        return new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(x != null && x === f.getBoundingClientRect().right))));
+      });
+      // A point on the first row that the panel doesn't cover (it covers the list's left part).
+      const at = await page.evaluate(() => {
+        const row = document.querySelector('.folder-layer .row');
+        const r = row.getBoundingClientRect();
+        const y = r.top + r.height / 2;
+        for (let x = r.right - 12; x > r.left; x -= 10) if (document.elementFromPoint(x, y)?.closest('.row') === row) return { x, y };
+        return null;
+      });
+      assert.ok(at, 'a part of the row is free to press');
       const tb = await flyout.locator('.folder', { hasText: 'Receipts' }).first().boundingBox();
-      await page.mouse.move(rb.x + rb.width - 30, rb.y + rb.height / 2);
+      await page.mouse.move(at.x, at.y);
       await page.mouse.down();
       await page.mouse.move(tb.x + tb.width / 2, tb.y + tb.height / 2, { steps: 12 });
-      await page.locator('.drag-ghost').waitFor();
+      await page.locator('.drag-ghost').waitFor({ timeout: 5000 }).catch(async () => {
+        const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.outerHTML.slice(0, 160), at);
+        assert.fail(`the drag didn't start; the press at ${JSON.stringify(at)} hit ${hit}`);
+      });
       await page.keyboard.press('Escape');
       await page.locator('.drag-ghost').waitFor({ state: 'detached' });
       await page.mouse.up();
