@@ -57,52 +57,55 @@
   --radius: 8px;
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 
-  color-scheme: light dark;
+  color-scheme: light;
+}
+/* The scheme in use: data-scheme on <html>, set from the theme chosen in Settings › General
+   (lib/theme.ts), or from the system's for Auto. */
+:root:where([data-scheme='dark']) {
+  color-scheme: dark;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1c1c1f;
-    --bg-sidebar: #161618;
-    --bg-list: #1c1c1f;
-    --bg-reader: #1f1f22;
-    --bg-elev: #26262a;
-    --bg-input: #1a1a1d;
-    --bg-hover: rgba(255, 255, 255, 0.05);
-    --bg-active: rgba(255, 255, 255, 0.09);
-    --bg-subtle: rgba(255, 255, 255, 0.04);
-    --bg-band: rgba(255, 255, 255, 0.055);
+:root:where([data-scheme='dark']) {
+  --bg: #1c1c1f;
+  --bg-sidebar: #161618;
+  --bg-list: #1c1c1f;
+  --bg-reader: #1f1f22;
+  --bg-elev: #26262a;
+  --bg-input: #1a1a1d;
+  --bg-hover: rgba(255, 255, 255, 0.05);
+  --bg-active: rgba(255, 255, 255, 0.09);
+  --bg-subtle: rgba(255, 255, 255, 0.04);
+  --bg-band: rgba(255, 255, 255, 0.055);
 
-    --text: #ececef;
-    --text-2: #b4b4bb;
-    --text-3: #7f7f88;
-    --text-4: #56565d;
+  --text: #ececef;
+  --text-2: #b4b4bb;
+  --text-3: #7f7f88;
+  --text-4: #56565d;
 
-    --sep: rgba(255, 255, 255, 0.075);
-    --sep-strong: rgba(255, 255, 255, 0.14);
+  --sep: rgba(255, 255, 255, 0.075);
+  --sep-strong: rgba(255, 255, 255, 0.14);
 
-    --accent: #3d8bff;
-    --accent-hover: #5a9cff;
-    --accent-soft: rgba(61, 139, 255, 0.16);
+  --accent: #3d8bff;
+  --accent-hover: #5a9cff;
+  --accent-soft: rgba(61, 139, 255, 0.16);
 
-    --sel-bg: #2d6ae0;
-    --sel-muted: rgba(255, 255, 255, 0.75);
-    --sel-bg-inactive: rgba(255, 255, 255, 0.085);
-    --sel-bg-away: rgba(255, 255, 255, 0.1);
-    --sidebar-sel: rgba(255, 255, 255, 0.09);
+  --sel-bg: #2d6ae0;
+  --sel-muted: rgba(255, 255, 255, 0.75);
+  --sel-bg-inactive: rgba(255, 255, 255, 0.085);
+  --sel-bg-away: rgba(255, 255, 255, 0.1);
+  --sidebar-sel: rgba(255, 255, 255, 0.09);
 
-    --unread: #3d8bff;
-    --flag: #ffa526;
-    --danger: #ff5c5c;
-    --danger-soft: rgba(255, 92, 92, 0.1);
+  --unread: #3d8bff;
+  --flag: #ffa526;
+  --danger: #ff5c5c;
+  --danger-soft: rgba(255, 92, 92, 0.1);
 
-    --skeleton: rgba(255, 255, 255, 0.05);
-    --skeleton-hi: rgba(255, 255, 255, 0.09);
+  --skeleton: rgba(255, 255, 255, 0.05);
+  --skeleton-hi: rgba(255, 255, 255, 0.09);
 
-    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 48px rgba(0, 0, 0, 0.45);
-    --focus-ring: 0 0 0 3px rgba(61, 139, 255, 0.4);
-    --scroll-thumb: rgba(255, 255, 255, 0.18);
-  }
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 48px rgba(0, 0, 0, 0.45);
+  --focus-ring: 0 0 0 3px rgba(61, 139, 255, 0.4);
+  --scroll-thumb: rgba(255, 255, 255, 0.18);
 }
 
 /* ==========================================================================
@@ -972,17 +975,15 @@ body.resizing iframe {
   background: #fff;
   color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
-  /* Newsletters assume white: present HTML as a white sheet inset in the dark reader. */
-  .reader-body {
-    border-top: 0;
-  }
-  .html-wrap {
-    inset: 0 14px 14px;
-    border-radius: 10px;
-    overflow: hidden;
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
-  }
+/* Newsletters assume white: present HTML as a white sheet inset in the dark reader. */
+:where(:root[data-scheme='dark']) .reader-body {
+  border-top: 0;
+}
+:where(:root[data-scheme='dark']) .html-wrap {
+  inset: 0 14px 14px;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
 .plain {
@@ -1119,7 +1120,7 @@ body.resizing iframe {
   place-items: center;
   color: #fff;
   background: linear-gradient(160deg, #4aa1ff, #0a5cf0);
-  box-shadow: 0 6px 18px rgba(10, 108, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 35%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 .card-hero h1 {
   margin: 0 0 6px;
@@ -1417,10 +1418,8 @@ body.resizing iframe {
   overflow: hidden;
   animation: fade-in 140ms var(--ease);
 }
-@media (prefers-color-scheme: dark) {
-  .card-msg {
-    background: rgba(255, 255, 255, 0.025);
-  }
+:where(:root[data-scheme='dark']) .card-msg {
+  background: rgba(255, 255, 255, 0.025);
 }
 .card-msg .unread-dot {
   left: 7px;
@@ -1492,13 +1491,11 @@ body.resizing iframe {
 /* the keyboard on an expanded message's header: the ring inside it (the card clips outlines) */
 .cm-head:focus-visible {
   outline: none;
-  box-shadow: inset 0 0 0 3px rgba(10, 108, 255, 0.3);
+  box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
   border-radius: 10px 10px 0 0;
 }
-@media (prefers-color-scheme: dark) {
-  .cm-head:focus-visible {
-    box-shadow: inset 0 0 0 3px rgba(61, 139, 255, 0.4);
-  }
+:where(:root[data-scheme='dark']) .cm-head:focus-visible {
+  box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transparent);
 }
 .cm-head:hover {
   background: var(--bg-subtle);
@@ -1536,11 +1533,9 @@ body.resizing iframe {
   border-radius: 8px;
   overflow: hidden;
 }
-@media (prefers-color-scheme: light) {
-  .card-frame-wrap {
-    margin: 0 0 4px;
-    border-radius: 0;
-  }
+:where(:root[data-scheme='light']) .card-frame-wrap {
+  margin: 0 0 4px;
+  border-radius: 0;
 }
 .card-frame {
   display: block;
@@ -1674,10 +1669,8 @@ body.resizing iframe {
   font-weight: 600;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
 }
-@media (prefers-color-scheme: dark) {
-  .segmented button.on {
-    background: rgba(255, 255, 255, 0.14);
-  }
+:where(:root[data-scheme='dark']) .segmented button.on {
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .folder-tag {
@@ -1703,10 +1696,8 @@ body.resizing iframe {
   padding: 0 1px;
   margin: 0 -1px;
 }
-@media (prefers-color-scheme: dark) {
-  .row mark {
-    background: var(--rs-mark, rgba(255, 204, 0, 0.3));
-  }
+:where(:root[data-scheme='dark']) .row mark {
+  background: var(--rs-mark, rgba(255, 204, 0, 0.3));
 }
 
 .search-hint {
@@ -2444,12 +2435,10 @@ body.resizing iframe {
   --quote-2: #d9bd84;
   --quote-3: #9fc5a8;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --quote-1: #4d535e;
-    --quote-2: #8c7646;
-    --quote-3: #4f7d5c;
-  }
+:root:where([data-scheme='dark']) {
+  --quote-1: #4d535e;
+  --quote-2: #8c7646;
+  --quote-3: #4f7d5c;
 }
 .plain .pt {
   white-space: pre-wrap;
@@ -2566,11 +2555,9 @@ body.resizing iframe {
   white-space: nowrap;
   animation: toast-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
-@media (prefers-color-scheme: dark) {
-  .toast {
-    --toast-bg: #45454c;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
-  }
+:where(:root[data-scheme='dark']) .toast {
+  --toast-bg: #45454c;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 @keyframes toast-in {
   from {
@@ -2949,11 +2936,9 @@ html.macos .sidebar-title {
   /* the card header's hover tint (bg-subtle) composited on the card */
   --card-solid-hover: #f6f6f6;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --card-solid: #252528;
-    --card-solid-hover: #2d2d30;
-  }
+:root:where([data-scheme='dark']) {
+  --card-solid: #252528;
+  --card-solid-hover: #2d2d30;
 }
 
 /* header toolbar: fixed slot at the right of the band's info row */
@@ -3327,10 +3312,8 @@ html.macos .rail-top {
     transform: none;
   }
 }
-@media (prefers-color-scheme: dark) {
-  .flyout {
-    box-shadow: 8px 0 32px rgba(0, 0, 0, 0.5);
-  }
+:where(:root[data-scheme='dark']) .flyout {
+  box-shadow: 8px 0 32px rgba(0, 0, 0, 0.5);
 }
 
 /* macOS rail: the traffic lights (x 18→70) don't fit the 48px rail, so, like Mail and Finder
@@ -3507,10 +3490,8 @@ html.macos .app.rail-mode .search-bar {
   border-radius: 2px;
   background: var(--bar-l);
 }
-@media (prefers-color-scheme: dark) {
-  .row-inner.tagged::before {
-    background: var(--bar-d);
-  }
+:where(:root[data-scheme='dark']) .row-inner.tagged::before {
+  background: var(--bar-d);
 }
 
 /* reader chips: one line in the band's info row */
@@ -4575,15 +4556,13 @@ html.macos .app.rail-mode .search-bar {
   background: #e3e6eb;
   color: #3b3f48;
 }
-@media (prefers-color-scheme: dark) {
-  .cmp-quote-pill {
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--text-3);
-  }
-  .cmp-quote-pill:hover {
-    background: rgba(255, 255, 255, 0.13);
-    color: var(--text-2);
-  }
+:where(:root[data-scheme='dark']) .cmp-quote-pill {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-3);
+}
+:where(:root[data-scheme='dark']) .cmp-quote-pill:hover {
+  background: rgba(255, 255, 255, 0.13);
+  color: var(--text-2);
 }
 
 /* compose window: the composer fills it */
@@ -4722,7 +4701,7 @@ html.macos .app.rail-mode .search-bar {
   overflow: hidden;
 }
 .addr-sugg-row.on {
-  background: rgba(10, 108, 255, 0.13);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
 }
 .sugg-name {
   flex: none;
@@ -4758,13 +4737,11 @@ html.macos .app.rail-mode .search-bar {
   font-size: 12.5px;
   color: var(--text-3);
 }
-@media (prefers-color-scheme: dark) {
-  .addr-sugg {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
-  }
-  .addr-sugg-row.on {
-    background: rgba(45, 106, 224, 0.28);
-  }
+:where(:root[data-scheme='dark']) .addr-sugg {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+}
+:where(:root[data-scheme='dark']) .addr-sugg-row.on {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
 /* see lib/platform.ts: background windows pause their continuous animations */
@@ -4826,11 +4803,9 @@ html.inactive .sk-line {
   --seg-track: rgba(0, 0, 0, 0.06);
   --seg-on: #ffffff;
 }
-@media (prefers-color-scheme: dark) {
-  .cmp-mode {
-    --seg-track: rgba(255, 255, 255, 0.07);
-    --seg-on: rgba(255, 255, 255, 0.16);
-  }
+:where(:root[data-scheme='dark']) .cmp-mode {
+  --seg-track: rgba(255, 255, 255, 0.07);
+  --seg-on: rgba(255, 255, 255, 0.16);
 }
 .cmp-mode button {
   display: inline-flex;
@@ -5085,6 +5060,85 @@ body.dragging-message * {
 .st-field-top {
   align-items: start;
   padding-top: 7px;
+}
+.st-themes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  max-width: 440px;
+  padding-bottom: 4px;
+}
+/* A settings page in titled parts (SettingsGroup), a line between them. */
+.st-sect + .st-sect {
+  margin-top: 18px;
+  padding-top: 4px;
+  border-top: 1px solid var(--sep);
+}
+.st-sect > .st-field + .st-field {
+  margin-top: 8px;
+}
+/* A line between two settings of one part (a long one under it starts at the top). */
+.st-sect > .st-field.st-divided {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--sep);
+}
+.st-field.st-field-top > .st-field-value {
+  align-items: flex-start;
+}
+.st-sect-title {
+  margin: 12px 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.st-theme {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--sep-strong);
+  border-radius: 9px;
+  background: var(--bg-elev);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.st-theme:hover {
+  border-color: var(--text-4);
+}
+.st-theme.on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  color: var(--text);
+}
+.st-theme-preview {
+  display: flex;
+  height: 46px;
+  border-radius: 5px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--sep);
+}
+.st-tp {
+  position: relative;
+  flex: 1;
+}
+.st-tp-side {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 32%;
+}
+.st-tp-sel {
+  position: absolute;
+  left: 40%;
+  right: 10%;
+  top: 38%;
+  height: 7px;
+  border-radius: 3px;
 }
 .st-levels {
   display: flex;
@@ -5661,10 +5715,8 @@ body.dragging-message * {
   color: #a35d00;
   background: rgba(255, 149, 0, 0.14);
 }
-@media (prefers-color-scheme: dark) {
-  .ct-chip.star {
-    color: #ffb340;
-  }
+:where(:root[data-scheme='dark']) .ct-chip.star {
+  color: #ffb340;
 }
 .ct-list {
   display: flex;
@@ -6394,4 +6446,129 @@ body.dragging-message * {
    over one would never reach the drag, which would then end on the next click anywhere. */
 body.dragging-message iframe {
   pointer-events: none;
+}
+
+/* ==========================================================================
+   Themes (Settings › General › Theme; lib/theme.ts sets data-theme and data-scheme on <html>).
+   Each overrides the colour tokens above; light and dark come from the scheme's own blocks.
+   ========================================================================== */
+
+/* Claude: warm paper and Claude's orange; follows the system's light or dark. */
+:root[data-theme='claude'] {
+  --bg: #faf9f5;
+  --bg-sidebar: #f0eee6;
+  --bg-list: #faf9f5;
+  --bg-reader: #faf9f5;
+  --bg-elev: #ffffff;
+  --bg-input: #ffffff;
+  --bg-hover: rgba(20, 20, 19, 0.045);
+  --bg-active: rgba(20, 20, 19, 0.08);
+  --bg-subtle: rgba(20, 20, 19, 0.035);
+  --bg-band: rgba(20, 20, 19, 0.035);
+  --text: #141413;
+  --text-2: #3d3d3a;
+  --text-3: #73726c;
+  --text-4: #a8a69e;
+  --sep: rgba(20, 20, 19, 0.09);
+  --sep-strong: rgba(20, 20, 19, 0.16);
+  --accent: #c96442;
+  --accent-hover: #b5573a;
+  --accent-soft: rgba(201, 100, 66, 0.12);
+  --sel-bg: #c96442;
+  --sidebar-sel: rgba(20, 20, 19, 0.075);
+  --unread: #c96442;
+  --flag: #d4a017;
+  --focus-ring: 0 0 0 3px rgba(201, 100, 66, 0.3);
+  --card-solid: #fffefb;
+  --card-solid-hover: #f6f4ee;
+}
+:root[data-theme='claude'][data-scheme='dark'] {
+  --bg: #262624;
+  --bg-sidebar: #1f1e1d;
+  --bg-list: #262624;
+  --bg-reader: #2a2a27;
+  --bg-elev: #30302e;
+  --bg-input: #1f1e1d;
+  --bg-hover: rgba(250, 249, 245, 0.05);
+  --bg-active: rgba(250, 249, 245, 0.09);
+  --bg-subtle: rgba(250, 249, 245, 0.04);
+  --bg-band: rgba(250, 249, 245, 0.05);
+  --text: #faf9f5;
+  --text-2: #c2c0b6;
+  --text-3: #8f8d85;
+  --text-4: #5e5d58;
+  --sep: rgba(250, 249, 245, 0.08);
+  --sep-strong: rgba(250, 249, 245, 0.15);
+  --accent: #d97757;
+  --accent-hover: #e08a6d;
+  --accent-soft: rgba(217, 119, 87, 0.18);
+  --sel-bg: #b85a3c;
+  --sidebar-sel: rgba(250, 249, 245, 0.09);
+  --unread: #d97757;
+  --flag: #e0b040;
+  --focus-ring: 0 0 0 3px rgba(217, 119, 87, 0.4);
+  --card-solid: #30302e;
+  --card-solid-hover: #383835;
+}
+
+/* Solarized (Ethan Schoonover's palette): base3/base2 paper, or base03/base02 night. */
+:root[data-theme='solarized-light'] {
+  --bg: #fdf6e3;
+  --bg-sidebar: #eee8d5;
+  --bg-list: #fdf6e3;
+  --bg-reader: #fdf6e3;
+  --bg-elev: #fffbf0;
+  --bg-input: #fffbf0;
+  --bg-hover: rgba(88, 110, 117, 0.07);
+  --bg-active: rgba(88, 110, 117, 0.12);
+  --bg-subtle: rgba(88, 110, 117, 0.05);
+  --bg-band: rgba(88, 110, 117, 0.06);
+  --text: #073642;
+  --text-2: #586e75;
+  --text-3: #839496;
+  --text-4: #a9b3b0;
+  --sep: rgba(88, 110, 117, 0.15);
+  --sep-strong: rgba(88, 110, 117, 0.28);
+  --accent: #268bd2;
+  --accent-hover: #1f76b5;
+  --accent-soft: rgba(38, 139, 210, 0.12);
+  --sel-bg: #268bd2;
+  --sidebar-sel: rgba(88, 110, 117, 0.12);
+  --unread: #268bd2;
+  --flag: #cb4b16;
+  --danger: #dc322f;
+  --danger-soft: rgba(220, 50, 47, 0.08);
+  --focus-ring: 0 0 0 3px rgba(38, 139, 210, 0.3);
+  --card-solid: #fffbf0;
+  --card-solid-hover: #f5efdc;
+}
+:root[data-theme='solarized-dark'] {
+  --bg: #002b36;
+  --bg-sidebar: #00212b;
+  --bg-list: #002b36;
+  --bg-reader: #002b36;
+  --bg-elev: #073642;
+  --bg-input: #00212b;
+  --bg-hover: rgba(147, 161, 161, 0.07);
+  --bg-active: rgba(147, 161, 161, 0.12);
+  --bg-subtle: rgba(147, 161, 161, 0.05);
+  --bg-band: rgba(147, 161, 161, 0.06);
+  --text: #eee8d5;
+  --text-2: #93a1a1;
+  --text-3: #839496;
+  --text-4: #586e75;
+  --sep: rgba(147, 161, 161, 0.12);
+  --sep-strong: rgba(147, 161, 161, 0.22);
+  --accent: #268bd2;
+  --accent-hover: #3a9be0;
+  --accent-soft: rgba(38, 139, 210, 0.2);
+  --sel-bg: #1f6fa8;
+  --sidebar-sel: rgba(147, 161, 161, 0.12);
+  --unread: #2aa198;
+  --flag: #b58900;
+  --danger: #dc322f;
+  --danger-soft: rgba(220, 50, 47, 0.12);
+  --focus-ring: 0 0 0 3px rgba(38, 139, 210, 0.4);
+  --card-solid: #073642;
+  --card-solid-hover: #0b3f4c;
 }

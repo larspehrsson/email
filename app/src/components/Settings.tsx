@@ -2,6 +2,7 @@ import { createEffect, createResource, createSignal, For, Match, onCleanup, onMo
 import { AiAppsSection } from './AiApps';
 import { GoogleClientNote, GoogleContactsField } from './GoogleContacts';
 import { pictureLevel, setPictureLevel, type PictureLevel } from '../lib/senderIcons';
+import { setTheme, theme, THEMES } from '../lib/theme';
 import { accountLogo, logoFromFile, setAccountLogo } from '../lib/accountLogos';
 import {
   bindKey,
@@ -413,9 +414,9 @@ function GraphField(props: { account: Account; onMessage: (m: { text: string; er
   );
 }
 
-function Field(props: { label: string; children: JSX.Element }) {
+function Field(props: { label: string; class?: string; children: JSX.Element }) {
   return (
-    <div class="st-field">
+    <div class={props.class ? `st-field ${props.class}` : 'st-field'}>
       <span class="st-field-label">{props.label}</span>
       <span class="st-field-value">{props.children}</span>
     </div>
@@ -752,6 +753,26 @@ const PICTURE_LEVELS: { id: PictureLevel; label: string; note: string }[] = [
   },
 ];
 
+/** A theme in miniature: its sidebar, its page, and a line in its accent. */
+function ThemeSwatch(props: { colors: [string, string, string] }) {
+  return (
+    <span class="st-tp" style={{ background: props.colors[1] }}>
+      <span class="st-tp-side" style={{ background: props.colors[0] }} />
+      <span class="st-tp-sel" style={{ background: props.colors[2] }} />
+    </span>
+  );
+}
+
+/** A titled part of a settings page, with a line above it after the first. */
+function SettingsGroup(props: { title: string; children: JSX.Element }) {
+  return (
+    <section class="st-sect">
+      <h4 class="st-sect-title">{props.title}</h4>
+      {props.children}
+    </section>
+  );
+}
+
 function GeneralSection() {
   const [status, { refetch }] = createResource(() => api.defaultMailStatus().catch(() => null));
   const [msg, setMsg] = createSignal<string | null>(null);
@@ -766,51 +787,80 @@ function GeneralSection() {
   };
   return (
     <div class="st-body">
-      <Field label="Default mail app">
-        <Show when={status()} fallback={<span class="st-muted">…</span>}>
-          {(s) => (
-            <Show when={s().supported} fallback={<span class="st-muted">Set it in your system’s settings.</span>}>
-              <Show
-                when={s().isDefault}
-                fallback={
-                  <>
-                    <span class="st-muted">Email links (mailto:) open another program.</span>
-                    <button class="btn secondary st-field-action" onClick={() => void make()}>
-                      Make Email the default
-                    </button>
-                  </>
-                }
-              >
-                <span>Email opens email links (mailto:).</span>
-              </Show>
-            </Show>
-          )}
-        </Show>
-      </Field>
-      <Show when={msg()}>
-        <Field label="">
-          <span class="st-status error">{msg()}</span>
-        </Field>
-      </Show>
-      <RemoteSenders />
-      {/* How far pictures may be looked up: each level contacts more senders' websites. View
-          options switches between Off and the level chosen here. */}
-      <div class="st-field st-field-top">
-        <span class="st-field-label">Sender pictures</span>
-        <div class="st-levels" role="radiogroup" aria-label="Sender pictures">
-          <For each={PICTURE_LEVELS}>
-            {(l) => (
-              <label class="st-level">
-                <input type="radio" name="picture-level" checked={pictureLevel() === l.id} onChange={() => setPictureLevel(l.id)} />
-                <span>
-                  {l.label}
-                  <span class="st-level-note">{l.note}</span>
-                </span>
-              </label>
-            )}
-          </For>
+      <SettingsGroup title="Appearance">
+        <div class="st-field st-field-top">
+          <span class="st-field-label">Theme</span>
+          <div class="st-themes" role="radiogroup" aria-label="Theme">
+            <For each={THEMES}>
+              {(t) => (
+                <button
+                  type="button"
+                  role="radio"
+                  class="st-theme"
+                  classList={{ on: theme() === t.id }}
+                  aria-checked={theme() === t.id}
+                  onClick={() => setTheme(t.id)}
+                >
+                  <span class="st-theme-preview" classList={{ split: !!t.darkSwatch }} aria-hidden="true">
+                    <ThemeSwatch colors={t.swatch} />
+                    <Show when={t.darkSwatch}>{(d) => <ThemeSwatch colors={d()} />}</Show>
+                  </span>
+                  <span class="st-theme-label">{t.label}</span>
+                </button>
+              )}
+            </For>
+          </div>
         </div>
-      </div>
+      </SettingsGroup>
+      <SettingsGroup title="Privacy">
+        {/* How far pictures may be looked up: each level contacts more senders' websites. View
+            options switches between Off and the level chosen here. */}
+        <div class="st-field st-field-top">
+          <span class="st-field-label">Sender pictures</span>
+          <div class="st-levels" role="radiogroup" aria-label="Sender pictures">
+            <For each={PICTURE_LEVELS}>
+              {(l) => (
+                <label class="st-level">
+                  <input type="radio" name="picture-level" checked={pictureLevel() === l.id} onChange={() => setPictureLevel(l.id)} />
+                  <span>
+                    {l.label}
+                    <span class="st-level-note">{l.note}</span>
+                  </span>
+                </label>
+              )}
+            </For>
+          </div>
+        </div>
+        <RemoteSenders />
+      </SettingsGroup>
+      <SettingsGroup title="Email links">
+        <Field label="Default mail app">
+          <Show when={status()} fallback={<span class="st-muted">…</span>}>
+            {(s) => (
+              <Show when={s().supported} fallback={<span class="st-muted">Set it in your system’s settings.</span>}>
+                <Show
+                  when={s().isDefault}
+                  fallback={
+                    <>
+                      <span class="st-muted">Email links (mailto:) open another program.</span>
+                      <button class="btn secondary st-field-action" onClick={() => void make()}>
+                        Make Email the default
+                      </button>
+                    </>
+                  }
+                >
+                  <span>Email opens email links (mailto:).</span>
+                </Show>
+              </Show>
+            )}
+          </Show>
+        </Field>
+        <Show when={msg()}>
+          <Field label="">
+            <span class="st-status error">{msg()}</span>
+          </Field>
+        </Show>
+      </SettingsGroup>
     </div>
   );
 }
@@ -819,9 +869,10 @@ function GeneralSection() {
 function RemoteSenders() {
   const [list, { refetch }] = createResource(() => api.remoteSenders().catch(() => [] as string[]));
   return (
-    <Field label="Images always load from">
+    <Field label="Remote images" class="st-field-top st-divided">
       <Show when={(list() ?? []).length > 0} fallback={<span class="st-muted">No one yet. “Always from this sender” over a message’s blocked images adds them.</span>}>
         <ul class="st-remote-senders">
+          <li class="st-muted">Always loaded in mail from:</li>
           <For each={list()}>
             {(addr) => (
               <li>

@@ -1,6 +1,7 @@
 /* @refresh reload */
 import { render } from 'solid-js/web';
 import './lib/platform';
+import './lib/theme';
 import { App } from './App';
 import { isComposeWindow } from './lib/windows';
 import './styles.css';
