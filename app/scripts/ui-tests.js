@@ -2143,3 +2143,41 @@ describe('address book', () => {
     }
   });
 });
+
+describe('contact pictures', () => {
+  test("the overview shows each contact's picture, as the mail list does", async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.evaluate(() => {
+        localStorage.setItem('ui.senderPictures', 'true');
+        localStorage.setItem(
+          'mock.cards',
+          JSON.stringify([
+            { id: 1, name: 'Olivia Hart', emails: ['olivia.hart@example.com'], phones: [], company: 'Fabrikam', notes: '', google: 1, groups: [] },
+            { id: 2, name: 'Noah Becker', emails: ['noah@beckers.dev'], phones: [], company: '', notes: '', google: null, groups: [] },
+          ]),
+        );
+      });
+      await page.reload();
+      await page.waitForSelector('.folder-layer .row');
+      await page.locator('button[aria-label="Address book"]').click();
+      const olivia = page.locator('.ct-row', { hasText: 'Olivia Hart' });
+      await olivia.waitFor();
+      await olivia.locator('.avatar.pic img').waitFor();
+      assert.match(await olivia.locator('.avatar img').getAttribute('src'), /^data:image\//, 'her Google photo');
+      const noah = page.locator('.ct-row', { hasText: 'Noah Becker' });
+      assert.equal(await noah.locator('.avatar').textContent(), 'NB', 'initials when there is no photo');
+      assert.equal(await noah.locator('.avatar img').count(), 0);
+      // Pictures off: the rows go back to text only, like the mail list.
+      await page.evaluate(() => localStorage.setItem('ui.senderPictures', 'false'));
+      await page.reload();
+      await page.waitForSelector('.folder-layer .row');
+      await page.locator('button[aria-label="Address book"]').click();
+      await page.locator('.ct-row', { hasText: 'Olivia Hart' }).waitFor();
+      assert.equal(await page.locator('.ct-row .avatar').count(), 0, 'no avatars with pictures off');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});

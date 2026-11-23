@@ -6,6 +6,8 @@ import { chipsOf as chips, contactLinks, inSource, STARRED, where } from '../lib
 import { sidebarMode } from '../lib/layout';
 import { hint } from '../lib/shortcuts';
 import { accounts, setMainView, setSearchQuery, setSearchScope } from '../state';
+import { senderPictures } from '../lib/senderIcons';
+import { Avatar } from './Avatar';
 import { googleStatus, reloadGoogleStatus, syncGoogle, syncGoogleSoon } from '../lib/googleContacts';
 import { confirmDialog } from './Actions';
 import { ContactSources } from './ContactSources';
@@ -238,15 +240,20 @@ export function ContactsView() {
                 classList={{ on: form()?.id === c.id }}
                 onClick={() => void pick(c)}
               >
-                <span class="ct-name">
-                  {c.name || c.company || c.emails[0]}
-                  <Show when={c.google != null}>
-                    <span class="ct-google" title={`Google Contacts: ${googleEmail(c.google!)}`}>G</span>
-                  </Show>
-                </span>
-                <span class="ct-sub">
-                  <For each={chips(c)}>{(g) => <span class="ct-chip" classList={{ star: g.resource === STARRED }}>{g.name}</span>}</For>
-                  {c.emails[0] ?? c.company}
+                <Show when={senderPictures()}>
+                  <Avatar name={c.name || c.company || null} addr={c.emails[0] ?? ''} size={32} class="ct-avatar" />
+                </Show>
+                <span class="ct-row-text">
+                  <span class="ct-name">
+                    {c.name || c.company || c.emails[0]}
+                    <Show when={c.google != null}>
+                      <span class="ct-google" title={`Google Contacts: ${googleEmail(c.google!)}`}>G</span>
+                    </Show>
+                  </span>
+                  <span class="ct-sub">
+                    <For each={chips(c)}>{(g) => <span class="ct-chip" classList={{ star: g.resource === STARRED }}>{g.name}</span>}</For>
+                    {c.emails[0] ?? c.company}
+                  </span>
                 </span>
               </button>
             )}
