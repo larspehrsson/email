@@ -1904,10 +1904,14 @@ body.resizing iframe {
   color: var(--text-3);
   overflow: hidden;
 }
+/* "Restart to update": laid out as the status row under it (icon, then text, in the same
+   columns), so the two icons line up, in the sidebar and in the rail. */
 .sf-update {
   grid-template-columns: 14px minmax(0, 1fr);
   width: 100%;
+  padding: 0 10px;
   border: 0;
+  border-radius: 7px;
   background: none;
   font: inherit;
   font-size: 11.5px;
@@ -1915,12 +1919,17 @@ body.resizing iframe {
   color: var(--accent);
   cursor: pointer;
   text-align: left;
+  transition: background 100ms;
 }
 .sf-update .sf-icon {
   color: var(--accent);
 }
+.sf-update .sf-text {
+  text-align: left;
+  white-space: nowrap;
+}
 .sf-update:hover {
-  background: var(--hover, rgba(127, 127, 127, 0.1));
+  background: var(--bg-hover);
 }
 .sf-icon {
   width: 14px;
@@ -3187,7 +3196,8 @@ html.macos .rail-top {
 .sync-footer.compact {
   padding: 4px 6px;
 }
-.sync-footer.compact .sf-summary {
+.sync-footer.compact .sf-summary,
+.sync-footer.compact .sf-update {
   grid-template-columns: 14px;
   justify-content: center;
   padding: 0;

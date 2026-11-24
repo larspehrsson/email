@@ -131,6 +131,11 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
     }
     tracing::info!(version = ready.0.version, "installing the update");
     let installing = ready.clone();
+    #[cfg(target_os = "linux")]
+    if is_rpm(&installing.1) {
+        tokio::task::spawn_blocking(move || install_rpm(&installing.1)).await.map_err(|e| e.to_string())??;
+        app.restart();
+    }
     tokio::task::spawn_blocking(move || installing.0.install(&installing.1))
         .await
         .map_err(|e| e.to_string())?
@@ -139,6 +144,49 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
             format!("The update couldn't be installed: {e}")
         })?;
     app.restart();
+}
+
+/// An .rpm package (its lead starts with these bytes).
+#[cfg(target_os = "linux")]
+fn is_rpm(bytes: &[u8]) -> bool {
+    bytes.starts_with(&[0xED, 0xAB, 0xEE, 0xDB])
+}
+
+/// Install an .rpm update with one password prompt (the system's own, through pkexec).
+///
+/// Not with the updater plugin: it runs `rpm -U`, which RPM 6 (Fedora 43 and later) refuses
+/// for a package without an RPM signature ("does not verify: no signature"), then asks for the
+/// password again in a dialog of its own and fails the same way. `--nosignature` skips only
+/// RPM's own check: the download was already checked against the update key built into the app
+/// (`Update::download` verifies its signature), which is what says it's ours.
+#[cfg(target_os = "linux")]
+fn install_rpm(bytes: &[u8]) -> Result<(), String> {
+    let dir = std::env::temp_dir().join(format!("email-update-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("The update couldn't be saved for installing: {e}"))?;
+    let pkg = dir.join("email-update.rpm");
+    let result = (|| {
+        std::fs::write(&pkg, bytes).map_err(|e| format!("The update couldn't be saved for installing: {e}"))?;
+        let out = std::process::Command::new("pkexec")
+            .args(["rpm", "-U", "--nosignature"])
+            .arg(&pkg)
+            .output()
+            .map_err(|e| format!("The update couldn't be installed: pkexec didn't start ({e})"))?;
+        if out.status.success() {
+            tracing::info!("update installed with rpm");
+            return Ok(());
+        }
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        tracing::warn!(code = ?out.status.code(), "installing the update with rpm: {err}");
+        Err(match out.status.code() {
+            // pkexec: the password dialog was dismissed, or not allowed
+            Some(126) | Some(127) => "The update wasn't installed: no password was given.".to_string(),
+            _ if err.is_empty() => "The update couldn't be installed.".to_string(),
+            _ => format!("The update couldn't be installed: {err}"),
+        })
+    })();
+    let _ = std::fs::remove_dir_all(&dir);
+    result
 }
 
 fn now() -> i64 {
