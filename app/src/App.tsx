@@ -20,6 +20,7 @@ import {
   multiPicked,
   readerMessageId,
   selectedMessageId,
+  selectedSummary,
   selectedThread,
   addingAccount,
   setAddingAccount,
@@ -43,7 +44,7 @@ import { ConfirmHost } from './components/Actions';
 import { isTextInput, openShortcuts, ShortcutsHost } from './components/ShortcutsSheet';
 import { openSettings, SettingsHost } from './components/Settings';
 import { commandFor } from './lib/shortcuts';
-import { newMessage, takeMailtoLinks } from './lib/compose';
+import { isDraftMessage, newMessage, openDraftSummary, takeMailtoLinks } from './lib/compose';
 import { initExports } from './lib/exports';
 import { ManageTagsHost } from './components/Tags';
 import { AttachmentToast } from './components/Attachments';
@@ -241,6 +242,12 @@ export function App() {
   };
 
   const openReader = () => {
+    // A draft (double-click or Enter on its row): into the composer, to go on writing it.
+    const s = selectedSummary();
+    if (!threaded() && s && isDraftMessage(s)) {
+      openDraftSummary(s);
+      return;
+    }
     flushReader(); // a reader switch still pending: do it now, so focus lands in the right one
     // Focus the reader so Space / arrows scroll the body; iframe takes focus if present.
     if (readerEl?.classList.contains('conv-scroll') && readerEl.isConnected) {

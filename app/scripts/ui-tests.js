@@ -2110,6 +2110,58 @@ describe('updates', () => {
 });
 
 describe('message source', () => {
+  test('right-click in a message body: Copy, Copy link address and Show source', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const rows = page.locator('.folder-layer .row');
+      const showSourceHere = async () => {
+        await page.locator('.ctx-menu .vm-item', { hasText: 'Show source…' }).click();
+        await page.waitForFunction(() => document.querySelector('.source-view .src-text')?.textContent?.includes('Subject:'));
+        await page.keyboard.press('Escape');
+        await page.locator('.source-view').waitFor({ state: 'detached' });
+      };
+      // An HTML message: its body is a frame of its own.
+      let k = 0;
+      for (; k < 30; k++) {
+        await rows.nth(k).click();
+        await page.waitForTimeout(250);
+        if ((await page.locator('.reader .html-frame').count()) > 0) break;
+      }
+      const frame = page.frameLocator('.reader .html-frame');
+      await frame.locator('body').waitFor();
+      await frame.locator('body').click({ button: 'right', position: { x: 40, y: 20 } });
+      const labels = async () => (await page.locator('.ctx-menu .vm-item').allTextContents()).map((t) => t.trim());
+      assert.deepEqual(await labels(), ['Show source…'], 'nothing selected, not on a link');
+      // At the pointer, in the window (not at the frame's own coordinates).
+      const box = await page.locator('.ctx-menu').boundingBox();
+      const fbox = await page.locator('.reader .html-frame').boundingBox();
+      assert.ok(box.x >= fbox.x && box.y >= fbox.y, 'over the message');
+      await showSourceHere();
+      // With text selected: Copy first.
+      await frame.locator('body').evaluate((b) => {
+        const r = b.ownerDocument.createRange();
+        r.selectNodeContents(b.querySelector('p, td, div') ?? b);
+        b.ownerDocument.getSelection().removeAllRanges();
+        b.ownerDocument.getSelection().addRange(r);
+      });
+      await frame.locator('body').click({ button: 'right', position: { x: 40, y: 20 } });
+      assert.equal((await labels())[0], 'Copy');
+      await page.keyboard.press('Escape');
+      // A plain-text message: the same menu.
+      for (k = 0; k < 40; k++) {
+        await rows.nth(k).click();
+        await page.waitForTimeout(250);
+        if ((await page.locator('.reader .plain').count()) > 0) break;
+      }
+      await page.locator('.reader .plain').click({ button: 'right' });
+      assert.ok((await labels()).includes('Show source…'));
+      await showSourceHere();
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('right-click › Show source; a question about it is answered; ⌥⌘U opens it too', async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {
@@ -2561,6 +2613,50 @@ describe('favorite folders', () => {
       await railFav.first().click();
       await page.waitForSelector('.folder-layer .row');
       assert.equal(await railFav.first().evaluate((e) => e.classList.contains('selected')), true);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('drafts', () => {
+  test('a draft from the server opens in the composer; changed, the server copy goes to Trash', async () => {
+    const { page, errors, context, close } = await open({ threaded: false });
+    try {
+      await page.locator('.sidebar .account .folder', { hasText: 'Drafts' }).first().click();
+      const row = page.locator('.folder-layer .row').first();
+      await row.waitFor();
+      const subject = (await row.locator('.row-subject').textContent()).trim();
+      await row.click();
+      // The reader offers it; double-clicking the row opens it as well.
+      await page.locator('.reader .band-edit-draft').waitFor();
+      let popup = context.waitForEvent('page');
+      await row.dblclick();
+      let w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      await w.locator('.cmp-editor .ProseMirror').waitFor();
+      assert.equal(await w.locator('input.cmp-subject').inputValue(), subject, 'its subject');
+      assert.ok((await w.locator('.cmp-editor .ProseMirror').innerText()).trim().length > 0, 'its text');
+      // Closed unchanged: the server's draft stays where it is.
+      await w.close();
+      await page.bringToFront();
+      await page.waitForTimeout(300);
+      assert.equal(await page.locator('.folder-layer .row', { hasText: subject }).count(), 1, 'still in Drafts');
+      // Opened again and changed: this one replaces it, and the server's goes to Trash.
+      popup = context.waitForEvent('page');
+      await page.locator('.reader .band-edit-draft').click();
+      w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      await w.locator('.cmp-editor .ProseMirror').click();
+      await w.keyboard.type(' More to say.');
+      await page.bringToFront();
+      await page.locator('.sidebar .account .folder', { hasText: 'Trash' }).first().click();
+      await page.locator('.folder-layer .row', { hasText: subject }).first().waitFor({ timeout: 5000 });
+      await page.locator('.sidebar .account .folder', { hasText: 'Drafts' }).first().click();
+      await page.waitForTimeout(400);
+      assert.equal(await page.locator('.folder-layer .row', { hasText: subject }).count(), 1, 'one copy in Drafts: the one written here');
+      await w.close();
       assert.deepEqual(errors, []);
     } finally {
       await close();

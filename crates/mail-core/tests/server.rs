@@ -481,6 +481,7 @@ async fn sent_mail_goes_out_and_into_sent_once() {
             draft: None,
             draft_id: None,
             listed: true,
+            replaces: None,
         })
         .await
         .expect("queueing");

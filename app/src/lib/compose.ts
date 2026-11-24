@@ -40,6 +40,9 @@ export interface ComposeState {
   /** the signature under the text (null: none), and its HTML as it was put in */
   signatureId?: number | null;
   signatureHtml?: string | null;
+  /** opened from a draft on the server (written in another app): that message, which goes to
+   *  Trash once this one is saved with a change, or sent */
+  replaces?: number | null;
 }
 
 let keySeq = 0;
@@ -62,6 +65,7 @@ function request(c: ComposeState, draftId: number | null): SendRequest {
     draft: c,
     draftId,
     listed: !!c.edited,
+    replaces: c.replaces ?? null,
   };
 }
 
@@ -207,6 +211,74 @@ export async function startReply(id: number, mode: ReplyMode): Promise<void> {
 /** Open an existing draft (from Drafts) in its compose window. */
 export function editDraft(draftId: number): void {
   void openComposeWindow(draftId).catch((e) => showToast({ kind: 'error', text: errorMessage(e) }));
+}
+
+/** A message to open in the composer: a draft written here, or one in a Drafts folder. */
+export function isDraftMessage(m: { draftId: number | null; folderId: number }): boolean {
+  return m.draftId != null || folderById(m.folderId)?.role === 'drafts';
+}
+
+/** Open a list row's draft (its account from its folder). */
+export function openDraftSummary(m: { id: number; draftId: number | null; folderId: number }): void {
+  const accountId = folderById(m.folderId)?.accountId;
+  if (accountId == null) return;
+  void openDraftMessage({ id: m.id, accountId, draftId: m.draftId });
+}
+
+/** The body of an HTML message, for the editor (no <html>/<head>, no styles or scripts). */
+function bodyHtml(html: string): string {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('script, style, title, meta, link').forEach((e) => e.remove());
+  return doc.body.innerHTML.trim();
+}
+
+/** Plain text as paragraphs for the editor. */
+function textHtml(text: string): string {
+  const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return text
+    .split(/\n{2,}/)
+    .map((p) => `<p>${esc(p).replace(/\n/g, '<br>')}</p>`)
+    .join('');
+}
+
+/**
+ * Open a message in Drafts in the composer. One written here has its draft: that opens. One
+ * from the server (written in another app, or on the phone) becomes a draft here, with its
+ * recipients, subject, text and attachments; the server's copy goes to Trash once this one is
+ * changed and saved, or sent, so Drafts shows one of them. Closed unchanged, nothing happens.
+ */
+export async function openDraftMessage(m: { id: number; accountId: number; draftId: number | null }): Promise<void> {
+  if (m.draftId != null) return editDraft(m.draftId);
+  try {
+    const d = await api.getMessage(m.id, false);
+    if (!d) throw new Error('That draft is no longer there.');
+    // Its attachments as files here: they must outlive the server's copy.
+    const paths = d.attachments.length ? await api.draftAttachmentFiles(m.id) : [];
+    const files = paths.length ? await api.fileInfo(paths) : [];
+    const html = d.html ? bodyHtml(d.html) : textHtml(d.text ?? '');
+    const bcc = d.bcc ?? [];
+    await openDraftWindow({
+      mode: 'new',
+      accountId: m.accountId,
+      to: d.to,
+      cc: d.cc,
+      bcc,
+      showCc: d.cc.length + bcc.length > 0,
+      subject: d.subject,
+      html,
+      replyingTo: null,
+      forwarding: null,
+      quoteHtml: null,
+      fwdAttachments: [],
+      files,
+      // Its signature, if any, is part of the text already.
+      signatureId: null,
+      signatureHtml: null,
+      replaces: m.id,
+    });
+  } catch (e) {
+    showToast({ kind: 'error', text: errorMessage(e) });
+  }
 }
 
 /** A message taken back (undo, or edit after a failure): back into a compose window. */

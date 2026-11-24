@@ -609,6 +609,7 @@ async fn compose<H: Host>(core: &Core, _host: &H, s: &Settings, a: &Args<'_>) ->
         draft: Some(state.clone()),
         draft_id: None,
         listed: true,
+        replaces: None,
     };
     Ok((req, state))
 }

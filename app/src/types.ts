@@ -145,6 +145,8 @@ export interface MessageDetail {
   from: Addr;
   to: Addr[];
   cc: Addr[];
+  /** only a message of our own has these (a draft, a sent copy) */
+  bcc?: Addr[];
   date: number;
   html: string | null;
   text: string | null;
@@ -504,6 +506,9 @@ export interface SendRequest {
   draftId: number | null;
   /** save_draft: show it in Drafts (false until the user has changed something) */
   listed?: boolean;
+  /** a draft from the server this one was opened from: to Trash once this one is saved with a
+   *  change, or sent */
+  replaces?: number | null;
 }
 
 export type ReplyMode = 'reply' | 'replyAll' | 'forward';
@@ -704,6 +709,7 @@ export interface CommandMap {
   save_attachment: { args: { messageId: number; index: number }; ret: string };
   save_all_attachments: { args: { messageId: number }; ret: string[] };
   save_attachment_as: { args: { messageId: number; index: number }; ret: string | null };
+  draft_attachment_files: { args: { messageId: number }; ret: string[] };
   apply_action: { args: { action: Action; messageIds: number[]; folderId: number }; ret: ActionResult };
   undo_action: { args: { opId: number }; ret: void };
   mark_folder_read: { args: { folderId: number }; ret: number };

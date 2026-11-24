@@ -456,6 +456,28 @@ async fn open_attachment(
     app.opener().open_path(path.to_string_lossy(), None::<&str>).map_err(|e| format!("Couldn't open {name}: {e}"))
 }
 
+/// A server draft's attachments as files of their own (in the app's data folder, which isn't
+/// cleaned up like the cache), for the draft opened from it here: they're still there to send
+/// once the server's copy has gone to Trash. Returns their paths, in order.
+#[tauri::command]
+async fn draft_attachment_files(app: tauri::AppHandle, core: State<'_, Arc<Core>>, message_id: i64) -> Res<Vec<String>> {
+    let (count, _subject) = core.attachment_summary(message_id).map_err(err)?;
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("draft-files")
+        .join(format!("{message_id}-{stamp}"));
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let mut paths = Vec::with_capacity(count);
+    for index in 0..count {
+        let (name, _mime, data) = core.attachment(message_id, index).await.map_err(err)?;
+        paths.push(write_unique(&dir, &name, &data)?.to_string_lossy().into_owned());
+    }
+    Ok(paths)
+}
+
 /// Save to the Downloads folder without overwriting: `name (1).ext`, `name (2).ext`, ...
 #[tauri::command]
 async fn save_attachment(
@@ -1537,6 +1559,7 @@ pub fn run() {
             save_attachment,
             save_all_attachments,
             save_attachment_as,
+            draft_attachment_files,
             reveal_path,
             app_version,
             apply_action,

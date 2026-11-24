@@ -951,8 +951,10 @@ export function createMockBackend(): Backend {
   function syncDraftCopies() {
     const all = loadMockDrafts();
     const changed = new Set<number>();
+    // As the core: one not changed yet (a reply opened and closed again) isn't listed.
+    const listed = (r: SendRequest | undefined) => !!r && r.listed !== false;
     for (const [did, c] of draftCopies) {
-      if (all[did]) continue;
+      if (listed(all[did])) continue;
       const list = folderMsgs.get(c.folder.id) ?? [];
       const i = list.indexOf(c.m);
       if (i >= 0) list.splice(i, 1);
@@ -963,6 +965,7 @@ export function createMockBackend(): Backend {
     }
     for (const [key, req] of Object.entries(all)) {
       const did = Number(key);
+      if (!listed(req)) continue;
       const folder = [...folders.values()].find((f) => f.accountId === req.accountId && f.role === 'drafts');
       const acc = accounts.find((a) => a.id === req.accountId);
       if (!folder || !acc) continue;
@@ -1600,6 +1603,11 @@ export function createMockBackend(): Backend {
   }
 
   const latency = () => sleep(8 + Math.random() * 25);
+  /** A server draft a draft here was opened from: to Trash, while it's still in Drafts. */
+  const retireReplaced = (id: number | null | undefined) => {
+    const m = id == null ? undefined : byId.get(id);
+    if (m && folders.get(m.folderId)?.role === 'drafts') applyAction({ kind: 'trash' }, [m.id], m.folderId);
+  };
   /** Extra time a list read takes (tests: a database busy with a long sync). */
   let listDelay = 0;
 
@@ -2317,6 +2325,7 @@ export function createMockBackend(): Backend {
         storeMockDrafts(all);
         syncDraftCopies();
       }
+      retireReplaced(request.replaces);
       // A local copy in Sent, marked sending (like the core's insert_local_copy).
       const acc = accounts.find((a) => a.id === request.accountId);
       const sent = [...folders.values()].find((f) => f.accountId === request.accountId && f.role === 'sent');
@@ -2383,6 +2392,7 @@ export function createMockBackend(): Backend {
       all[did] = request;
       storeMockDrafts(all);
       syncDraftCopies();
+      if (request.listed !== false) retireReplaced(request.replaces);
       return did;
     },
     async open_draft({ id }) {
@@ -2583,6 +2593,10 @@ export function createMockBackend(): Backend {
         .sort((a, b) => b.n - a.n)
         .map(({ name, addr }) => ({ name, addr }));
       return [...fromCards, ...rest].slice(0, limit ?? 8);
+    },
+    async draft_attachment_files({ messageId }) {
+      await sleep(20);
+      return (meta.get(messageId)?.attachments ?? []).map((a) => `/home/user/.local/share/email/draft-files/${messageId}/${a.name}`);
     },
     async file_info({ paths }) {
       await sleep(3);

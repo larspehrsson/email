@@ -23,9 +23,10 @@ import { searchTag, TagChips, TagDots } from './Tags';
 import { runAction } from '../lib/actions';
 import { forwardFrameKeys } from '../lib/frameKeys';
 import { watchFrameLinks } from './LinkPeek';
+import { watchFrameMenu } from './BodyMenu';
 import { zoomableImages } from '../lib/images';
 import { SendState } from './MessageList';
-import { editDraft } from '../lib/compose';
+import { isDraftMessage, openDraftSummary } from '../lib/compose';
 import { commandFor } from '../lib/shortcuts';
 import { isTextInput } from './ShortcutsSheet';
 
@@ -42,7 +43,7 @@ const CARD_FRAME_CSS = 'html{overflow:hidden}body{padding:4px 20px 20px}';
  * email can't run code: it's sanitised and the document's CSP has script-src 'none' (see
  * `buildSrcdoc`). Built imperatively so sandbox + srcdoc are set before attachment.
  */
-export function AutoHeightFrame(props: { doc: string; sender?: string }) {
+export function AutoHeightFrame(props: { doc: string; sender?: string; messageId?: number }) {
   let host!: HTMLDivElement;
   createEffect(() => {
     const f = document.createElement('iframe');
@@ -97,6 +98,7 @@ export function AutoHeightFrame(props: { doc: string; sender?: string }) {
       if (!doc) return;
       forwardFrameKeys(f);
       watchFrameLinks(f, props.sender ?? null);
+      if (props.messageId != null) watchFrameMenu(f, props.messageId);
       zoomableImages(doc, () => measure());
       last = -1;
       measure();
@@ -237,18 +239,16 @@ function ExpandedCard(props: { m: MessageSummary; me: Me; folderTag?: string; ac
         </div>
         <span class="cm-head-right">
           <span class="cm-head-date">
-            <Show when={props.m.draftId}>
-              {(d) => (
-                <button
-                  class="link-btn cm-edit-draft"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    editDraft(d());
-                  }}
-                >
-                  Edit draft
-                </button>
-              )}
+            <Show when={isDraftMessage(props.m)}>
+              <button
+                class="link-btn cm-edit-draft"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openDraftSummary(props.m);
+                }}
+              >
+                Edit draft
+              </button>
             </Show>
             <Marks m={props.m} />
             <TagDots tags={props.m.tags ?? []} />
@@ -306,8 +306,10 @@ function ExpandedCard(props: { m: MessageSummary; me: Me; folderTag?: string; ac
           </Match>
           <Match when={body.shown()}>
             {(s) => (
-              <Show when={s().d.html} fallback={<PlainBody text={s().d.text ?? ''} sender={props.m.fromAddr} />}>
-                {(html) => <AutoHeightFrame doc={buildSrcdoc(html(), s().remote, CARD_FRAME_CSS)} sender={props.m.fromAddr} />}
+              <Show when={s().d.html} fallback={<PlainBody text={s().d.text ?? ''} sender={props.m.fromAddr} messageId={props.m.id} />}>
+                {(html) => (
+                  <AutoHeightFrame doc={buildSrcdoc(html(), s().remote, CARD_FRAME_CSS)} sender={props.m.fromAddr} messageId={props.m.id} />
+                )}
               </Show>
             )}
           </Match>
