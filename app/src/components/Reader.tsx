@@ -15,6 +15,7 @@ import { ForwardIcon, ImageIcon, MailIcon, PaperclipIcon, ReplyIcon } from './Ic
 import { DRAG } from '../lib/platform';
 import { forwardFrameKeys } from '../lib/frameKeys';
 import { peekHandlers, watchFrameLinks } from './LinkPeek';
+import { bodyMenu, watchFrameMenu } from './BodyMenu';
 import { keepImageShapes, ZOOM_CSS, zoomableImages } from '../lib/images';
 import { isDraftMessage, openDraftSummary } from '../lib/compose';
 import { allKeys, label, MOD } from '../lib/shortcuts';
@@ -59,7 +60,7 @@ ${extraCss}
  * allow-scripts). The email itself still can't run code: the sanitiser removes scripts, event
  * handlers and javascript: links, and the document's CSP has script-src 'none'.
  */
-function HtmlFrame(props: { doc: string; sender: string }) {
+function HtmlFrame(props: { doc: string; sender: string; messageId: number }) {
   let host!: HTMLDivElement;
   createEffect(() => {
     const f = document.createElement('iframe');
@@ -71,6 +72,7 @@ function HtmlFrame(props: { doc: string; sender: string }) {
     f.addEventListener('load', () => {
       forwardFrameKeys(f);
       watchFrameLinks(f, props.sender);
+      watchFrameMenu(f, props.messageId);
       if (f.contentDocument) zoomableImages(f.contentDocument);
     });
     host.replaceChildren(f);
@@ -189,10 +191,17 @@ function QuoteNodes(props: { nodes: QNode[] }) {
   );
 }
 
-export function PlainBody(props: { text: string; sender?: string }) {
+export function PlainBody(props: { text: string; sender?: string; messageId?: number }) {
   const res = createMemo(() => analyzePlain(props.text));
   return (
-    <div class="plain" tabIndex={-1} data-sender={props.sender}>
+    <div
+      class="plain"
+      tabIndex={-1}
+      data-sender={props.sender}
+      onContextMenu={(e) => {
+        if (props.messageId != null) bodyMenu(e, props.messageId);
+      }}
+    >
       <QuoteNodes nodes={res().head} />
       <Show when={res().collapsed}>
         {(c) => (
@@ -511,8 +520,8 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
                 </Match>
                 <Match when={ready()}>
                   {(d) => (
-                    <Show when={d().d.html} fallback={<PlainBody text={d().d.text ?? ''} sender={h().from.addr} />}>
-                      {(html) => <HtmlFrame doc={buildSrcdoc(html(), d().remote)} sender={h().from.addr} />}
+                    <Show when={d().d.html} fallback={<PlainBody text={d().d.text ?? ''} sender={h().from.addr} messageId={d().d.id} />}>
+                      {(html) => <HtmlFrame doc={buildSrcdoc(html(), d().remote)} sender={h().from.addr} messageId={d().d.id} />}
                     </Show>
                   )}
                 </Match>
