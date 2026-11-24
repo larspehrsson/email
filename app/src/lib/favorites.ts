@@ -10,6 +10,16 @@ import type { Folder } from '../types';
 // place should it come back.
 
 const PREF = 'ui.favoriteFolders';
+
+/** Favorites stay at the top of the sidebar and rail while the folders under them scroll
+ *  (Settings › General › Appearance); on unless turned off. */
+const PIN_PREF = 'ui.pinFavorites';
+const [pinFavorites, setPinSig] = createSignal<boolean>(loadPref<boolean>(PIN_PREF, true) !== false);
+export { pinFavorites };
+export function setPinFavorites(on: boolean): void {
+  setPinSig(on);
+  savePref(PIN_PREF, on);
+}
 const [keys, setKeys] = createSignal<string[]>(loadPref<unknown[]>(PREF, []).filter((k): k is string => typeof k === 'string'));
 
 /** A folder's lasting name: its account's address and its path. */

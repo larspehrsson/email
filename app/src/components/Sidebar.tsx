@@ -1,5 +1,5 @@
 import { batch, createEffect, createMemo, createSignal, For, Match, onCleanup, Show, Switch, untrack } from 'solid-js';
-import { favoriteFolders } from '../lib/favorites';
+import { favoriteFolders, pinFavorites } from '../lib/favorites';
 import { folderMenu } from './ContextMenu';
 import { hint } from '../lib/shortcuts';
 import { createStore } from 'solid-js/store';
@@ -729,7 +729,7 @@ export function Sidebar(props: { flyout?: boolean }) {
           fallback={
             <>
               <Show when={favoriteFolders().length > 0}>
-                <section class="favorites" aria-label="Favorite folders">
+                <section class="favorites" classList={{ pinned: pinFavorites() }} aria-label="Favorite folders">
                   <div class="fav-head">Favorites</div>
                   <For each={favoriteFolders()}>{(f) => <FolderRow folder={f} depth={0} role={!!f.role || isInboxPath(f)} fav />}</For>
                 </section>

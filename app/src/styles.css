@@ -467,6 +467,26 @@ body.resizing iframe {
   margin-bottom: 4px;
   border-bottom: 1px solid var(--sep);
 }
+/* Pinned (Settings › General): it stays at the top while the accounts scroll under it; a long
+   list scrolls on its own so the accounts keep room. */
+.favorites.pinned {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg-sidebar);
+  border-bottom-color: var(--sep-strong);
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.rail-favs.pinned {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg-sidebar);
+  max-height: 40vh;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
 .fav-head {
   padding: 8px 14px 4px 16px;
   font-size: 11px;

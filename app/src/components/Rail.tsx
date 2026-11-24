@@ -8,6 +8,7 @@ import { flyout, setFlyout, toggleSidebar } from '../lib/layout';
 import { DRAG } from '../lib/platform';
 import { accountMark, accounts, folderById, foldersByAccount, mainView, selectedFolderId, selectFolder, setMainView } from '../state';
 import { FoldersIcon, PeopleIcon, RoleIcon, SidebarIcon } from './Icons';
+import { pinFavorites } from '../lib/favorites';
 import { badgeFor, favoriteFolders, isAccountCollapsed, isInboxPath, roleFolders, SyncFooter, toggleAccount } from './Sidebar';
 import { msgDrag } from '../lib/messageDrag';
 
@@ -120,7 +121,7 @@ export function Rail() {
       </div>
       <div class="rail-scroll">
         <Show when={favoriteFolders().length > 0}>
-          <div class="rail-favs" aria-label="Favorite folders">
+          <div class="rail-favs" classList={{ pinned: pinFavorites() }} aria-label="Favorite folders">
             <For each={favoriteFolders()}>
               {(f) => <RailFolder f={f} acct={(accounts() ?? []).find((a) => a.id === f.accountId)?.email} />}
             </For>

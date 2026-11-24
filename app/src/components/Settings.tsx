@@ -4,6 +4,7 @@ import { AiAppsSection } from './AiApps';
 import { GoogleClientNote, GoogleContactsField } from './GoogleContacts';
 import { pictureLevel, setPictureLevel, type PictureLevel } from '../lib/senderIcons';
 import { setTheme, theme, THEMES } from '../lib/theme';
+import { pinFavorites, setPinFavorites } from '../lib/favorites';
 import { accountLogo, logoFromFile, setAccountLogo } from '../lib/accountLogos';
 import {
   bindKey,
@@ -885,6 +886,12 @@ function GeneralSection() {
             </For>
           </div>
         </div>
+        <Field label="Favorites">
+          <label class="st-check">
+            <input type="checkbox" checked={pinFavorites()} onChange={(e) => setPinFavorites(e.currentTarget.checked)} />
+            Keep them at the top of the sidebar while the folders scroll
+          </label>
+        </Field>
       </SettingsGroup>
       <SettingsGroup title="Privacy">
         {/* How far pictures may be looked up: each level contacts more senders' websites. View

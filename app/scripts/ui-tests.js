@@ -2374,6 +2374,38 @@ describe('favorite folders', () => {
     }
   });
 
+  test('favorites stay at the top while the folders scroll, unless turned off in Settings', async () => {
+    const { page, errors, close } = await open({ threaded: false, query: '&many' });
+    try {
+      await page.locator('.sidebar .account .folder', { hasText: 'Receipts' }).first().click({ button: 'right' });
+      await page.locator('.ctx-menu .vm-item', { hasText: 'Add to favorites' }).click();
+      await page.locator('.sidebar .favorites .folder').waitFor();
+      const scroller = page.locator('.sidebar .sidebar-scroll');
+      const top = async () => (await page.locator('.sidebar .favorites').boundingBox()).y - (await scroller.boundingBox()).y;
+      const scrollDown = async () => {
+        await scroller.evaluate((e) => (e.scrollTop = 0));
+        await scroller.evaluate((e) => (e.scrollTop = 400));
+        await page.waitForTimeout(100);
+        assert.ok((await scroller.evaluate((e) => e.scrollTop)) > 100, 'the sidebar scrolled');
+      };
+      await scrollDown();
+      assert.ok(Math.abs(await top()) < 2, 'pinned: still at the top');
+      // Settings › General › Appearance › Favorites: off, and they scroll away with the rest.
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'General' }).click();
+      const pin = page.locator('.st-field', { hasText: 'Favorites' }).locator('input[type=checkbox]');
+      assert.equal(await pin.isChecked(), true, 'on to begin with');
+      await pin.uncheck();
+      assert.equal(await page.evaluate(() => localStorage.getItem('ui.pinFavorites')), 'false');
+      await page.keyboard.press('Escape');
+      await scrollDown();
+      assert.ok((await top()) < -100, 'not pinned: scrolled out of view');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('the rail shows pinned folders above the account markers', async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {
