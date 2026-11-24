@@ -1032,6 +1032,9 @@ describe('accounts', () => {
       await page.keyboard.press('Control+,');
       const acct = page.locator('.st-acct', { hasText: before[0] });
       await acct.locator('.st-mark-letter').fill('w');
+      // Saved, and the accounts reloaded (which redraws the card): only then open the panel, or
+      // the reload closes it under the click (on a slow machine, CI).
+      await acct.locator('.acct-dot', { hasText: /^W$/ }).first().waitFor();
       // One swatch, the chosen color; it opens the panel of them all, and a pick closes it.
       assert.equal(await acct.locator('.st-swatch').count(), 1, 'only the chosen color shows');
       await acct.locator('.st-color-btn').click();

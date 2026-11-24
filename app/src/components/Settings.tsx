@@ -305,15 +305,21 @@ function MarkColor(props: { account: Account; onPick: (color: string | null) => 
       btn.focus();
     };
     const close = () => setOpen(false);
+    // A scroll closes it only if it moved the button away from the panel: a scroll reported
+    // late, from before it opened, leaves it be.
+    const onScroll = () => {
+      const r = btn.getBoundingClientRect();
+      if (Math.abs(r.bottom + 6 - at().top) > 1 || Math.abs(r.left - at().left) > 1) setOpen(false);
+    };
     document.addEventListener('mousedown', onDown, true);
     window.addEventListener('keydown', onKey, true);
     window.addEventListener('resize', close);
-    document.addEventListener('scroll', close, true);
+    document.addEventListener('scroll', onScroll, true);
     onCleanup(() => {
       document.removeEventListener('mousedown', onDown, true);
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('resize', close);
-      document.removeEventListener('scroll', close, true);
+      document.removeEventListener('scroll', onScroll, true);
     });
   });
   return (
