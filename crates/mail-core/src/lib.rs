@@ -1162,10 +1162,63 @@ impl Core {
         })()
         .unwrap_or(None);
         if let Some(folder) = in_drafts {
+            tracing::info!("a draft opened from a server draft was changed: the server's goes to Trash");
             if let Err(e) = self.apply_action(actions::Action::Trash, &[message_id], folder) {
                 tracing::warn!("moving the replaced draft to Trash: {e:#}");
             }
         }
+    }
+
+    /// Throw a draft away (the composer's Discard, or closing it without saving). One opened
+    /// from a server draft that has already gone to Trash (`retire_replaced_draft`) puts that
+    /// back in Drafts, so what was written elsewhere isn't left only in Trash.
+    pub fn discard_draft(&self, id: i64) -> Result<()> {
+        if let Some((account_id, state, _)) = self.store.draft(id)? {
+            let replaces = serde_json::from_str::<serde_json::Value>(&state).ok().and_then(|v| v.get("replaces")?.as_i64());
+            if let Some(old) = replaces {
+                if let Err(e) = self.restore_replaced_draft(account_id, old) {
+                    tracing::warn!("putting the replaced draft back in Drafts: {e:#}");
+                }
+            }
+        }
+        self.delete_draft(id)
+    }
+
+    fn restore_replaced_draft(&self, account_id: i64, message_id: i64) -> Result<()> {
+        let folders = self.store.folders(account_id)?;
+        let role = |r: FolderRole| folders.iter().find(|f| f.role == Some(r)).map(|f| f.id);
+        let (Some(trash), Some(drafts)) = (role(FolderRole::Trash), role(FolderRole::Drafts)) else { return Ok(()) };
+        // The same message, or, once the move reached the server and came back, the copy in
+        // Trash with its Message-ID.
+        let in_trash = if self.store.message_folder_ids(message_id)?.contains(&trash) {
+            Some(message_id)
+        } else {
+            match self.store.message_header_id(message_id)? {
+                Some(h) => self.store.message_in_folder_by_header(trash, &h)?,
+                None => None,
+            }
+        };
+        if let Some(m) = in_trash {
+            tracing::info!("discarded: the server draft it replaced goes back to Drafts");
+            self.apply_action(actions::Action::Move { target_folder_id: drafts }, &[m], trash)?;
+        }
+        Ok(())
+    }
+
+    /// The files of drafts opened from server drafts (`draft-files/` in the data folder) that no
+    /// draft or queued message uses any more: what to clean up.
+    pub fn unused_draft_file_dirs(&self, root: &std::path::Path) -> Result<Vec<std::path::PathBuf>> {
+        let Ok(entries) = std::fs::read_dir(root) else { return Ok(Vec::new()) };
+        let states = self.store.draft_states()?;
+        Ok(entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.is_dir())
+            .filter(|p| {
+                let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                !states.iter().any(|s| s.contains(&name))
+            })
+            .collect())
     }
 
     /// The composer state of a draft (to open it in a window).

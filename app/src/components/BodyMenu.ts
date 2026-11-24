@@ -1,5 +1,6 @@
 import { openContextMenu, type MenuItem } from './ContextMenu';
 import { openSource } from './SourceView';
+import { addressMenuItems } from './AddressMenu';
 
 // The right-click menu over a message's body (the app's own, as elsewhere, instead of the
 // webview's Reload / Inspect): Copy what's selected, Copy link address over a link, and Show
@@ -16,8 +17,17 @@ function items(messageId: number, doc: Document, target: EventTarget | null): Me
   if (selected.trim()) list.push({ label: 'Copy', run: () => copy(selected, doc) });
   const link = target instanceof Element ? target.closest<HTMLAnchorElement>('a[href]') : null;
   const href = link?.href ?? '';
-  if (href && !href.startsWith('about:') && !href.startsWith('#')) {
-    list.push({ label: 'Copy link address', run: () => copy(href.replace(/^mailto:/, ''), doc) });
+  if (href.toLowerCase().startsWith('mailto:')) {
+    // An email address in the message: write to it, or copy it.
+    let addr = href.slice(7).split('?')[0] ?? '';
+    try {
+      addr = decodeURIComponent(addr);
+    } catch {
+      /* as written */
+    }
+    if (addr) list.push(...addressMenuItems({ name: null, addr }));
+  } else if (href && !href.startsWith('about:') && !href.startsWith('#')) {
+    list.push({ label: 'Copy link address', run: () => copy(href, doc) });
   }
   list.push({ label: 'Show source…', run: () => openSource(messageId) });
   return list;

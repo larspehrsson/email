@@ -254,6 +254,12 @@ export function App() {
       readerEl.focus();
       return;
     }
+    // The message's page scrolls (its frame is as tall as the message): focus that.
+    const page = readerEl?.querySelector<HTMLElement>('.reader-scroll');
+    if (page) {
+      page.focus();
+      return;
+    }
     const frame = readerEl?.querySelector('iframe');
     if (frame?.contentWindow) {
       // Into the message's own document: focusing just the element can leave the keys

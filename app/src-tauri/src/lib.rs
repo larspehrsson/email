@@ -1230,7 +1230,7 @@ async fn open_draft(core: State<'_, Arc<Core>>, id: i64) -> Res<serde_json::Valu
 
 #[tauri::command]
 async fn delete_draft(core: State<'_, Arc<Core>>, id: i64) -> Res<()> {
-    core.delete_draft(id).map_err(err)
+    core.discard_draft(id).map_err(err)
 }
 
 // ------------------------------------------------------------- mailto: links
@@ -1463,6 +1463,16 @@ pub fn run() {
                 }
             };
             tracing::info!("data directory: {}", dir.display());
+            // Files copied for drafts opened from server drafts (`draft_attachment_files`) that
+            // no draft or queued message uses any more.
+            match core.unused_draft_file_dirs(&dir.join("draft-files")) {
+                Ok(dirs) => {
+                    for d in dirs {
+                        let _ = std::fs::remove_dir_all(d);
+                    }
+                }
+                Err(e) => tracing::warn!("draft files: {e:#}"),
+            }
             app.manage(core.clone());
             // AI apps (MCP): listening, though they can do nothing until allowed in Settings.
             let mcp_state = Arc::new(mcp::McpState::load(app.handle()));

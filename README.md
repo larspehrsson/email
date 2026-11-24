@@ -146,12 +146,14 @@ between them and Enter opens or closes one.
 ![Settings › Keyboard](docs/screenshots/keyboard.png)
 ![The keyboard shortcuts sheet](docs/screenshots/shortcuts.png)
 
-**And also:** notifications for new mail, email links from your browser opening a new message
-(Settings › General › Make Email the default), your own order and markers for accounts, and
-images in messages blocked until you choose to load them (for one message, or always from a
-sender or from everyone at their company). Pictures too wide for the reader
-shrink to fit; click one to see it at its actual size. Marking mail as spam or not spam
-also teaches your provider's spam filter.
+**And also:** notifications for new mail; email links from your browser opening a new message
+(Settings › General › Make Email the default); your own order and markers for accounts;
+attachments as chips with their names under the sender (click to open, right-click to save or
+Save As…; a long list shows three rows and "+N more"); right-click a name in a message to write
+to that person or copy their address; images in messages blocked until you choose to load them
+(for one message, or always from a sender or from everyone at their company). Pictures too wide
+for the reader shrink to fit; click one to see it at its actual size. Marking mail as spam or
+not spam also teaches your provider's spam filter.
 
 ## Good to know
 

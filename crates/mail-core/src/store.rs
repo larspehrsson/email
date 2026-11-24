@@ -3540,6 +3540,26 @@ impl Store {
         self.message_folder_ids(id)
     }
 
+    /// Every draft's and every queued message's composer state (to see which files they use).
+    pub fn draft_states(&self) -> Result<Vec<String>> {
+        let db = self.rdb();
+        let mut stmt = db.prepare_cached("SELECT state FROM drafts UNION ALL SELECT draft FROM outgoing WHERE draft IS NOT NULL")?;
+        let rows = stmt.query_map([], |r| r.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// A message in `folder_id` with this Message-ID header, if there's one.
+    pub fn message_in_folder_by_header(&self, folder_id: i64, header_id: &str) -> Result<Option<i64>> {
+        Ok(self
+            .rdb()
+            .query_row(
+                "SELECT m.id FROM messages m JOIN entries e ON e.message_id=m.id WHERE e.folder_id=?1 AND m.message_id=?2 LIMIT 1",
+                params![folder_id, header_id],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+
     /// Discard (or sent): the draft and its copy in Drafts go. Returns the folders it was in.
     pub fn delete_draft(&self, draft_id: i64) -> Result<Vec<i64>> {
         let folders = self.delete_draft_copy(draft_id)?;

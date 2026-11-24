@@ -509,3 +509,62 @@ async fn sent_mail_goes_out_and_into_sent_once() {
     .await;
     assert_eq!(on_server(&mut other, "Sent", &subject).await.len(), 1);
 }
+
+/// A draft written in another app, opened here and changed: the server's copy goes to Trash,
+/// so Drafts has only the one written here. Discarded after all, it comes back.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_server_draft_opened_here_and_changed_goes_to_trash() {
+    let Some(s) = servers() else { return };
+    let user = new_user("draft");
+    let mut other = other_client(&s, &user).await;
+    append(&mut other, "Drafts", &raw_message(&user, "Jane Doe <jane@example.test>", "Written on the phone", 1), Some("(\\Draft)")).await;
+    let a = app(&s, &user).await;
+    folders_listed(&a).await;
+    until("the draft here", 30, || a.subjects(FolderRole::Drafts).iter().any(|s| s == "Written on the phone")).await;
+    let old = a.messages(FolderRole::Drafts).into_iter().find(|m| m.subject == "Written on the phone").unwrap().id;
+    let req = |listed: bool| SendRequest {
+        account_id: a.account.id,
+        to: vec![Addr { name: Some("Jane Doe".into()), addr: "jane@example.test".into() }],
+        cc: vec![],
+        bcc: vec![],
+        subject: "Written on the phone".into(),
+        html: "<p>Hello Jane, more</p>".into(),
+        attachments: vec![],
+        replying_to: None,
+        forwarding: None,
+        forward_attachments: vec![],
+        forward_messages: vec![],
+        draft: Some(serde_json::json!({ "subject": "Written on the phone", "replaces": old })),
+        draft_id: None,
+        listed,
+        replaces: Some(old),
+    };
+    // Opened (saved unlisted): the server's draft stays.
+    let id = a.core.save_draft(None, req(false)).unwrap();
+    assert_eq!(on_server(&mut other, "Drafts", "Written on the phone").await.len(), 1);
+    // Changed: saved listed, and the old one goes.
+    a.core.save_draft(Some(id), req(true)).unwrap();
+    let end = Instant::now() + Duration::from_secs(30);
+    loop {
+        let drafts = on_server(&mut other, "Drafts", "Written on the phone").await.len();
+        let trash = on_server(&mut other, "Trash", "Written on the phone").await.len();
+        if drafts == 0 && trash == 1 {
+            break;
+        }
+        assert!(Instant::now() < end, "the server's draft never went to Trash (Drafts {drafts}, Trash {trash})");
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    // Discarded after all: it comes back to Drafts, and the draft here goes.
+    a.core.discard_draft(id).unwrap();
+    let end = Instant::now() + Duration::from_secs(30);
+    loop {
+        let drafts = on_server(&mut other, "Drafts", "Written on the phone").await.len();
+        let trash = on_server(&mut other, "Trash", "Written on the phone").await.len();
+        if drafts == 1 && trash == 0 {
+            break;
+        }
+        assert!(Instant::now() < end, "the server's draft never came back (Drafts {drafts}, Trash {trash})");
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    until("one draft here, the server's", 20, || a.subjects(FolderRole::Drafts) == ["Written on the phone"]).await;
+}

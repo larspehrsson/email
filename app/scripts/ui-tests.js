@@ -330,14 +330,27 @@ describe('reader', () => {
       const full = await img.evaluate((el) => [el.getBoundingClientRect().width, el.getBoundingClientRect().height]);
       assert.ok(Math.abs(full[0] - 1400) < 1 && Math.abs(full[1] - 700) < 1, `actual size: ${full}`);
       assert.equal(await img.evaluate((el) => getComputedStyle(el).cursor), 'zoom-out');
-      // and the reader scrolls sideways to the rest of it
-      const across = await img.evaluate((el) => {
-        const s = el.ownerDocument.scrollingElement;
-        s.scrollLeft = 10_000;
-        return { left: s.scrollLeft, room: s.clientWidth, right: el.getBoundingClientRect().right };
+      // and the reader's page scrolls sideways to the rest of it (the message itself never does)
+      await page.waitForFunction(() => {
+        const s = document.querySelector('.reader-scroll');
+        return s.scrollWidth > s.clientWidth + 500;
       });
-      assert.ok(across.left > 0 && Math.abs(across.right - across.room) < 30, `scrolled to its right edge: ${JSON.stringify(across)}`);
-      await img.evaluate((el) => (el.ownerDocument.scrollingElement.scrollLeft = 0));
+      const across = await page.evaluate(() => {
+        const s = document.querySelector('.reader-scroll');
+        s.scrollLeft = 10_000;
+        const f = document.querySelector('.reader .card-frame');
+        const de = f.contentDocument.documentElement;
+        const i = f.contentDocument.querySelector('img');
+        return {
+          left: s.scrollLeft,
+          frameScrolls: de.scrollWidth > de.clientWidth + 1,
+          imgRight: f.getBoundingClientRect().left + i.getBoundingClientRect().right,
+          paneRight: s.getBoundingClientRect().right,
+        };
+      });
+      assert.ok(!across.frameScrolls, 'the message itself never scrolls sideways');
+      assert.ok(across.left > 0 && Math.abs(across.imgRight - across.paneRight) < 40, `scrolled to its right edge: ${JSON.stringify(across)}`);
+      await page.evaluate(() => (document.querySelector('.reader-scroll').scrollLeft = 0));
       await img.click({ position: { x: 20, y: 20 } });
       assert.ok(Math.abs((await img.evaluate((el) => el.getBoundingClientRect().width)) - w) < 1, 'fits again');
       assert.deepEqual(errors, []);
@@ -1782,8 +1795,8 @@ describe('attachments', () => {
         await page.waitForTimeout(300);
         if ((await page.locator('.reader .att-chip').count()) > 1) break;
       }
-      const chips = page.locator('.reader .att-chip');
-      const n = await chips.count();
+      const chips = page.locator('.reader .att-chip:not(.att-more)');
+      const n = parseInt(await page.locator('.reader .att-chips').getAttribute('aria-label'));
       assert.ok(n > 1, 'several attachments');
       // The name and size are on the chip, not hidden in a menu.
       const first = chips.first();
@@ -1802,6 +1815,88 @@ describe('attachments', () => {
       await page.locator('.toast', { hasText: /Saved .* to Downloads/ }).waitFor();
       await page.locator('.reader .att-save-all').click();
       await page.locator('.toast', { hasText: `Saved ${n} attachments to Downloads` }).waitFor({ timeout: 5000 });
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('attachments, many', () => {
+  test('up to three rows of chips, then "+N more" shows the rest in place; the page scrolls as one', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.locator('button[aria-label="View options"]').first().click();
+      await page.locator('.vm-item', { hasText: 'With attachments only' }).click();
+      await page.keyboard.press('Escape');
+      const rows = page.locator('.folder-layer .row');
+      await rows.first().waitFor();
+      const total = async () => parseInt((await page.locator('.reader .att-chips').getAttribute('aria-label').catch(() => '0')) ?? '0');
+      for (let k = 0; k < 40; k++) {
+        await rows.nth(k).click();
+        await page.waitForTimeout(300);
+        if ((await page.locator('.reader .att-more').count()) > 0) break;
+      }
+      const more = page.locator('.reader .att-more');
+      assert.equal(await more.count(), 1, 'a message with more than three rows of attachments');
+      const n = await total();
+      const chips = page.locator('.reader .att-chip:not(.att-more)');
+      const shown = await chips.count();
+      assert.equal((await more.textContent()).trim(), `+${n - shown} more`);
+      // Three rows at most, the "+N more" chip included.
+      const tops = await page.locator('.reader .att-chip').evaluateAll((els) => [...new Set(els.map((e) => Math.round(e.getBoundingClientRect().top)))]);
+      assert.ok(tops.length <= 3, `rows: ${tops.length}`);
+      // Every one, in place; and back.
+      await more.click();
+      assert.equal(await chips.count(), n, 'all shown');
+      await page.locator('.reader .att-fewer').click();
+      assert.equal(await chips.count(), shown, 'folded again');
+      // No scrolling area of its own over the message: the page under the band scrolls.
+      const head = await page.locator('.reader .reader-head').evaluate((el) => getComputedStyle(el).overflowY);
+      assert.equal(head, 'visible');
+      const frameScrolls = await page.evaluate(() => {
+        const de = document.querySelector('.reader .card-frame')?.contentDocument?.documentElement;
+        return de ? de.scrollHeight > de.clientHeight + 1 : false;
+      });
+      assert.equal(frameScrolls, false, 'the message is as tall as it is');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('people in the header', () => {
+  test('right-click a name: write to them, or copy their address', async () => {
+    const { page, errors, context, close } = await open({ threaded: false });
+    try {
+      await page.evaluate(() => {
+        window.__copied = [];
+        navigator.clipboard.writeText = async (t) => void window.__copied.push(t);
+      });
+      // A message with a named recipient.
+      const rows = page.locator('.folder-layer .row');
+      await rows.first().click();
+      const recip = page.locator('.reader .recip').first();
+      await recip.waitFor();
+      const addr = await recip.getAttribute('title');
+      const name = (await recip.textContent()).trim();
+      await recip.click({ button: 'right' });
+      const labels = (await page.locator('.ctx-menu .vm-item').allTextContents()).map((t) => t.trim());
+      assert.equal(labels[0], `New message to ${name}`);
+      assert.ok(labels.includes('Copy address'));
+      await page.locator('.ctx-menu .vm-item', { hasText: 'Copy address' }).click();
+      assert.deepEqual(await page.evaluate(() => window.__copied), [addr]);
+      // The sender too: a new message to them.
+      const from = page.locator('.reader .reader-from-name');
+      const fromName = (await from.textContent()).trim();
+      await from.click({ button: 'right' });
+      const popup = context.waitForEvent('page');
+      await page.locator('.ctx-menu .vm-item', { hasText: `New message to ${fromName}` }).click();
+      const w = await popup;
+      await w.locator('.cmp-fields .addr-chip').first().waitFor();
+      const to = (await w.locator('.cmp-fields .addr-chip').allTextContents()).map((t) => t.replace('×', '').trim());
+      assert.deepEqual(to, [fromName]);
       assert.deepEqual(errors, []);
     } finally {
       await close();
@@ -2125,16 +2220,16 @@ describe('message source', () => {
       for (; k < 30; k++) {
         await rows.nth(k).click();
         await page.waitForTimeout(250);
-        if ((await page.locator('.reader .html-frame').count()) > 0) break;
+        if ((await page.locator('.reader .card-frame').count()) > 0) break;
       }
-      const frame = page.frameLocator('.reader .html-frame');
+      const frame = page.frameLocator('.reader .card-frame');
       await frame.locator('body').waitFor();
       await frame.locator('body').click({ button: 'right', position: { x: 40, y: 20 } });
       const labels = async () => (await page.locator('.ctx-menu .vm-item').allTextContents()).map((t) => t.trim());
       assert.deepEqual(await labels(), ['Show source…'], 'nothing selected, not on a link');
       // At the pointer, in the window (not at the frame's own coordinates).
       const box = await page.locator('.ctx-menu').boundingBox();
-      const fbox = await page.locator('.reader .html-frame').boundingBox();
+      const fbox = await page.locator('.reader .card-frame').boundingBox();
       assert.ok(box.x >= fbox.x && box.y >= fbox.y, 'over the message');
       await showSourceHere();
       // With text selected: Copy first.

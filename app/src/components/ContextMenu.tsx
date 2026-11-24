@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, onCleanup, Show } from 'solid-js';
+import { createEffect, createRoot, createSignal, For, onCleanup, Show } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { api, errorMessage, type Folder } from '../api';
 import { favoriteFolders, favoriteIndex, isFavorite, moveFavorite, toggleFavorite } from '../lib/favorites';
@@ -18,9 +18,22 @@ export interface MenuItem {
 
 const [menu, setMenu] = createSignal<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
-export function openContextMenu(e: MouseEvent, items: MenuItem[]): void {
+/** What the open menu is about (a name in a header): marked `.menu-target` while it's open. */
+let target: Element | null = null;
+createRoot(() =>
+  createEffect(() => {
+    if (menu()) return;
+    target?.classList.remove('menu-target');
+    target = null;
+  }),
+);
+
+export function openContextMenu(e: MouseEvent, items: MenuItem[], about?: Element | null): void {
   e.preventDefault();
   e.stopPropagation();
+  target?.classList.remove('menu-target');
+  target = about ?? null;
+  target?.classList.add('menu-target');
   setMenu({ x: e.clientX, y: e.clientY, items });
 }
 

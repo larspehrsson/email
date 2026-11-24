@@ -29,7 +29,7 @@ import { MOD } from '../lib/shortcuts';
 import { DRAG } from '../lib/platform';
 import { confirmDialog } from './Actions';
 import { CloseIcon, ForwardIcon, MailIcon, PaperclipIcon, ReplyAllIcon, ReplyIcon, TrashIcon } from './Icons';
-import { AutoHeightFrame } from './Conversation';
+import { AutoHeightFrame } from './AutoHeightFrame';
 import { buildSrcdoc } from './Reader';
 import { fmtSize } from '../lib/format';
 import { showToast } from './Toast';

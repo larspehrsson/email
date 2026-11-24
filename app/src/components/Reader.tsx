@@ -1,4 +1,6 @@
 import { Select } from './Select';
+import { AutoHeightFrame } from './AutoHeightFrame';
+import { addressMenu } from './AddressMenu';
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, Show, Switch } from 'solid-js';
 import { api, errorMessage, type Addr, type Attachment, type MessageDetail } from '../api';
 import { AttachmentChips } from './Attachments';
@@ -13,10 +15,9 @@ import { searchTag, TagChips } from './Tags';
 import { runAction } from '../lib/actions';
 import { ForwardIcon, ImageIcon, MailIcon, PaperclipIcon, ReplyIcon } from './Icons';
 import { DRAG } from '../lib/platform';
-import { forwardFrameKeys } from '../lib/frameKeys';
-import { peekHandlers, watchFrameLinks } from './LinkPeek';
-import { bodyMenu, watchFrameMenu } from './BodyMenu';
-import { keepImageShapes, ZOOM_CSS, zoomableImages } from '../lib/images';
+import { peekHandlers } from './LinkPeek';
+import { bodyMenu } from './BodyMenu';
+import { keepImageShapes, ZOOM_CSS } from '../lib/images';
 import { isDraftMessage, openDraftSummary } from '../lib/compose';
 import { allKeys, label, MOD } from '../lib/shortcuts';
 
@@ -51,34 +52,6 @@ ${extraCss}
 </style></head><body>${html}</body></html>`;
 }
 
-/**
- * Sandboxed body frame. Built imperatively so `sandbox` + `srcdoc` are set before the
- * element is attached (setting srcdoc on an already-attached sandboxed frame can leave it
- * unpainted in Blink), and each document gets a fresh browsing context.
- * allow-same-origin + allow-scripts let the app listen for keys inside it (shortcuts keep
- * working while the message has focus; WebKit runs no listener at all in a frame without
- * allow-scripts). The email itself still can't run code: the sanitiser removes scripts, event
- * handlers and javascript: links, and the document's CSP has script-src 'none'.
- */
-function HtmlFrame(props: { doc: string; sender: string; messageId: number }) {
-  let host!: HTMLDivElement;
-  createEffect(() => {
-    const f = document.createElement('iframe');
-    f.className = 'html-frame';
-    f.title = 'Message body';
-    f.setAttribute('sandbox', 'allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox');
-    f.setAttribute('referrerpolicy', 'no-referrer');
-    f.srcdoc = props.doc;
-    f.addEventListener('load', () => {
-      forwardFrameKeys(f);
-      watchFrameLinks(f, props.sender);
-      watchFrameMenu(f, props.messageId);
-      if (f.contentDocument) zoomableImages(f.contentDocument);
-    });
-    host.replaceChildren(f);
-  });
-  return <div class="html-wrap" ref={host} />;
-}
 
 // ------------------------------------------------------------- small pieces
 
@@ -131,7 +104,7 @@ export function AddrList(props: { label: string; list: Addr[] }) {
         <For each={shown()}>
           {(a, i) => (
             <>
-              <span class="recip" title={a.addr}>
+              <span class="recip" title={a.addr} onContextMenu={(e) => addressMenu(e, a)}>
                 {addrLabel(a)}
               </span>
               {i() < shown().length - 1 ? ', ' : ''}
@@ -267,7 +240,20 @@ const actionTarget = (): ActionTarget | null => {
   return { ids: [s.id], folderId, anyUnread: s.unread, starId: s.id, replyId: s.id, starred: s.flagged, advance: true, tagSets: [s.tags ?? []], snoozedUntil: pendingSnooze([s]) };
 };
 
+/** The reader's page scrolls, not the message's own frame: it grows to its content. */
+const PAGE_FRAME_CSS = 'html{overflow:hidden}';
+
 export function Reader(props: { ref?: (el: HTMLElement) => void }) {
+  let scrollEl: HTMLDivElement | undefined;
+  // Another message: back to its top (and its own width, after a wide one).
+  createEffect(
+    on(readerMessageId, () => {
+      if (!scrollEl) return;
+      scrollEl.scrollTop = 0;
+      scrollEl.scrollLeft = 0;
+      scrollEl.querySelector<HTMLElement>('.reader-page')?.style.removeProperty('width');
+    }),
+  );
   /** The message shown is a draft (written here, or in a Drafts folder): "Edit draft". */
   const shownDraft = () => {
     const s = selectedSummary();
@@ -453,14 +439,22 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
                 <HeaderActions target={actionTarget()} />
               </div>
             </header>
+            {/* Under the band, one page that scrolls: sender, recipients, attachments and the
+                message together, each as tall as it is (an expanded list just makes it longer). */}
+            <div class="reader-scroll" tabIndex={-1} ref={scrollEl}>
+            <div class="reader-page">
             <div class="reader-head">
               <div class="reader-from">
                 <Avatar name={h().from.name} addr={h().from.addr} size={40} />
                 <div class="reader-from-text">
                   <div class="reader-from-line">
-                    <span class="reader-from-name">{h().from.name || h().from.addr}</span>
+                    <span class="reader-from-name" onContextMenu={(e) => addressMenu(e, h().from)}>
+                      {h().from.name || h().from.addr}
+                    </span>
                     <Show when={h().from.name}>
-                      <span class="reader-from-addr">&lt;{h().from.addr}&gt;</span>
+                      <span class="reader-from-addr" onContextMenu={(e) => addressMenu(e, h().from)}>
+                        &lt;{h().from.addr}&gt;
+                      </span>
                     </Show>
                   </div>
                   <div class="recips">
@@ -520,7 +514,9 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
                 <Match when={ready()}>
                   {(d) => (
                     <Show when={d().d.html} fallback={<PlainBody text={d().d.text ?? ''} sender={h().from.addr} messageId={d().d.id} />}>
-                      {(html) => <HtmlFrame doc={buildSrcdoc(html(), d().remote)} sender={h().from.addr} messageId={d().d.id} />}
+                      {(html) => (
+                        <AutoHeightFrame doc={buildSrcdoc(html(), d().remote, PAGE_FRAME_CSS)} sender={h().from.addr} messageId={d().d.id} />
+                      )}
                     </Show>
                   )}
                 </Match>
@@ -528,6 +524,8 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
                   <BodySkeleton downloading={phase() === 'downloading'} />
                 </Match>
               </Switch>
+            </div>
+            </div>
             </div>
           </>
         )}

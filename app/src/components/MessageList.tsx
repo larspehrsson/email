@@ -783,7 +783,7 @@ export function MessageList(props: {
     if (e.defaultPrevented || e.altKey) return;
     if (isTypingTarget(e.target)) return;
     // In the reader the scrolling keys scroll the message (letter keys still work there).
-    if (SCROLL_KEYS.has(e.key) && e.target instanceof Element && (e.target.matches('iframe, .reader') || e.target.closest('.plain, .conv-scroll')))
+    if (SCROLL_KEYS.has(e.key) && e.target instanceof Element && (e.target.matches('iframe, .reader') || e.target.closest('.plain, .conv-scroll, .reader-scroll')))
       return;
     // Enter/Space on a focused button, link or menu item activates it (popup triggers, toolbar…).
     if ((e.key === 'Enter' || e.key === ' ') && e.target instanceof Element && e.target.closest('button, a[href], summary, [role="button"], [role^="menuitem"], [role="option"]')) return;
