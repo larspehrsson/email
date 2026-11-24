@@ -103,8 +103,9 @@ come first when you type an address.
 ![The address book](docs/screenshots/contacts.png)
 
 **Everything from a sender** at a glance: Ctrl/⌘+2 opens a panel beside the message with all
-the mail from whoever sent it, in every folder. Select them all (Ctrl/⌘+A) and delete or archive
-at once — the quickest way to clear out a newsletter; the next message opens in its place.
+the mail from whoever sent it, in every folder. Select them all (Ctrl/⌘+A) and delete, archive or
+move them to a folder at once — the quickest way to clear out a newsletter, or to file all of
+someone's mail; the next message opens in its place.
 
 ![The sender panel beside a message, three messages picked](docs/screenshots/sender.png)
 
