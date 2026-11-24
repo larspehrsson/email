@@ -2040,6 +2040,12 @@ export function createMockBackend(): Backend {
       const name = n === 1 ? a.name : `${a.name.slice(0, dot)} (${n - 1})${a.name.slice(dot)}`;
       return `/home/user/Downloads/${name}`;
     },
+    async save_attachment_as({ messageId, index }) {
+      // No save dialog in the browser: as if one was given the name in Documents.
+      const a = await fetchAttachment(messageId, index);
+      await sleep(80);
+      return `/home/user/Documents/${a.name}`;
+    },
     async save_all_attachments({ messageId }) {
       const m = byId.get(messageId);
       const list = meta.get(messageId)?.attachments ?? [];

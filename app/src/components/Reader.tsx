@@ -1,8 +1,8 @@
 import { Select } from './Select';
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, Show, Switch } from 'solid-js';
 import { api, errorMessage, type Addr, type Attachment, type MessageDetail } from '../api';
-import { AttachmentControl } from './Attachments';
-export { AttachmentControl };
+import { AttachmentChips } from './Attachments';
+export { AttachmentChips };
 import { analyzePlain, collapseHtmlQuotes, QUOTE_FRAME_CSS, type QNode } from '../lib/quotes';
 import { cacheClear, cacheGet, cacheMarkRemoteAllowed, cachePut, onMessageReady, readyAt } from '../lib/body';
 import { linkify, longDate } from '../lib/format';
@@ -450,15 +450,14 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
                     <AddrList label="Cc" list={h().cc} />
                   </div>
                 </div>
-                {/* Slot reserved whenever the message has attachments (known from the list row). */}
-                <Show when={h().attachments.length > 0 || selectedSummary()?.hasAttachments}>
-                  <div class="hdr-att">
-                    <Show when={h().attachments.length > 0} fallback={<span class="att-pill-ph" />}>
-                      <AttachmentControl messageId={readerMessageId()!} list={h().attachments} />
-                    </Show>
-                  </div>
-                </Show>
               </div>
+              {/* Room kept whenever the message has attachments (known from the list row), so
+                  nothing moves when the names come in. */}
+              <Show when={h().attachments.length > 0 || selectedSummary()?.hasAttachments}>
+                <Show when={h().attachments.length > 0} fallback={<div class="att-chips att-chips-ph" />}>
+                  <AttachmentChips messageId={readerMessageId()!} list={h().attachments} />
+                </Show>
+              </Show>
             </div>
             <Show when={ready()?.d.hasRemoteContent && !ready()?.remote && !allowRemote()}>
               <div class="remote-banner">

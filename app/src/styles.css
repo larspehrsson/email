@@ -2694,29 +2694,76 @@ body.resizing iframe {
   max-width: 100%;
   min-width: 0;
 }
-.hdr-att {
-  flex: none;
-  height: 22px;
+/* A message's attachments under its header (Attachments.tsx): one chip per file, name and
+   size; click opens, right-click for more. */
+.att-chips {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-end;
-  max-width: 100%;
-  min-width: 0;
+  gap: 6px;
+  padding: 2px 0 10px;
+  min-height: 28px;
 }
-.reader-from > .hdr-att {
-  align-self: flex-start;
-  margin-top: 1px;
-  max-width: 45%;
+/* in the reader: under the sender, lined up with the name */
+.reader-head .att-chips {
+  padding: 12px 0 0 52px;
 }
-.att-ctl {
+.att-chips-ph {
+  min-height: 38px;
+}
+.att-chip {
   display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(360px, 100%);
+  height: 28px;
+  padding: 0 10px 0 8px;
+  border: 1px solid var(--sep-strong);
+  border-radius: 14px;
+  background: var(--bg-elev);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
   min-width: 0;
-  max-width: 100%;
 }
-.att-pill-ph {
-  display: inline-block;
-  width: 72px;
-  height: 22px;
+.att-chip:hover {
+  background: var(--bg-hover);
+  border-color: var(--text-4);
+}
+.att-chip:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.att-chip[aria-disabled='true'] {
+  cursor: progress;
+}
+.att-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.att-chip-size {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+.att-save-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12.5px;
+  margin-left: 2px;
+}
+/* in a conversation card: under its header, lined up with its text */
+.cm-att,
+.att-chips-ph.cm-att {
+  padding-left: 66px;
+  padding-right: 16px;
 }
 .att-icon {
   flex: none;
@@ -2731,198 +2778,12 @@ body.resizing iframe {
   color: var(--text-4);
 }
 
-/* single chip */
-
-.att-pill:focus-visible,
-.att-row:focus-visible,
-.att-row:focus {
-  box-shadow: inset var(--focus-ring);
-  outline: none;
-}
-
-/* pill */
-.att-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 22px;
-  padding: 0 7px 0 6px;
-  border: 1px solid var(--sep);
-  border-radius: 11px;
-  background: var(--bg-subtle);
-  font-size: 11.5px;
-  color: var(--text-2);
-  white-space: nowrap;
-  cursor: pointer;
-  font-variant-numeric: tabular-nums;
-}
-.att-pill:hover,
-.att-pill.open {
-  background: var(--bg-hover);
-  border-color: var(--sep-strong);
-}
-.att-pill-count {
-  font-weight: 600;
-  color: var(--text);
-}
-.att-pill-size {
-  color: var(--text-3);
-}
-.att-pill-disc {
-  display: grid;
-  place-items: center;
-  color: var(--text-3);
-  transform: rotate(90deg);
-  transition: transform 140ms var(--ease);
-}
-.att-pill.open .att-pill-disc {
-  transform: rotate(-90deg);
-}
-
-/* dropdown */
-.att-menu {
-  position: fixed;
-  z-index: 130;
-  display: flex;
-  flex-direction: column;
-  border-radius: 10px;
-  border: 1px solid var(--sep);
-  background: var(--bg-elev);
-  box-shadow: var(--shadow-card);
-  overflow: hidden;
-  animation: pop-in 120ms var(--ease);
-  transform-origin: top right;
-  font-size: 12.5px;
-}
-.att-menu.up {
-  transform-origin: bottom right;
-}
-.att-menu-rows {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 4px;
-}
-.att-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 32px;
-  padding: 0 4px 0 8px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.att-row:hover {
-  background: var(--bg-hover);
-}
-.att-row-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.att-row-size {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  color: var(--text-3);
-  font-size: 11.5px;
-  font-variant-numeric: tabular-nums;
-}
-.att-row-btn {
-  flex: none;
-  width: 24px;
-  height: 24px;
-  display: grid;
-  place-items: center;
-  border-radius: 5px;
-  color: var(--text-2);
-  cursor: pointer;
-}
-.att-row-btn:hover {
-  background: var(--bg-active);
-  color: var(--accent);
-}
-.att-row-btn[aria-disabled='true'] {
-  color: var(--text-4);
-  cursor: not-allowed;
-  background: none;
-}
 /* sender block: name line + one recipients line is the floor, so the summary→detail swap
    (recipients arrive with the detail) can't change its height by a pixel */
 .reader-head .reader-from {
   min-height: 42px;
 }
 
-/* single-attachment pill: same outer box as the multi pill; the ▾ slot becomes a ⤓ button */
-.att-pill-disc {
-  width: 12px;
-  height: 12px;
-}
-.att-pill.single,
-.att-pill.multi {
-  padding: 0;
-  gap: 0;
-  overflow: hidden;
-  cursor: default;
-}
-.att-pill-main {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 100%;
-  padding: 0 0 0 6px;
-  cursor: pointer;
-  border-radius: 11px 0 0 11px;
-}
-.att-pill-save {
-  flex: none;
-  height: 100%;
-  width: 24px; /* 5px gap + 12px glyph + 7px padding = the multi pill's ▾ segment */
-  padding: 0 7px 0 5px;
-  display: grid;
-  place-items: center;
-  color: var(--text-3);
-  cursor: pointer;
-  border-radius: 0 11px 11px 0;
-}
-.att-pill-main:hover,
-.att-pill-save:hover {
-  background: var(--bg-active);
-}
-.att-pill-save:hover {
-  color: var(--accent);
-}
-.att-pill-main:focus-visible,
-.att-pill-save:focus-visible {
-  box-shadow: inset var(--focus-ring);
-  outline: none;
-}
-.att-pill.single [aria-disabled='true'],
-.att-pill.multi [aria-disabled='true'] {
-  cursor: progress;
-}
-
-/* multi pill: main part (count · size ▾) toggles the dropdown; ⤓ = Save all */
-.att-pill.multi .att-pill-main {
-  padding-right: 5px;
-}
-/* No ▾ in the single pill: same breathing room before the divider as the left edge. */
-.att-pill.single .att-pill-main {
-  padding-right: 7px;
-}
-.att-pill-save {
-  border-left: 1px solid var(--sep);
-}
-.att-pill.multi:hover,
-.att-pill.single:hover {
-  background: var(--bg-subtle);
-}
-.att-pill.multi.open .att-pill-main {
-  background: var(--bg-active);
-}
 
 /* app version at the bottom of the sync popover (fixed height) */
 .acct-dialog {

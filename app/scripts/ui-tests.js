@@ -1767,6 +1767,48 @@ describe('images from a domain', () => {
   });
 });
 
+describe('attachments', () => {
+  test('each attachment is a chip with its name and size; right-click to open, save, save as, or all', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.locator('button[aria-label="View options"]').first().click();
+      await page.locator('.vm-item', { hasText: 'With attachments only' }).click();
+      await page.keyboard.press('Escape');
+      const rows = page.locator('.folder-layer .row');
+      await rows.first().waitFor();
+      // One with several attachments.
+      for (let k = 0; k < 15; k++) {
+        await rows.nth(k).click();
+        await page.waitForTimeout(300);
+        if ((await page.locator('.reader .att-chip').count()) > 1) break;
+      }
+      const chips = page.locator('.reader .att-chip');
+      const n = await chips.count();
+      assert.ok(n > 1, 'several attachments');
+      // The name and size are on the chip, not hidden in a menu.
+      const first = chips.first();
+      const name = (await first.locator('.att-chip-name').textContent()).trim();
+      assert.match(name, /\.[a-z0-9]+$/i, 'a file name');
+      assert.match(await first.locator('.att-chip-size').textContent(), /\d/);
+      // Right-click: one file's actions, then all of them.
+      await first.click({ button: 'right' });
+      const items = (await page.locator('.ctx-menu .vm-item').allTextContents()).map((t) => t.trim());
+      assert.deepEqual(items, ['Open', 'Save to Downloads', 'Save As…', `Open All ${n}`, `Save All ${n} to Downloads`]);
+      assert.equal(await page.locator('.ctx-menu .vm-sep').count(), 1, 'a line between the two groups');
+      await page.locator('.ctx-menu .vm-item', { hasText: 'Save As…' }).click();
+      await page.locator('.toast', { hasText: `Saved ${name}` }).waitFor();
+      await first.click({ button: 'right' });
+      await page.locator('.ctx-menu .vm-item', { hasText: 'Save to Downloads' }).click();
+      await page.locator('.toast', { hasText: /Saved .* to Downloads/ }).waitFor();
+      await page.locator('.reader .att-save-all').click();
+      await page.locator('.toast', { hasText: `Saved ${n} attachments to Downloads` }).waitFor({ timeout: 5000 });
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('account picture', () => {
   test('a picture of your own for an account shows in the sidebar and the sync status', async () => {
     const { page, errors, close } = await open({ threaded: false });

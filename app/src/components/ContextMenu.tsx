@@ -11,6 +11,8 @@ import { showToast } from './Toast';
 export interface MenuItem {
   label: string;
   disabled?: boolean;
+  /** A line above it, starting a new group. */
+  separatorBefore?: boolean;
   run: () => void;
 }
 
@@ -120,18 +122,23 @@ export function ContextMenuHost() {
           >
             <For each={m().items}>
               {(it) => (
-                <button
-                  role="menuitem"
-                  class="vm-item"
-                  classList={{ disabled: !!it.disabled }}
-                  disabled={it.disabled}
-                  onClick={() => {
-                    setMenu(null);
-                    it.run();
-                  }}
-                >
-                  <span class="vm-label">{it.label}</span>
-                </button>
+                <>
+                  <Show when={it.separatorBefore}>
+                    <div class="vm-sep" role="separator" />
+                  </Show>
+                  <button
+                    role="menuitem"
+                    class="vm-item"
+                    classList={{ disabled: !!it.disabled }}
+                    disabled={it.disabled}
+                    onClick={() => {
+                      setMenu(null);
+                      it.run();
+                    }}
+                  >
+                    <span class="vm-label">{it.label}</span>
+                  </button>
+                </>
               )}
             </For>
           </div>
