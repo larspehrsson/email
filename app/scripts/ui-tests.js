@@ -2390,6 +2390,9 @@ describe('favorite folders', () => {
       };
       await scrollDown();
       assert.ok(Math.abs(await top()) < 2, 'pinned: still at the top');
+      // Never wider than the sidebar: a long name ends in …, no sideways scrolling.
+      await page.locator('.sidebar .favorites .folder-name').first().evaluate((e) => (e.textContent = 'A very long folder name that will not fit at all'));
+      assert.equal(await page.locator('.sidebar .favorites').evaluate((e) => e.scrollWidth <= e.clientWidth), true, 'no sideways overflow');
       // Settings › General › Appearance › Favorites: off, and they scroll away with the rest.
       await page.keyboard.press('ControlOrMeta+,');
       await page.locator('.st-nav-item', { hasText: 'General' }).click();
