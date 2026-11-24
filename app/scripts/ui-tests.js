@@ -2412,6 +2412,52 @@ describe('favorite folders', () => {
     }
   });
 
+  test('favorites reorder: Alt+arrows, Move up in the menu, and dragging; the order is kept', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      for (const name of ['Receipts', 'Newsletters', 'Travel']) {
+        await page.locator('.sidebar .account .folder', { hasText: name }).first().click({ button: 'right' });
+        await page.locator('.ctx-menu .vm-item', { hasText: 'Add to favorites' }).click();
+      }
+      const favs = page.locator('.sidebar .favorites .folder');
+      const order = async () => (await favs.locator('.folder-name').allTextContents()).map((t) => t.trim());
+      await page.waitForFunction(() => document.querySelectorAll('.sidebar .favorites .folder').length === 3);
+      assert.deepEqual(await order(), ['Receipts', 'Newsletters', 'Travel'], 'in the order added');
+      // Alt+↓ on the first: one down, and it keeps the focus for another press.
+      await favs.first().focus();
+      await page.keyboard.press('Alt+ArrowDown');
+      assert.deepEqual(await order(), ['Newsletters', 'Receipts', 'Travel']);
+      await page.keyboard.press('Alt+ArrowDown');
+      assert.deepEqual(await order(), ['Newsletters', 'Travel', 'Receipts'], 'again, still focused');
+      // Right-click › Move up in favorites (the first can't go up).
+      await favs.nth(2).click({ button: 'right' });
+      await page.locator('.ctx-menu .vm-item', { hasText: 'Move up in favorites' }).click();
+      assert.deepEqual(await order(), ['Newsletters', 'Receipts', 'Travel']);
+      await favs.first().click({ button: 'right' });
+      assert.equal(await page.locator('.ctx-menu .vm-item', { hasText: 'Move up in favorites' }).isDisabled(), true);
+      await page.keyboard.press('Escape');
+      // Drag the last one to the top; letting go doesn't open it.
+      const selectedBefore = await page.locator('.sidebar .folder.selected').first().textContent();
+      const last = await favs.nth(2).boundingBox();
+      const first = await favs.first().boundingBox();
+      await page.mouse.move(last.x + 40, last.y + last.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(last.x + 40, last.y + last.height / 2 - 10, { steps: 3 });
+      await page.mouse.move(first.x + 40, first.y + 2, { steps: 8 });
+      await page.mouse.up();
+      await page.waitForTimeout(100);
+      assert.deepEqual(await order(), ['Travel', 'Newsletters', 'Receipts'], 'dragged to the top');
+      assert.equal(await page.locator('.sidebar .folder.selected').first().textContent(), selectedBefore, 'the drop opened nothing');
+      // Kept.
+      await page.reload();
+      await page.waitForSelector('.sidebar .favorites .folder');
+      assert.deepEqual(await order(), ['Travel', 'Newsletters', 'Receipts'], 'after a reload');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('the rail shows pinned folders above the account markers', async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {

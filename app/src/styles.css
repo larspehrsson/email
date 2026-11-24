@@ -472,6 +472,18 @@ body.resizing iframe {
 .favorites .folder {
   width: calc(100% - 16px);
   box-sizing: border-box;
+  position: relative;
+  transition: background 80ms, transform 150ms var(--ease);
+}
+/* Reordering (drag a favorite up or down): the dragged one over the others, which slide. */
+.favorites .folder.dragging {
+  z-index: 2;
+  transition: none;
+  background: var(--bg-sidebar);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
+}
+.favorites .folder.settling {
+  transition: none;
 }
 /* The name shrinks from its own width (not from 0), so beside the account's name it keeps most
    of the room. */

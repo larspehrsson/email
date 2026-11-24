@@ -1,7 +1,7 @@
 import { createEffect, createSignal, For, onCleanup, Show } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { api, errorMessage, type Folder } from '../api';
-import { isFavorite, toggleFavorite } from '../lib/favorites';
+import { favoriteFolders, favoriteIndex, isFavorite, moveFavorite, toggleFavorite } from '../lib/favorites';
 import { fmtNum } from '../lib/format';
 import { showToast } from './Toast';
 
@@ -41,6 +41,16 @@ export function folderMenu(e: MouseEvent, f: Folder): void {
       label: isFavorite(f) ? 'Remove from favorites' : 'Add to favorites',
       run: () => toggleFavorite(f),
     },
+    ...(isFavorite(f) && favoriteFolders().length > 1
+      ? [
+          { label: 'Move up in favorites', disabled: favoriteIndex(f) <= 0, run: () => moveFavorite(f, favoriteIndex(f) - 1) },
+          {
+            label: 'Move down in favorites',
+            disabled: favoriteIndex(f) >= favoriteFolders().length - 1,
+            run: () => moveFavorite(f, favoriteIndex(f) + 1),
+          },
+        ]
+      : []),
     {
       label: 'Mark all as read',
       disabled: f.unread === 0,

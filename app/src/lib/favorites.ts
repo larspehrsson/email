@@ -51,3 +51,26 @@ export function favoriteFolders(): Folder[] {
   }
   return keys().flatMap((k) => byKey.get(k) ?? []);
 }
+
+/** Where a favorite is among those shown (-1 if it isn't one). */
+export function favoriteIndex(f: Folder): number {
+  const k = keyOf(f);
+  return k == null ? -1 : favoriteFolders().findIndex((x) => keyOf(x) === k);
+}
+
+/** Move a favorite to place `to` among those shown (dragging it, Alt+↑/↓, Move up/down).
+ *  Ones not shown (their folder gone for now) keep their places in the saved list. */
+export function moveFavorite(f: Folder, to: number): void {
+  const k = keyOf(f);
+  if (k == null) return;
+  const shown = favoriteFolders().flatMap((x) => keyOf(x) ?? []);
+  const from = shown.indexOf(k);
+  const dest = Math.max(0, Math.min(shown.length - 1, to));
+  if (from < 0 || dest === from) return;
+  const order = shown.filter((x) => x !== k);
+  order.splice(dest, 0, k);
+  const isShown = new Set(shown);
+  let i = 0;
+  setKeys((list) => list.map((x) => (isShown.has(x) ? order[i++]! : x)));
+  savePref(PREF, keys());
+}

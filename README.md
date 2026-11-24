@@ -130,7 +130,8 @@ them) to delete, move, mark or tag them together, or forward them as attachments
 
 **Getting around:** fold the sidebar into a slim rail (Ctrl/⌘+1), or jump to any folder in any
 account by typing its name (Ctrl/⌘+G). Right-click a folder › Add to favorites to keep it at the
-top, above the accounts. Drag messages onto a folder to move them there (Undo in the message
+top, above the accounts (it stays there while the folders scroll); drag favorites up or down, or
+Alt+↑/↓, to change their order. Drag messages onto a folder to move them there (Undo in the message
 that follows).
 
 ![The sidebar as a rail, with all folders slid out](docs/screenshots/rail.png)

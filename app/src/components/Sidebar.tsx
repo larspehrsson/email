@@ -1,5 +1,5 @@
 import { batch, createEffect, createMemo, createSignal, For, Match, onCleanup, Show, Switch, untrack } from 'solid-js';
-import { favoriteFolders, pinFavorites } from '../lib/favorites';
+import { favoriteFolders, favoriteIndex, moveFavorite, pinFavorites } from '../lib/favorites';
 import { folderMenu } from './ContextMenu';
 import { hint } from '../lib/shortcuts';
 import { createStore } from 'solid-js/store';
@@ -433,16 +433,44 @@ function Badge(props: { n: number }) {
 function FolderRow(props: { folder: Folder; depth: number; role?: boolean; fav?: boolean }) {
   const selected = () => selectedFolderId() === props.folder.id;
   const acct = () => (accounts() ?? []).find((a) => a.id === props.folder.accountId);
+  const favMoving = () => props.fav && favDrag()?.id === props.folder.id;
   return (
     <button
       class="folder"
-      classList={{ selected: selected(), role: !!props.role, 'drop-target': msgDrag()?.targetId === props.folder.id }}
-      style={{ 'padding-left': `${12 + props.depth * 14 + 18}px` }}
+      classList={{
+        selected: selected(),
+        role: !!props.role,
+        'drop-target': msgDrag()?.targetId === props.folder.id,
+        dragging: !!favMoving(),
+        settling: !!props.fav && favSettling(),
+      }}
+      style={{ 'padding-left': `${12 + props.depth * 14 + 18}px`, ...(props.fav ? favDragStyle(props.folder) : {}) }}
       data-folder-id={props.folder.id}
       data-account-id={props.folder.accountId}
-      onClick={() => selectFolder(props.folder.id)}
+      onPointerDown={props.fav ? (e) => startFavDrag(e, props.folder) : undefined}
+      onKeyDown={(e) => {
+        // Alt+↑/↓ on a favorite: move it up/down among them (as for accounts).
+        if (!props.fav || !e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+        e.preventDefault();
+        const id = props.folder.id;
+        const list = (e.currentTarget as HTMLElement).closest('.favorites');
+        moveFavorite(props.folder, favoriteIndex(props.folder) + (e.key === 'ArrowUp' ? -1 : 1));
+        // A moved row loses focus: back on it, so the keys can be pressed again.
+        queueMicrotask(() => list?.querySelector<HTMLElement>(`.folder[data-folder-id="${id}"]`)?.focus());
+      }}
+      onClick={() => {
+        if (favSuppressClick) {
+          favSuppressClick = false;
+          return;
+        }
+        selectFolder(props.folder.id);
+      }}
       onContextMenu={(e) => folderMenu(e, props.folder)}
-      title={props.fav ? `${props.folder.path.join(' / ')}\n${acct()?.email ?? ''}` : props.folder.path.join(' / ')}
+      title={
+        props.fav
+          ? `${props.folder.path.join(' / ')}\n${acct()?.email ?? ''}\nDrag (or ${platform === 'macos' ? '⌥' : 'Alt'}+↑/↓) to reorder`
+          : props.folder.path.join(' / ')
+      }
     >
       <span class="folder-icon">
         <RoleIcon role={props.folder.role ?? (isInboxPath(props.folder) ? 'inbox' : null)} />
@@ -515,6 +543,84 @@ function TreeItem(props: { node: TreeNode }) {
       </Show>
     </>
   );
+}
+
+// ------------------------------------------------------------- reordering favorites
+
+/** A favorite being dragged to a new place among them (as accounts are, below). */
+interface FavDrag {
+  id: number;
+  from: number;
+  to: number;
+  dy: number;
+  /** one row's height (what the others shift by) */
+  h: number;
+}
+const [favDrag, setFavDrag] = createSignal<FavDrag | null>(null);
+const [favSettling, setFavSettling] = createSignal(false);
+let favSuppressClick = false;
+
+/** Press on a favorite: a click opens it; moving 5px up or down drags it to a new place. */
+function startFavDrag(e: PointerEvent, f: Folder) {
+  if (e.button !== 0) return;
+  const list = (e.currentTarget as HTMLElement).closest('.favorites');
+  if (!list) return;
+  const rows = [...list.querySelectorAll<HTMLElement>(':scope > .folder')];
+  const from = rows.findIndex((r) => r === e.currentTarget);
+  if (from < 0 || rows.length < 2) return;
+  const mids = rows.map((r) => {
+    const b = r.getBoundingClientRect();
+    return b.top + b.height / 2;
+  });
+  const h = rows[1]!.getBoundingClientRect().top - rows[0]!.getBoundingClientRect().top;
+  const startY = e.clientY;
+  let started = false;
+  const onMove = (ev: PointerEvent) => {
+    const dy = ev.clientY - startY;
+    if (!started) {
+      if (Math.abs(dy) < 5) return;
+      started = true;
+      document.body.classList.add('dragging-account');
+    }
+    // Kept within the list; it swaps with a neighbour once past that row's middle.
+    const lo = mids[0]! - mids[from]! - h / 2;
+    const hi = mids[mids.length - 1]! - mids[from]! + h / 2;
+    const d = Math.max(lo, Math.min(hi, dy));
+    const mid = mids[from]! + d;
+    let to = from;
+    mids.forEach((m, j) => {
+      if (j < from && mid < m) to = Math.min(to, j);
+      if (j > from && mid > m) to = Math.max(to, j);
+    });
+    setFavDrag({ id: f.id, from, to, dy: d, h });
+  };
+  const onUp = () => {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    if (!started) return;
+    document.body.classList.remove('dragging-account');
+    favSuppressClick = true; // the click after a drag doesn't open the folder
+    const d = favDrag();
+    batch(() => {
+      setFavSettling(true);
+      setFavDrag(null);
+      if (d && d.to !== d.from) moveFavorite(f, d.to);
+    });
+    requestAnimationFrame(() => requestAnimationFrame(() => setFavSettling(false)));
+  };
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+}
+
+/** Where a favorite's row is drawn during a drag (the dragged one follows the pointer). */
+function favDragStyle(f: Folder): Record<string, string> {
+  const d = favDrag();
+  if (!d) return {};
+  if (d.id === f.id) return { transform: `translateY(${d.dy}px)` };
+  const i = favoriteIndex(f);
+  if (d.from < d.to && i > d.from && i <= d.to) return { transform: `translateY(${-d.h}px)` };
+  if (d.to < d.from && i >= d.to && i < d.from) return { transform: `translateY(${d.h}px)` };
+  return { transform: 'translateY(0)' };
 }
 
 // ------------------------------------------------------------- reordering accounts
