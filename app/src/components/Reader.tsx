@@ -16,7 +16,7 @@ import { DRAG } from '../lib/platform';
 import { forwardFrameKeys } from '../lib/frameKeys';
 import { peekHandlers, watchFrameLinks } from './LinkPeek';
 import { keepImageShapes, ZOOM_CSS, zoomableImages } from '../lib/images';
-import { editDraft } from '../lib/compose';
+import { isDraftMessage, openDraftSummary } from '../lib/compose';
 import { allKeys, label, MOD } from '../lib/shortcuts';
 
 // ------------------------------------------------------------- srcdoc
@@ -259,6 +259,11 @@ const actionTarget = (): ActionTarget | null => {
 };
 
 export function Reader(props: { ref?: (el: HTMLElement) => void }) {
+  /** The message shown is a draft (written here, or in a Drafts folder): "Edit draft". */
+  const shownDraft = () => {
+    const s = selectedSummary();
+    return s && s.id === readerMessageId() && isDraftMessage(s) ? s : null;
+  };
   const [allowRemote, setAllowRemote] = createSignal(false);
   /** The body currently on screen, with the allowRemote it was fetched with. */
   const [shown, setShown] = createSignal<{ d: MessageDetail; remote: boolean } | null>(null);
@@ -406,11 +411,15 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
                     <ForwardIcon size={13} />
                   </span>
                 </Show>
-                <Show when={selectedSummary()?.id === readerMessageId() && selectedSummary()?.draftId}>
-                  {(d) => (
+                <Show when={shownDraft()}>
+                  {(s) => (
                     <>
                       <span class="dot-sep">·</span>
-                      <button class="link-btn band-edit-draft" onClick={() => editDraft(d())}>
+                      <button
+                        class="link-btn band-edit-draft"
+                        title="Open it in the composer (or double-click it in the list)"
+                        onClick={() => openDraftSummary(s())}
+                      >
                         Edit draft
                       </button>
                     </>

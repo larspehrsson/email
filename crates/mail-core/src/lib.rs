@@ -1072,6 +1072,9 @@ impl Core {
         if let Some(d) = draft_id {
             self.delete_draft(d)?;
         }
+        if let Some(old) = req.replaces {
+            self.retire_replaced_draft(old);
+        }
         // Shown in Sent (and its conversation) right away, marked as sending.
         let sent = self.store.folders(account.id)?.into_iter().find(|f| f.role == Some(FolderRole::Sent));
         if let Some(sent) = sent {
@@ -1129,6 +1132,11 @@ impl Core {
             || msg.recipients().is_empty()
             && msg.subject.trim().is_empty()
             && mail_parser::decoders::html::html_to_text(&req.html).trim().is_empty();
+        if !empty {
+            if let Some(old) = req.replaces {
+                self.retire_replaced_draft(old);
+            }
+        }
         if let Some(drafts) = self.store.folders(account.id)?.into_iter().find(|f| f.role == Some(FolderRole::Drafts)) {
             let folders = if empty {
                 self.store.delete_draft_copy(id)?
@@ -1139,6 +1147,25 @@ impl Core {
             let _ = self.events.send(CoreEvent::FoldersChanged { account_id: account.id });
         }
         Ok(id)
+    }
+
+    /// A server draft (written in another app) that a draft here was opened from: to Trash, so
+    /// Drafts doesn't show both. Only while it's still in Drafts (nothing to do the second time);
+    /// a failure is logged, not passed on: the draft here is saved either way.
+    fn retire_replaced_draft(&self, message_id: i64) {
+        let in_drafts = (|| -> Result<Option<i64>> {
+            let folders = self.store.message_folder_ids(message_id)?;
+            let Some(&first) = folders.first() else { return Ok(None) };
+            let Some((account_id, _)) = self.store.folder(first)? else { return Ok(None) };
+            let drafts = self.store.folders(account_id)?.into_iter().find(|f| f.role == Some(FolderRole::Drafts));
+            Ok(drafts.map(|d| d.id).filter(|d| folders.contains(d)))
+        })()
+        .unwrap_or(None);
+        if let Some(folder) = in_drafts {
+            if let Err(e) = self.apply_action(actions::Action::Trash, &[message_id], folder) {
+                tracing::warn!("moving the replaced draft to Trash: {e:#}");
+            }
+        }
     }
 
     /// The composer state of a draft (to open it in a window).

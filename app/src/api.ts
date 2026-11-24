@@ -220,6 +220,8 @@ export const api = {
   suggestAddresses: (query: string, limit: number | null = null): Promise<Addr[]> => call('suggest_addresses', { query, limit }),
   /** Name and size of files to attach (missing files and folders are left out). */
   fileInfo: (paths: string[]): Promise<FileInfo[]> => call('file_info', { paths }),
+  /** A server draft's attachments as files of their own (for the draft opened from it). */
+  draftAttachmentFiles: (messageId: number): Promise<string[]> => call('draft_attachment_files', { messageId }),
   /** Open (or focus) the compose window of draft `draftId` (at the last compose window's size). */
   openCompose: (draftId: number): Promise<void> => call('open_compose', { draftId }),
   /** Prefill a reply / reply-all / forward of a message (downloads it first if needed). */

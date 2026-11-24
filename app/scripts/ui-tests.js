@@ -2396,6 +2396,50 @@ describe('favorite folders', () => {
   });
 });
 
+describe('drafts', () => {
+  test('a draft from the server opens in the composer; changed, the server copy goes to Trash', async () => {
+    const { page, errors, context, close } = await open({ threaded: false });
+    try {
+      await page.locator('.sidebar .account .folder', { hasText: 'Drafts' }).first().click();
+      const row = page.locator('.folder-layer .row').first();
+      await row.waitFor();
+      const subject = (await row.locator('.row-subject').textContent()).trim();
+      await row.click();
+      // The reader offers it; double-clicking the row opens it as well.
+      await page.locator('.reader .band-edit-draft').waitFor();
+      let popup = context.waitForEvent('page');
+      await row.dblclick();
+      let w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      await w.locator('.cmp-editor .ProseMirror').waitFor();
+      assert.equal(await w.locator('input.cmp-subject').inputValue(), subject, 'its subject');
+      assert.ok((await w.locator('.cmp-editor .ProseMirror').innerText()).trim().length > 0, 'its text');
+      // Closed unchanged: the server's draft stays where it is.
+      await w.close();
+      await page.bringToFront();
+      await page.waitForTimeout(300);
+      assert.equal(await page.locator('.folder-layer .row', { hasText: subject }).count(), 1, 'still in Drafts');
+      // Opened again and changed: this one replaces it, and the server's goes to Trash.
+      popup = context.waitForEvent('page');
+      await page.locator('.reader .band-edit-draft').click();
+      w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      await w.locator('.cmp-editor .ProseMirror').click();
+      await w.keyboard.type(' More to say.');
+      await page.bringToFront();
+      await page.locator('.sidebar .account .folder', { hasText: 'Trash' }).first().click();
+      await page.locator('.folder-layer .row', { hasText: subject }).first().waitFor({ timeout: 5000 });
+      await page.locator('.sidebar .account .folder', { hasText: 'Drafts' }).first().click();
+      await page.waitForTimeout(400);
+      assert.equal(await page.locator('.folder-layer .row', { hasText: subject }).count(), 1, 'one copy in Drafts: the one written here');
+      await w.close();
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('writing help', () => {
   test('without a key it says where to add one; with one, a reply is written and used', async () => {
     const { page, errors, context, close } = await open({ threaded: false });

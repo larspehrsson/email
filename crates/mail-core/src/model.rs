@@ -335,6 +335,8 @@ pub struct MessageDetail {
     pub from: Addr,
     pub to: Vec<Addr>,
     pub cc: Vec<Addr>,
+    /// Only a message of our own has these (a draft, a sent copy).
+    pub bcc: Vec<Addr>,
     pub date: i64,
     pub html: Option<String>,
     pub text: Option<String>,
@@ -459,6 +461,10 @@ pub struct SendRequest {
     /// opened and closed again isn't a draft).
     #[serde(default = "yes")]
     pub listed: bool,
+    /// A draft from the server (written in another app) that this one was opened from: it goes
+    /// to Trash once this one is saved with a change, or sent, so Drafts shows one of them.
+    #[serde(default)]
+    pub replaces: Option<i64>,
 }
 
 fn yes() -> bool {

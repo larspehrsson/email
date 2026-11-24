@@ -57,6 +57,7 @@ attachments by drag and drop, replies quoted below your text, and a switch betwe
 Reply all. Addresses are suggested from the people you write to most. Signatures (Settings ›
 Signatures, with pictures pasted in) go under your text, a default per account for new messages
 and for replies, switchable in the message. Sending waits 10 seconds so you can undo it.
+Drafts open again with a double-click, including ones written on your phone or in another app.
 
 <img src="docs/screenshots/compose.png" alt="A compose window with address suggestions" width="640">
 

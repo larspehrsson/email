@@ -305,6 +305,7 @@ pub fn render(id: i64, raw: &[u8], date: i64) -> Option<MessageDetail> {
         from: Addr { name: (!from_name.is_empty()).then_some(from_name), addr: from_addr },
         to: addr_list(msg.to()),
         cc: addr_list(msg.cc()),
+        bcc: addr_list(msg.bcc()),
         date,
         html,
         text,
