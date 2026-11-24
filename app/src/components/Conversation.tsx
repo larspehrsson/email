@@ -206,7 +206,7 @@ function ExpandedCard(props: { m: MessageSummary; me: Me; folderTag?: string; ac
             {(s) => (
               <Show when={s().d.html} fallback={<PlainBody text={s().d.text ?? ''} sender={props.m.fromAddr} messageId={props.m.id} />}>
                 {(html) => (
-                  <AutoHeightFrame doc={buildSrcdoc(html(), s().remote, CARD_FRAME_CSS)} sender={props.m.fromAddr} messageId={props.m.id} />
+                  <AutoHeightFrame doc={buildSrcdoc(html(), s().remote, CARD_FRAME_CSS)} sender={props.m.fromAddr} messageId={props.m.id} remote={s().remote} />
                 )}
               </Show>
             )}

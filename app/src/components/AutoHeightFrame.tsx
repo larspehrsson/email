@@ -1,6 +1,7 @@
 import { createEffect, onCleanup } from 'solid-js';
 import { forwardFrameKeys } from '../lib/frameKeys';
-import { zoomableImages } from '../lib/images';
+import { rescueHttpImages, zoomableImages } from '../lib/images';
+import { mailImageUrl } from '../api';
 import { watchFrameLinks } from './LinkPeek';
 import { watchFrameMenu } from './BodyMenu';
 
@@ -11,7 +12,7 @@ import { watchFrameMenu } from './BodyMenu';
  * email can't run code: it's sanitised and the document's CSP has script-src 'none' (see
  * `buildSrcdoc`). Built imperatively so sandbox + srcdoc are set before attachment.
  */
-export function AutoHeightFrame(props: { doc: string; sender?: string; messageId?: number }) {
+export function AutoHeightFrame(props: { doc: string; sender?: string; messageId?: number; remote?: boolean }) {
   let host!: HTMLDivElement;
   createEffect(() => {
     const f = document.createElement('iframe');
@@ -68,6 +69,7 @@ export function AutoHeightFrame(props: { doc: string; sender?: string; messageId
       watchFrameLinks(f, props.sender ?? null);
       if (props.messageId != null) watchFrameMenu(f, props.messageId);
       zoomableImages(doc, () => measure());
+      if (props.remote) rescueHttpImages(doc, mailImageUrl);
       last = -1;
       measure();
       ro?.disconnect();

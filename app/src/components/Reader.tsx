@@ -29,7 +29,7 @@ export function buildSrcdoc(rawHtml: string, allowRemote: boolean, extraCss = ''
   const csp =
     // script-src 'none' is the guard against code in an email (with the sanitiser): the frame
     // itself has allow-scripts, which WebKit needs for the app's key listener (lib/frameKeys.ts).
-    `default-src 'none'; script-src 'none'; img-src data: cid:${allowRemote ? ' https: http:' : ''}; ` +
+    `default-src 'none'; script-src 'none'; img-src data: cid:${allowRemote ? ' https: http: mailimg:' : ''}; ` +
     `style-src 'unsafe-inline'${allowRemote ? ' https:' : ''}; font-src data:${allowRemote ? ' https:' : ''}`;
   return `<!doctype html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
@@ -515,7 +515,7 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
                   {(d) => (
                     <Show when={d().d.html} fallback={<PlainBody text={d().d.text ?? ''} sender={h().from.addr} messageId={d().d.id} />}>
                       {(html) => (
-                        <AutoHeightFrame doc={buildSrcdoc(html(), d().remote, PAGE_FRAME_CSS)} sender={h().from.addr} messageId={d().d.id} />
+                        <AutoHeightFrame doc={buildSrcdoc(html(), d().remote, PAGE_FRAME_CSS)} sender={h().from.addr} messageId={d().d.id} remote={d().remote} />
                       )}
                     </Show>
                   )}

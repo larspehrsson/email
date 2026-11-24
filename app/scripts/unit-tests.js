@@ -9,7 +9,7 @@ import { switchRecipients } from '../src/lib/recipients.ts';
 import { accountMarks, hash } from '../src/lib/accountMarks.ts';
 import { parseMailto } from '../src/lib/mailto.ts';
 import { monthGrid, parseTime, stepTime } from '../src/lib/clock.ts';
-import { declaredSize } from '../src/lib/images.ts';
+import { declaredSize, rescueHttpImages } from '../src/lib/images.ts';
 
 const a = (addr, name = null) => ({ name, addr });
 const addrs = (list) => list.map((x) => x.addr);
@@ -160,6 +160,44 @@ test('an image keeps the shape it is declared at', () => {
 // ------------------------------------------------------------- list groups
 
 import { datePeriods, insertRow, labelDateCounts, layoutGroups, removeRows, startsGroup, startsThrough } from '../src/lib/listGroups.ts';
+
+test('a plain-http picture that failed gets one more try through the app', () => {
+  const img = (src, complete, naturalWidth) => {
+    const attrs = new Map([['src', src], ['srcset', `${src} 2x`]]);
+    const listeners = {};
+    return {
+      complete,
+      naturalWidth,
+      dataset: {},
+      getAttribute: (k) => attrs.get(k) ?? null,
+      removeAttribute: (k) => attrs.delete(k),
+      set src(v) { attrs.set('src', v); },
+      get src() { return attrs.get('src'); },
+      addEventListener: (type, fn) => { listeners[type] = fn; },
+      fire: (type) => listeners[type]?.(),
+      has: (k) => attrs.has(k),
+    };
+  };
+  const broken = img('http://x.com/a.png?t=1&u=2', true, 0);
+  const fine = img('http://x.com/b.png', true, 600);
+  const secure = img('https://x.com/c.png', true, 0);
+  const loading = img(' HTTP://x.com/d.png', false, 0);
+  const proxy = (u) => `mailimg://localhost/${encodeURIComponent(u)}`;
+  rescueHttpImages({ images: [broken, fine, secure, loading] }, proxy);
+  assert.equal(broken.src, 'mailimg://localhost/http%3A%2F%2Fx.com%2Fa.png%3Ft%3D1%26u%3D2');
+  assert.equal(broken.has('srcset'), false);
+  assert.equal(fine.src, 'http://x.com/b.png');
+  assert.equal(secure.src, 'https://x.com/c.png', 'https pictures are left to the webview');
+  assert.equal(loading.src, ' HTTP://x.com/d.png', 'still loading: only if it fails');
+  loading.fire('error');
+  assert.equal(loading.src, proxy('http://x.com/d.png'));
+  // One try only; and nothing outside the app.
+  rescueHttpImages({ images: [broken] }, proxy);
+  assert.equal(broken.src, 'mailimg://localhost/http%3A%2F%2Fx.com%2Fa.png%3Ft%3D1%26u%3D2');
+  const preview = img('http://x.com/e.png', true, 0);
+  rescueHttpImages({ images: [preview] }, () => null);
+  assert.equal(preview.src, 'http://x.com/e.png');
+});
 
 test('date periods: today, yesterday, this week by name, weeks, months, years', () => {
   // Saturday 21 November 2026, weeks starting on Monday.

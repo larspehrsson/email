@@ -50,6 +50,29 @@ export function keepImageShapes(html: string): string {
   return changed ? doc.head.innerHTML + doc.body.outerHTML : html;
 }
 
+/**
+ * A picture from a plain `http://` address gets a second try through the app when it fails.
+ * The webview upgrades such pictures to https (as any secure page does), so one whose server
+ * has no working certificate there shows broken, though it loads fine over http (as it does in
+ * other mail apps). `proxy` gives the app's address for it, or null (the browser preview).
+ * Only for a message allowed to load remote pictures. Call on each load of the frame.
+ */
+export function rescueHttpImages(doc: Document, proxy: (url: string) => string | null): void {
+  const plain = (img: HTMLImageElement) => /^\s*http:\/\//i.test(img.getAttribute('src') ?? '');
+  const retry = (img: HTMLImageElement) => {
+    const via = proxy((img.getAttribute('src') ?? '').trim().replace(/^http:/i, 'http:'));
+    if (!via || img.dataset.mailRetried) return;
+    img.dataset.mailRetried = '1';
+    img.removeAttribute('srcset');
+    img.src = via;
+  };
+  for (const img of Array.from(doc.images)) {
+    if (!plain(img)) continue;
+    if (img.complete && img.naturalWidth === 0) retry(img);
+    else if (!img.complete) img.addEventListener('error', () => retry(img), { once: true });
+  }
+}
+
 /** Styles for `zoomableImages` (in the message's own document). */
 export const ZOOM_CSS = `img.mail-zoom{cursor:zoom-in}img.mail-zoom.mail-full{max-width:none!important;cursor:zoom-out}`;
 

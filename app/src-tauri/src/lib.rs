@@ -1407,6 +1407,34 @@ async fn show_log(app: tauri::AppHandle) -> Res<()> {
     app.opener().reveal_item_in_dir(&path).map_err(|e| e.to_string())
 }
 
+/// `mailimg:` — a picture a message shows from a plain `http://` address, fetched here
+/// (`mail_core::icons::mail_image`) when the webview's upgrade of it to https failed. The
+/// reader asks for it only for a message allowed to load remote pictures (its frame's CSP
+/// lets `mailimg:` through only then). `mailimg://localhost/<address, percent-encoded>`, or
+/// `http://mailimg.localhost/…` on Windows.
+fn mail_image_protocol<R: tauri::Runtime>(_ctx: tauri::UriSchemeContext<'_, R>, request: tauri::http::Request<Vec<u8>>, responder: tauri::UriSchemeResponder) {
+    let url = mail_core::icons::mail_image_url(request.uri().path());
+    tauri::async_runtime::spawn(async move {
+        let answer = match url {
+            Some(url) => mail_core::icons::mail_image(&url).await.map_err(|e| {
+                tracing::debug!(url, "message picture: {e:#}");
+            }),
+            None => Err(()),
+        };
+        let response = match answer {
+            Ok(icon) => tauri::http::Response::builder()
+                .status(200)
+                .header("Content-Type", icon.mime)
+                .header("Cache-Control", "max-age=3600")
+                .body(icon.data),
+            Err(()) => tauri::http::Response::builder().status(502).body(Vec::new()),
+        };
+        if let Ok(response) = response {
+            responder.respond(response);
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
 
@@ -1435,7 +1463,8 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init());
+        .plugin(tauri_plugin_dialog::init())
+        .register_asynchronous_uri_scheme_protocol("mailimg", mail_image_protocol);
     // Updating itself: only a build made by CI with the signing key has the updater's
     // configuration (see `updater`); without it the plugin isn't there and Settings says so.
     let context = tauri::generate_context!();

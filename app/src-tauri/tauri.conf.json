@@ -12,7 +12,7 @@
   "app": {
     "windows": [],
     "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' data: https: http:; style-src 'self' 'unsafe-inline'; frame-src 'self' about: data:; font-src 'self' data:",
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' data: https: http: mailimg:; style-src 'self' 'unsafe-inline'; frame-src 'self' about: data:; font-src 'self' data:",
       "dangerousDisableAssetCspModification": [
         "style-src"
       ]
