@@ -330,11 +330,25 @@ pub const GOOGLE_CONTACTS_SCOPES: &str = "https://www.googleapis.com/auth/contac
 /// Mail (IMAP and SMTP take only this scope, Google's "restricted" one); and who signed in.
 pub const GOOGLE_MAIL_SCOPES: &str = "https://mail.google.com/ openid email";
 
-/// The user's own OAuth client (a Desktop app client made in Google Cloud Console).
+/// An OAuth client for Google: the app's own (`google_builtin_client`), or one the user made
+/// (a Desktop app client in Google Cloud Console).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GoogleClient {
     pub id: String,
     pub secret: String,
+}
+
+/// The app's own Google client, built in from `MAIL_GOOGLE_CLIENT_ID` and
+/// `MAIL_GOOGLE_CLIENT_SECRET` at compile time (the release builds get them from the
+/// repository's secrets). Google doesn't count a desktop app's client secret as a secret (it
+/// can't be kept in a program people download; PKCE protects the sign-in); it's left out of the
+/// source only so forks and local builds don't sign in as this app. None: built without them,
+/// and the user brings a client of their own (docs/GOOGLE.md). For contacts only: signing in to
+/// Gmail never uses it (the mail scope is restricted, and this client is reviewed for contacts).
+pub fn google_builtin_client() -> Option<GoogleClient> {
+    let id = option_env!("MAIL_GOOGLE_CLIENT_ID").unwrap_or("").trim();
+    let secret = option_env!("MAIL_GOOGLE_CLIENT_SECRET").unwrap_or("").trim();
+    (!id.is_empty()).then(|| GoogleClient { id: id.to_string(), secret: secret.to_string() })
 }
 
 /// Google wants the loopback address itself (localhost "may cause issues").
@@ -402,8 +416,9 @@ async fn google_token(form: &[(&str, &str)]) -> Result<Tokens> {
     if status != 200 {
         let code = v["error"].as_str().unwrap_or("error");
         let why = v["error_description"].as_str().unwrap_or("").to_string();
-        // invalid_grant: revoked, expired (a client in "Testing" expires them after 7 days).
-        if code == "invalid_grant" {
+        // invalid_grant: revoked, expired (a client in "Testing" expires them after 7 days);
+        // unauthorized_client: the token is another client's.
+        if matches!(code, "invalid_grant" | "unauthorized_client") {
             return Err(anyhow!(crate::gcontacts::PeopleError::SignIn(why)));
         }
         bail!("Google refused the sign-in ({code}): {why}");

@@ -1,9 +1,10 @@
 //! Google Contacts, two ways: a Gmail (or Workspace) account's contacts in the address book,
 //! kept in step with the Google People API.
 //!
-//! Signing in needs an OAuth client of the user's own (a Desktop app client in Google Cloud
-//! Console; its ID and secret are kept in the keychain), then each account is connected with a
-//! browser sign-in (its refresh token kept in the keychain too).
+//! Each account is connected with a browser sign-in (its refresh token kept in the keychain,
+//! noting the OAuth client that got it). The client is the app's own, built into release builds
+//! (`oauth::google_builtin_client`), or one the user made (a Desktop app client in Google Cloud
+//! Console; its ID and secret kept in the keychain), which builds without one need.
 //!
 //! What a sync does, and the rules that keep the user's real contacts safe:
 //! - Send first: contacts deleted here (`card_tombstones`) are deleted there; contacts changed

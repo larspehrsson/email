@@ -1,10 +1,16 @@
 # Google: signing in, and Contacts
 
 A Gmail or Google Workspace account can sign in on Google's page instead of with an app
-password, and its contacts can sync two ways with the address book. For now both need an OAuth
-client of your own: Google allows Gmail sign-in only through a client it has reviewed, and
-Email doesn't have one yet. Making your own is free and takes about fifteen minutes. One client
-serves all your Google accounts, for mail and contacts.
+password, and its contacts can sync two ways with the address book.
+
+- **Contacts** need nothing from you in Email's released builds: they have an OAuth client of
+  Email's own built in, for contacts only. **Connect…** opens Google's sign-in straight away.
+  Your contacts go straight between Google and your computer, never through anyone else
+  ([privacy policy](https://email.pehrsson.au/privacy)).
+- **Signing in to Gmail** needs an OAuth client of your own for now: Google allows Gmail
+  sign-in only through a client it has reviewed for mail, and Email's own client isn't one (it
+  never asks for your mail). Making your own is free and takes about fifteen minutes. One client
+  serves all your Google accounts, for mail and contacts.
 
 Without a client, Gmail keeps working with an [app password](https://myaccount.google.com/apppasswords)
 (it needs 2-Step Verification). Signing in with Google helps when app passwords aren't
@@ -39,19 +45,32 @@ keeps them in the system keychain:
 - **An account already on an app password:** Settings › Accounts › the account › Password ›
   **Sign in with Google instead…**. Its mail stays as it is; the app password is no longer used
   (you can revoke it in your Google account).
-- **Contacts:** Settings › Accounts › the account › Google Contacts › **Connect…**.
+- **Contacts:** Settings › Accounts › the account › Google Contacts › **Connect…**. With Email's
+  own client built in, it asks for nothing; while you have a client of your own set, new
+  connections use yours.
 
 On Google's page, Google first says it hasn't verified the app (**Advanced › Go to …**), then
 lists what the app asks for. Tick **Read, compose, send, and permanently delete all your email
 from Gmail**: Google may leave it unticked, and without it Email can't reach your mail.
 
 Each account remembers the client it signed in with, so **Forget it** (under the accounts) stops
-contacts syncing but leaves signed-in accounts working. If Google ends a sign-in (you revoked
+contacts connected with your client syncing (with Email's own client built in, connecting again
+uses that) but leaves signed-in accounts working. If Google ends a sign-in (you revoked
 it, or changed your password), the sidebar says **Sign-in needed**; **Fix…** signs in again.
 
 **A Google Workspace account** (a company's) works with the same client unless its
 administrator blocks apps they haven't approved, or IMAP. If signing in says "access blocked",
-the admin can mark the client ID as trusted (Admin console › Security › API controls).
+the admin can mark the client ID as trusted (Admin console › Security › API controls), or for
+contacts with Email's own client, Email itself (Security › API controls › App access control).
+
+**Until Google has verified Email's own client**, connecting contacts with it also says once
+that Google hasn't verified the app: **Advanced › Go to Email (unsafe)** continues.
+
+**Building it in:** a copy of Email you build yourself, or one from a fork, has no client built
+in. Set `MAIL_GOOGLE_CLIENT_ID` and `MAIL_GOOGLE_CLIENT_SECRET` when building (as repository
+secrets for the GitHub build, or in the environment or `scripts/mac-signing.env` for a local
+one), and that build connects contacts without asking for a client. It's used for contacts only,
+so its consent screen needs only the contacts scope.
 
 ## Google Contacts
 

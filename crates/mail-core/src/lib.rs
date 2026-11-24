@@ -212,18 +212,35 @@ pub struct NewAccount {
 /// The undo-send window: queued mail waits this long before it goes out.
 pub const SEND_DELAY_MS: i64 = 10_000;
 
-/// Keychain names: the user's Google OAuth client, and each account's Google sign-in.
+/// Keychain names: the user's own Google OAuth client, and each account's Google sign-in.
 const GOOGLE_CLIENT_KEY: &str = "#google:client";
 fn google_key(account_id: i64) -> String {
     format!("#google-contacts:{account_id}")
+}
+
+/// An account's Google sign-in as kept in the keychain: the refresh token, and the client that
+/// got it (a refresh token works only with its own client). Kept as JSON; from before the
+/// client was noted, the bare token (`client` None: the user's own client).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct GoogleSignIn {
+    refresh: String,
+    client: Option<String>,
+}
+
+impl GoogleSignIn {
+    fn parse(saved: &str) -> GoogleSignIn {
+        serde_json::from_str(saved).unwrap_or_else(|_| GoogleSignIn { refresh: saved.to_string(), client: None })
+    }
 }
 
 /// Google Contacts as Settings shows it.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GoogleStatus {
-    /// The OAuth client's ID (None: not set yet).
+    /// The user's own OAuth client's ID (None: not set).
     pub client_id: Option<String>,
+    /// The app has a client of its own built in, so connecting needs nothing from the user.
+    pub built_in: bool,
     pub links: Vec<gcontacts::GoogleLink>,
 }
 
@@ -1541,15 +1558,39 @@ impl Core {
         }
     }
 
-    /// Whether the client is set, and the accounts linked to their Google contacts.
+    /// Whether a client is there to sign in with, and the accounts linked to their Google
+    /// contacts.
     pub fn google_status(&self) -> Result<GoogleStatus> {
-        Ok(GoogleStatus { client_id: self.google_client().map(|c| c.id), links: self.store.google_links()? })
+        Ok(GoogleStatus {
+            client_id: self.google_client().map(|c| c.id),
+            built_in: oauth::google_builtin_client().is_some(),
+            links: self.store.google_links()?,
+        })
+    }
+
+    /// The client a new sign-in uses: the user's own when they've set one, else the app's.
+    fn google_connect_client(&self) -> Result<oauth::GoogleClient> {
+        self.google_client()
+            .or_else(oauth::google_builtin_client)
+            .ok_or_else(|| anyhow!("Add your Google client ID and secret first."))
+    }
+
+    /// The client a saved sign-in was made with. From before the client was noted: the user's
+    /// own, else the app's (which fails as "connect again" if it isn't the one).
+    fn google_client_for(&self, sign_in: &GoogleSignIn) -> Result<oauth::GoogleClient> {
+        let own = self.google_client();
+        let built_in = oauth::google_builtin_client();
+        let client = match &sign_in.client {
+            Some(id) => [own, built_in].into_iter().flatten().find(|c| &c.id == id),
+            None => own.or(built_in),
+        };
+        client.ok_or_else(|| anyhow!(gcontacts::PeopleError::SignIn("the OAuth client it was connected with is gone".into())))
     }
 
     /// Connect an account to its Google contacts: a browser sign-in (`open` shows the page),
     /// then a first sync (reading only). Returns the Google address signed in with.
     pub async fn google_connect(&self, account_id: i64, open: impl FnOnce(String)) -> Result<String> {
-        let client = self.google_client().ok_or_else(|| anyhow!("Add your Google client ID and secret first."))?;
+        let client = self.google_connect_client()?;
         let account = self.account(account_id)?;
         let redirect = oauth::Redirect::listen().await?;
         let uri = oauth::google_redirect(&redirect.uri);
@@ -1562,7 +1603,8 @@ impl Core {
         let tokens = oauth::google_exchange(&client, &code, &pkce.verifier, &uri).await?;
         let refresh = tokens.refresh_token.clone().ok_or_else(|| anyhow!("Google didn't allow staying signed in (no refresh token)."))?;
         let email = tokens.id_token.as_deref().and_then(oauth::email_from_id_token).unwrap_or_else(|| account.email.clone());
-        self.secrets.set(&google_key(account_id), &refresh)?;
+        let sign_in = GoogleSignIn { refresh, client: Some(client.id.clone()) };
+        self.secrets.set(&google_key(account_id), &serde_json::to_string(&sign_in)?)?;
         self.store.set_google_link(account_id, &email)?;
         Ok(email)
     }
@@ -1630,9 +1672,15 @@ impl Core {
         let lock = self.google_locks.lock().unwrap().entry(account_id).or_default().clone();
         let _held = lock.lock().await;
         let result = async {
-            let client = self.google_client().ok_or_else(|| anyhow!("Add your Google client ID and secret first."))?;
-            let refresh = self.secrets.get(&google_key(account_id)).map_err(|_| anyhow!(gcontacts::PeopleError::SignIn("no saved sign-in".into())))?;
-            let tokens = oauth::google_refresh(&client, &refresh).await?;
+            let saved = self.secrets.get(&google_key(account_id)).map_err(|_| anyhow!(gcontacts::PeopleError::SignIn("no saved sign-in".into())))?;
+            let mut sign_in = GoogleSignIn::parse(&saved);
+            let client = self.google_client_for(&sign_in)?;
+            let tokens = oauth::google_refresh(&client, &sign_in.refresh).await?;
+            // From before the client was noted: it worked, so note it.
+            if sign_in.client.is_none() {
+                sign_in.client = Some(client.id.clone());
+                self.secrets.set(&google_key(account_id), &serde_json::to_string(&sign_in)?)?;
+            }
             let api = gcontacts::GoogleApi { access_token: tokens.access_token };
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
             gcontacts::sync(&self.store, account_id, &api, now).await
@@ -2261,5 +2309,43 @@ mod vault_tests {
         assert_eq!(vault_join(&json, |_| panic!("no parts")).unwrap(), json);
         // A missing part is an error, not an empty vault.
         assert!(vault_join(&pieces[0], |_| anyhow::bail!("gone")).is_err());
+    }
+}
+
+#[cfg(test)]
+mod google_sign_in_tests {
+    use super::*;
+
+    #[test]
+    fn a_saved_sign_in_names_its_client() {
+        // From before the client was noted: the bare refresh token.
+        let old = GoogleSignIn::parse("1//0gAbC-dEf");
+        assert_eq!(old.refresh, "1//0gAbC-dEf");
+        assert_eq!(old.client, None);
+        let new = GoogleSignIn { refresh: "1//0gXyz".into(), client: Some("1-a.apps.googleusercontent.com".into()) };
+        let back = GoogleSignIn::parse(&serde_json::to_string(&new).unwrap());
+        assert_eq!(back.refresh, "1//0gXyz");
+        assert_eq!(back.client.as_deref(), Some("1-a.apps.googleusercontent.com"));
+    }
+
+    #[test]
+    fn a_sign_in_refreshes_with_the_client_that_made_it() {
+        let dir = std::env::temp_dir().join(format!("mail-core-google-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let core = Core::open(&dir, Secrets::memory()).unwrap();
+        let own = "1-own.apps.googleusercontent.com";
+        core.set_google_client(Some(oauth::GoogleClient { id: own.into(), secret: "s".into() })).unwrap();
+        let with = |client: Option<&str>| GoogleSignIn { refresh: "r".into(), client: client.map(str::to_string) };
+        assert_eq!(core.google_client_for(&with(Some(own))).unwrap().id, own);
+        assert_eq!(core.google_client_for(&with(None)).unwrap().id, own, "from before: the user's own");
+        // Made with a client that isn't here (not built in, not the user's): connect again.
+        if oauth::google_builtin_client().is_none() {
+            let e = core.google_client_for(&with(Some("2-other.apps.googleusercontent.com"))).unwrap_err();
+            assert!(matches!(e.downcast_ref::<gcontacts::PeopleError>(), Some(gcontacts::PeopleError::SignIn(_))));
+            // No client at all: a new connection asks for one.
+            core.set_google_client(None).unwrap();
+            assert!(core.google_connect_client().is_err());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

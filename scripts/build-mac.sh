@@ -16,6 +16,8 @@
 #   NOTARY_PROFILE     a notarytool keychain profile, made once with
 #                      xcrun notarytool store-credentials <name> --apple-id <id> --team-id <team>
 #   or NOTARY_APPLE_ID, NOTARY_PASSWORD (an app-specific password) and NOTARY_TEAM_ID
+#   MAIL_GOOGLE_CLIENT_ID, MAIL_GOOGLE_CLIENT_SECRET  the app's own Google OAuth client, built
+#                      in for Google Contacts (left out: users bring their own)
 #
 # Output: target/release/bundle/macos/Email.app, and Email-<version>-mac.zip beside it.
 
@@ -54,6 +56,8 @@ if [[ -f "$ROOT/scripts/mac-signing.env" ]]; then
   # shellcheck disable=SC1091
   source "$ROOT/scripts/mac-signing.env"
 fi
+# The app's own Google client (Google Contacts), when set there or in the environment: built in.
+[[ -n "${MAIL_GOOGLE_CLIENT_ID:-}" ]] && export MAIL_GOOGLE_CLIENT_ID MAIL_GOOGLE_CLIENT_SECRET
 
 # Tools. rustup puts cargo in ~/.cargo/bin, which a shell doesn't always have on its PATH.
 [[ -d "$HOME/.cargo/bin" ]] && export PATH="$HOME/.cargo/bin:$PATH"

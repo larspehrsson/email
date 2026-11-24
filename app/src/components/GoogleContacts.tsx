@@ -5,8 +5,10 @@ import { googleLink, googleStatus, reloadGoogleStatus, syncGoogle } from '../lib
 import { confirmDialog } from './Actions';
 
 // Settings › Accounts › Google Contacts: connect a Gmail (or Workspace) account's contacts to
-// the address book. Needs an OAuth client of the user's own the first time (docs/GOOGLE.md), the
-// same one that signs in to Gmail (`GoogleClientForm`, also in the add-account form).
+// the address book. Release builds sign in with the app's own OAuth client; a build without one
+// asks for a client of the user's own the first time (docs/GOOGLE.md). Signing in to Gmail always
+// takes the user's own client (`GoogleClientForm`, also in the add-account form): the built-in one
+// is for contacts only.
 
 const ago = (t: number) => {
   const s = Math.max(0, Date.now() / 1000 - t);
@@ -70,7 +72,8 @@ export function GoogleContactsField(props: { account: Account }) {
   const link = () => googleLink(props.account.id);
 
   async function connect() {
-    if (!googleStatus()?.clientId) {
+    const st = googleStatus();
+    if (!st?.clientId && !st?.builtIn) {
       setAskClient(true);
       return;
     }
@@ -184,16 +187,13 @@ export function GoogleContactsField(props: { account: Account }) {
   );
 }
 
-/** Google contacts' client, to forget it (Settings › Accounts, under the accounts). */
+/** The user's own Google client, to forget it (Settings › Accounts, under the accounts). */
 export function GoogleClientNote() {
   const forget = async () => {
-    if (
-      !(await confirmDialog(
-        'Forget the Google OAuth client? Connected Google contacts stop syncing until it is added again. Accounts signed in with Google keep working.',
-        'Forget',
-      ))
-    )
-      return;
+    const question = googleStatus()?.builtIn
+      ? "Forget your Google OAuth client? Contacts connected with it need connecting again; Email's own client is used from then on. Accounts signed in with Google keep working."
+      : 'Forget the Google OAuth client? Connected Google contacts stop syncing until it is added again. Accounts signed in with Google keep working.';
+    if (!(await confirmDialog(question, 'Forget'))) return;
     await api.setGoogleClient(null, null);
     await reloadGoogleStatus();
   };

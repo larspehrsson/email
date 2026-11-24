@@ -585,9 +585,9 @@ export function createMockBackend(): Backend {
   const mcpAnswers = new Map<number, (allow: boolean) => void>();
   const googleLoad = (): GoogleStatus => {
     try {
-      return JSON.parse(localStorage.getItem('mock.google') ?? 'null') ?? { clientId: null, links: [] };
+      return { builtIn: false, ...(JSON.parse(localStorage.getItem('mock.google') ?? 'null') ?? { clientId: null, links: [] }) };
     } catch {
-      return { clientId: null, links: [] };
+      return { clientId: null, builtIn: false, links: [] };
     }
   };
   /** The made-up photo Google has of one contact (Olivia Hart): a coloured circle. */
@@ -1959,7 +1959,7 @@ export function createMockBackend(): Backend {
     async google_connect({ accountId }) {
       await sleep(300); // the browser sign-in
       const st = googleLoad();
-      if (!st.clientId) throw 'Add your Google client ID and secret first.';
+      if (!st.clientId && !st.builtIn) throw 'Add your Google client ID and secret first.';
       const email = accounts.find((a) => a.id === accountId)?.email ?? 'me@gmail.com';
       // Their contacts come in (made up): Google's, linked to this account.
       const all = cardsLoad();

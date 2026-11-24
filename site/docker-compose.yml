@@ -1,0 +1,13 @@
+# The public homepage and privacy policy (email.pehrsson.au), which Google's OAuth
+# verification needs. Static files only; HAProxy in front terminates TLS.
+#   COPYFILE_DISABLE=1 tar -C site -cf - . | ssh root@10.0.0.30 'tar -C /opt/email-site -xf - && cd /opt/email-site && docker compose up -d'
+services:
+  email-site:
+    image: nginx:1.27-alpine
+    container_name: email-site
+    restart: unless-stopped
+    ports:
+      - "9456:80"
+    volumes:
+      - ./public:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro

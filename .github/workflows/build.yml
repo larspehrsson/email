@@ -196,8 +196,14 @@ jobs:
             echo "APPLE_API_KEY_PATH=$key"
           } >> "$GITHUB_ENV"
 
+      # Google Contacts (crates/mail-core/src/oauth.rs, google_builtin_client): with the
+      # MAIL_GOOGLE_CLIENT_ID and MAIL_GOOGLE_CLIENT_SECRET secrets, the app's own OAuth client is
+      # built in and users connect without making one. Without them (forks) users bring their own.
       - name: Build
         working-directory: app
+        env:
+          MAIL_GOOGLE_CLIENT_ID: ${{ secrets.MAIL_GOOGLE_CLIENT_ID }}
+          MAIL_GOOGLE_CLIENT_SECRET: ${{ secrets.MAIL_GOOGLE_CLIENT_SECRET }}
         run: |
           npm ci
           npm run tauri build -- ${{ matrix.args }}

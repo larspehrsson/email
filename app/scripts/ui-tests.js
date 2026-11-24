@@ -31,12 +31,14 @@ after(async () => {
   await server?.close();
 });
 
-/** The demo in a fresh window, as a list of messages or of conversations. */
-async function open({ threaded, query = '', init }) {
+/** The demo in a fresh window, as a list of messages or of conversations. `storage`: more
+ *  localStorage to start with (the mock backend's state, say). */
+async function open({ threaded, query = '', storage = {}, init }) {
   const context = await browser.newContext({ viewport: { width: 1400, height: 850 }, locale: 'en-US', timezoneId: 'America/New_York' });
   await context.clock.setFixedTime(NOW);
   if (init) await context.addInitScript(init);
   await context.addInitScript((t) => localStorage.setItem('ui.threaded', JSON.stringify(t)), threaded);
+  if (Object.keys(storage).length) await context.addInitScript((st) => Object.entries(st).forEach(([k, v]) => localStorage.setItem(k, v)), storage);
   // The app's window refuses blob: pictures (its CSP allows data:); a browser tab wouldn't, so
   // make them fail here too.
   await context.addInitScript(() => {
@@ -2201,6 +2203,22 @@ describe('google contacts', () => {
       await page.locator('.st-acct').first().getByRole('button', { name: 'Connect…' }).waitFor();
       const cards = await page.evaluate(() => JSON.parse(localStorage.getItem('mock.cards') ?? '[]'));
       assert.ok(!cards.some((c) => c.google != null), 'their cards went');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('with the app\'s own client built in, connect goes straight to the sign-in', async () => {
+    const { page, errors, close } = await open({ threaded: false, storage: { 'mock.google': JSON.stringify({ clientId: null, builtIn: true, links: [] }) } });
+    try {
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'Accounts' }).click();
+      const field = page.locator('.st-acct').first().locator('.gc');
+      await field.getByRole('button', { name: 'Connect…' }).click();
+      await field.locator('.gc-linked').waitFor();
+      assert.equal(await field.locator('input[aria-label="Google client ID"]').count(), 0, 'not asked for a client');
+      assert.equal(await page.locator('.gc-client-note').count(), 0, 'no client of the user\'s own to forget');
       assert.deepEqual(errors, []);
     } finally {
       await close();
