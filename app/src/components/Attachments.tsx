@@ -220,6 +220,8 @@ export function AttachmentChips(props: { messageId: number; list: Attachment[] }
     const ro = new ResizeObserver(() => fit());
     ro.observe(row);
     onCleanup(() => ro.disconnect());
+    // The chips' widths change once the fonts are in, the row's own size doesn't: fit again.
+    void document.fonts?.ready.then(() => fit());
   });
   const rest = () => props.list.length - shown();
   const folded = () => rest() > 0;

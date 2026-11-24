@@ -1629,6 +1629,8 @@ describe('sender pane', () => {
       await page.locator('.sp-row').first().waitFor();
       const folders = () => page.locator('.sp-row .sp-folder').allTextContents();
       const before = await folders();
+      // Each row's folder by message, to check one by one after Undo (the rows shown can differ).
+      const wasIn = await page.locator('.sp-row').evaluateAll((rows) => Object.fromEntries(rows.map((r) => [r.dataset.id, r.querySelector('.sp-folder')?.textContent])));
       assert.ok(before.length >= 2, 'more than one from the sender');
       assert.ok(before.some((f) => f !== 'Receipts'), 'not all in Receipts yet');
       // Select all, Move to… › type to find the folder › Enter.
@@ -1648,10 +1650,10 @@ describe('sender pane', () => {
       await page.waitForFunction(() => [...document.querySelectorAll('.sp-row .sp-folder')].every((e) => e.textContent === 'Receipts'));
       // One Undo puts them all back where they were.
       await page.locator('.toast button', { hasText: 'Undo' }).click();
-      await page.waitForFunction(
-        (want) => JSON.stringify([...document.querySelectorAll('.sp-row .sp-folder')].map((e) => e.textContent).sort()) === want,
-        JSON.stringify([...before].sort()),
-      );
+      await page.waitForFunction((was) => {
+        const rows = [...document.querySelectorAll('.sp-row')].filter((r) => r.dataset.id in was);
+        return rows.length > 0 && rows.every((r) => r.querySelector('.sp-folder')?.textContent === was[r.dataset.id]);
+      }, wasIn);
       // One that's in Receipts already: nothing to move, and it says so.
       await page.locator('.sp-row', { has: page.locator('.sp-folder', { hasText: /^Receipts$/ }) }).first().click();
       await page.locator('.sender-pane [aria-label="Move to folder"]').click();
@@ -1850,7 +1852,9 @@ describe('attachments, many', () => {
       await more.click();
       assert.equal(await chips.count(), n, 'all shown');
       await page.locator('.reader .att-fewer').click();
-      assert.equal(await chips.count(), shown, 'folded again');
+      await page.locator('.reader .att-more').waitFor();
+      const again = await page.locator('.reader .att-chip').evaluateAll((els) => [...new Set(els.map((e) => Math.round(e.getBoundingClientRect().top)))].length);
+      assert.ok(again <= 3 && (await chips.count()) < n, `folded again (${again} rows)`);
       // No scrolling area of its own over the message: the page under the band scrolls.
       const head = await page.locator('.reader .reader-head').evaluate((el) => getComputedStyle(el).overflowY);
       assert.equal(head, 'visible');

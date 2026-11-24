@@ -352,6 +352,7 @@ export function SenderPane() {
                 role="option"
                 aria-selected={picked().has(m.id)}
                 class="sp-row"
+                data-id={m.id}
                 classList={{ unread: m.unread, on: picked().has(m.id), current: m.id === source() }}
                 onMouseDown={(e) => e.shiftKey && e.preventDefault()}
                 onClick={(e) => click(m, i(), e)}
