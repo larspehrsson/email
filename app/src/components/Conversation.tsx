@@ -15,7 +15,7 @@ import {
   takeConversationFocus,
 } from '../state';
 import { ForwardIcon, ImageIcon, PaperclipIcon, ReplyIcon } from './Icons';
-import { AddrList, AlwaysLoad, AttachmentControl, Avatar, BodySkeleton, buildSrcdoc, PlainBody, ReaderEmpty } from './Reader';
+import { AddrList, AlwaysLoad, AttachmentChips, Avatar, BodySkeleton, buildSrcdoc, PlainBody, ReaderEmpty } from './Reader';
 import { DRAG } from '../lib/platform';
 import { CardActions, HeaderActions, type ActionTarget } from './Actions';
 import { pendingSnooze } from './Snooze';
@@ -267,16 +267,16 @@ function ExpandedCard(props: { m: MessageSummary; me: Me; folderTag?: string; ac
             {/* Overlays the date on hover/focus: no layout change. */}
             <CardActions target={props.actions} />
           </span>
-          {/* Second row, slot reserved from the summary so nothing shifts when the detail lands. */}
-          <Show when={props.m.hasAttachments || (detail()?.attachments.length ?? 0) > 0}>
-            <span class="hdr-att">
-              <Show when={(detail()?.attachments.length ?? 0) > 0} fallback={<span class="att-pill-ph" />}>
-                <AttachmentControl messageId={id} list={detail()!.attachments} />
-              </Show>
-            </span>
-          </Show>
         </span>
       </header>
+      {/* Under the header; room kept from the summary so nothing shifts when the detail lands. */}
+      <Show when={props.m.hasAttachments || (detail()?.attachments.length ?? 0) > 0}>
+        <Show when={(detail()?.attachments.length ?? 0) > 0} fallback={<div class="att-chips att-chips-ph cm-att" />}>
+          <div class="cm-att">
+            <AttachmentChips messageId={id} list={detail()!.attachments} />
+          </div>
+        </Show>
+      </Show>
       <Show when={body.shown()?.d.hasRemoteContent && !body.shown()?.remote}>
         <div class="remote-banner cm-banner">
           <ImageIcon size={14} />

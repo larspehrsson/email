@@ -469,6 +469,31 @@ async fn save_attachment(
     Ok(path.to_string_lossy().into_owned())
 }
 
+/// Save As…: the system's save dialog (starting in Downloads, with the attachment's name), then
+/// write it there. None when the dialog is cancelled. The dialog asks before replacing a file.
+#[tauri::command]
+async fn save_attachment_as(
+    app: tauri::AppHandle,
+    core: State<'_, Arc<Core>>,
+    message_id: i64,
+    index: usize,
+) -> Res<Option<String>> {
+    use tauri_plugin_dialog::DialogExt;
+    let (name, _mime, data) = core.attachment(message_id, index).await.map_err(err)?;
+    let mut dialog = app.dialog().file().set_file_name(mail_core::mime::safe_file_name(&name));
+    if let Ok(dir) = downloads_dir(&app) {
+        dialog = dialog.set_directory(dir);
+    }
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    dialog.save_file(move |p| {
+        let _ = tx.send(p);
+    });
+    let Some(chosen) = rx.await.map_err(|e| e.to_string())? else { return Ok(None) };
+    let path = chosen.into_path().map_err(|e| e.to_string())?;
+    std::fs::write(&path, &data).map_err(|e| format!("Couldn't write {}: {e}", path.display()))?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
 /// Write `data` as `name` in `dir` without overwriting: `name (1).ext`, `name (2).ext`, ...
 fn write_unique(dir: &std::path::Path, name: &str, data: &[u8]) -> Result<std::path::PathBuf, String> {
     use std::io::Write;
@@ -1511,6 +1536,7 @@ pub fn run() {
             open_attachment,
             save_attachment,
             save_all_attachments,
+            save_attachment_as,
             reveal_path,
             app_version,
             apply_action,

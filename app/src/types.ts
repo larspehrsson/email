@@ -703,6 +703,7 @@ export interface CommandMap {
   open_attachment: { args: { messageId: number; index: number }; ret: void };
   save_attachment: { args: { messageId: number; index: number }; ret: string };
   save_all_attachments: { args: { messageId: number }; ret: string[] };
+  save_attachment_as: { args: { messageId: number; index: number }; ret: string | null };
   apply_action: { args: { action: Action; messageIds: number[]; folderId: number }; ret: ActionResult };
   undo_action: { args: { opId: number }; ret: void };
   mark_folder_read: { args: { folderId: number }; ret: number };
