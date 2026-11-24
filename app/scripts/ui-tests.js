@@ -1032,6 +1032,9 @@ describe('accounts', () => {
       await page.keyboard.press('Control+,');
       const acct = page.locator('.st-acct', { hasText: before[0] });
       await acct.locator('.st-mark-letter').fill('w');
+      // Saved, and the accounts reloaded (which redraws the card): only then open the panel, or
+      // the reload closes it under the click (on a slow machine, CI).
+      await acct.locator('.acct-dot', { hasText: /^W$/ }).first().waitFor();
       // One swatch, the chosen color; it opens the panel of them all, and a pick closes it.
       assert.equal(await acct.locator('.st-swatch').count(), 1, 'only the chosen color shows');
       await acct.locator('.st-color-btn').click();
@@ -2368,6 +2371,87 @@ describe('favorite folders', () => {
       await page.locator('.sidebar .favorites .folder').first().click({ button: 'right' });
       await page.locator('.ctx-menu .vm-item', { hasText: 'Remove from favorites' }).click();
       await page.waitForSelector('.sidebar .favorites', { state: 'detached' });
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('favorites stay at the top while the folders scroll, unless turned off in Settings', async () => {
+    const { page, errors, close } = await open({ threaded: false, query: '&many' });
+    try {
+      await page.locator('.sidebar .account .folder', { hasText: 'Receipts' }).first().click({ button: 'right' });
+      await page.locator('.ctx-menu .vm-item', { hasText: 'Add to favorites' }).click();
+      await page.locator('.sidebar .favorites .folder').waitFor();
+      const scroller = page.locator('.sidebar .sidebar-scroll');
+      const top = async () => (await page.locator('.sidebar .favorites').boundingBox()).y - (await scroller.boundingBox()).y;
+      const scrollDown = async () => {
+        await scroller.evaluate((e) => (e.scrollTop = 0));
+        await scroller.evaluate((e) => (e.scrollTop = 400));
+        await page.waitForTimeout(100);
+        assert.ok((await scroller.evaluate((e) => e.scrollTop)) > 100, 'the sidebar scrolled');
+      };
+      await scrollDown();
+      assert.ok(Math.abs(await top()) < 2, 'pinned: still at the top');
+      // Never wider than the sidebar: a long name ends in …, no sideways scrolling.
+      await page.locator('.sidebar .favorites .folder-name').first().evaluate((e) => (e.textContent = 'A very long folder name that will not fit at all'));
+      assert.equal(await page.locator('.sidebar .favorites').evaluate((e) => e.scrollWidth <= e.clientWidth), true, 'no sideways overflow');
+      // Settings › General › Appearance › Favorites: off, and they scroll away with the rest.
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'General' }).click();
+      const pin = page.locator('.st-field', { hasText: 'Favorites' }).locator('input[type=checkbox]');
+      assert.equal(await pin.isChecked(), true, 'on to begin with');
+      await pin.uncheck();
+      assert.equal(await page.evaluate(() => localStorage.getItem('ui.pinFavorites')), 'false');
+      await page.keyboard.press('Escape');
+      await scrollDown();
+      assert.ok((await top()) < -100, 'not pinned: scrolled out of view');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('favorites reorder: Alt+arrows, Move up in the menu, and dragging; the order is kept', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      for (const name of ['Receipts', 'Newsletters', 'Travel']) {
+        await page.locator('.sidebar .account .folder', { hasText: name }).first().click({ button: 'right' });
+        await page.locator('.ctx-menu .vm-item', { hasText: 'Add to favorites' }).click();
+      }
+      const favs = page.locator('.sidebar .favorites .folder');
+      const order = async () => (await favs.locator('.folder-name').allTextContents()).map((t) => t.trim());
+      await page.waitForFunction(() => document.querySelectorAll('.sidebar .favorites .folder').length === 3);
+      assert.deepEqual(await order(), ['Receipts', 'Newsletters', 'Travel'], 'in the order added');
+      // Alt+↓ on the first: one down, and it keeps the focus for another press.
+      await favs.first().focus();
+      await page.keyboard.press('Alt+ArrowDown');
+      assert.deepEqual(await order(), ['Newsletters', 'Receipts', 'Travel']);
+      await page.keyboard.press('Alt+ArrowDown');
+      assert.deepEqual(await order(), ['Newsletters', 'Travel', 'Receipts'], 'again, still focused');
+      // Right-click › Move up in favorites (the first can't go up).
+      await favs.nth(2).click({ button: 'right' });
+      await page.locator('.ctx-menu .vm-item', { hasText: 'Move up in favorites' }).click();
+      assert.deepEqual(await order(), ['Newsletters', 'Receipts', 'Travel']);
+      await favs.first().click({ button: 'right' });
+      assert.equal(await page.locator('.ctx-menu .vm-item', { hasText: 'Move up in favorites' }).isDisabled(), true);
+      await page.keyboard.press('Escape');
+      // Drag the last one to the top; letting go doesn't open it.
+      const selectedBefore = await page.locator('.sidebar .folder.selected').first().textContent();
+      const last = await favs.nth(2).boundingBox();
+      const first = await favs.first().boundingBox();
+      await page.mouse.move(last.x + 40, last.y + last.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(last.x + 40, last.y + last.height / 2 - 10, { steps: 3 });
+      await page.mouse.move(first.x + 40, first.y + 2, { steps: 8 });
+      await page.mouse.up();
+      await page.waitForTimeout(100);
+      assert.deepEqual(await order(), ['Travel', 'Newsletters', 'Receipts'], 'dragged to the top');
+      assert.equal(await page.locator('.sidebar .folder.selected').first().textContent(), selectedBefore, 'the drop opened nothing');
+      // Kept.
+      await page.reload();
+      await page.waitForSelector('.sidebar .favorites .folder');
+      assert.deepEqual(await order(), ['Travel', 'Newsletters', 'Receipts'], 'after a reload');
       assert.deepEqual(errors, []);
     } finally {
       await close();

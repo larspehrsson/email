@@ -4,6 +4,7 @@ import { AiAppsSection } from './AiApps';
 import { GoogleClientNote, GoogleContactsField } from './GoogleContacts';
 import { pictureLevel, setPictureLevel, type PictureLevel } from '../lib/senderIcons';
 import { setTheme, theme, THEMES } from '../lib/theme';
+import { pinFavorites, setPinFavorites } from '../lib/favorites';
 import { accountLogo, logoFromFile, setAccountLogo } from '../lib/accountLogos';
 import {
   bindKey,
@@ -304,15 +305,21 @@ function MarkColor(props: { account: Account; onPick: (color: string | null) => 
       btn.focus();
     };
     const close = () => setOpen(false);
+    // A scroll closes it only if it moved the button away from the panel: a scroll reported
+    // late, from before it opened, leaves it be.
+    const onScroll = () => {
+      const r = btn.getBoundingClientRect();
+      if (Math.abs(r.bottom + 6 - at().top) > 1 || Math.abs(r.left - at().left) > 1) setOpen(false);
+    };
     document.addEventListener('mousedown', onDown, true);
     window.addEventListener('keydown', onKey, true);
     window.addEventListener('resize', close);
-    document.addEventListener('scroll', close, true);
+    document.addEventListener('scroll', onScroll, true);
     onCleanup(() => {
       document.removeEventListener('mousedown', onDown, true);
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('resize', close);
-      document.removeEventListener('scroll', close, true);
+      document.removeEventListener('scroll', onScroll, true);
     });
   });
   return (
@@ -885,6 +892,12 @@ function GeneralSection() {
             </For>
           </div>
         </div>
+        <Field label="Favorites">
+          <label class="st-check">
+            <input type="checkbox" checked={pinFavorites()} onChange={(e) => setPinFavorites(e.currentTarget.checked)} />
+            Keep them at the top of the sidebar while the folders scroll
+          </label>
+        </Field>
       </SettingsGroup>
       <SettingsGroup title="Privacy">
         {/* How far pictures may be looked up: each level contacts more senders' websites. View

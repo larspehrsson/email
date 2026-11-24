@@ -467,6 +467,53 @@ body.resizing iframe {
   margin-bottom: 4px;
   border-bottom: 1px solid var(--sep);
 }
+/* A row is a button, as wide as its text unless told: the list's width, so a long name ends
+   in … as in the accounts below. */
+.favorites .folder {
+  width: calc(100% - 16px);
+  box-sizing: border-box;
+  position: relative;
+  transition: background 80ms, transform 150ms var(--ease);
+}
+/* Reordering (drag a favorite up or down): the dragged one over the others, which slide. */
+.favorites .folder.dragging {
+  z-index: 2;
+  transition: none;
+  background: var(--bg-sidebar);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
+}
+.favorites .folder.settling {
+  transition: none;
+}
+/* The name shrinks from its own width (not from 0), so beside the account's name it keeps most
+   of the room. */
+.favorites .folder-name {
+  flex: 1 1 auto;
+}
+/* Pinned (Settings › General): it stays at the top while the accounts scroll under it; a long
+   list scrolls on its own so the accounts keep room. */
+.favorites.pinned {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg-sidebar);
+  border-bottom-color: var(--sep-strong);
+  max-height: 40vh;
+  overflow-y: auto;
+  /* never sideways: long names end in … as elsewhere */
+  overflow-x: hidden;
+}
+.rail-favs.pinned {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg-sidebar);
+  max-height: 40vh;
+  overflow-y: auto;
+  /* never sideways: long names end in … as elsewhere */
+  overflow-x: hidden;
+  scrollbar-width: none;
+}
 .fav-head {
   padding: 8px 14px 4px 16px;
   font-size: 11px;
@@ -477,7 +524,9 @@ body.resizing iframe {
 }
 /* Which account a pinned folder belongs to, when there's more than one. */
 .folder-sub {
-  flex: none;
+  /* gives way long before the folder's own name does */
+  flex: 0 100 auto;
+  min-width: 0;
   max-width: 45%;
   overflow: hidden;
   text-overflow: ellipsis;
