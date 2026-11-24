@@ -3,18 +3,18 @@ import { api, errorMessage, events, type Action, type MessageSummary, type Sende
 import { folderById, revealMessage, selectedMessageId, selectedThread, setSenderPane } from '../state';
 import { fmtNum, smartDate } from '../lib/format';
 import { hint, MOD } from '../lib/shortcuts';
-import { ArchiveIcon, CloseIcon, ForwardIcon, ReadIcon, TrashIcon } from './Icons';
+import { ArchiveIcon, CloseIcon, ForwardIcon, MoveIcon, ReadIcon, TrashIcon } from './Icons';
 import { platform } from '../lib/platform';
 import { advancePastRemoved, registerSenderSelectAll } from '../lib/actions';
 import { forwardAsAttachments } from '../lib/compose';
 import { hideToast, showToast } from './Toast';
 import { cardFor, loadCards } from '../lib/addressBook';
 import { openContacts } from './ContactsView';
-import { confirmDialog } from './Actions';
+import { confirmDialog, MovePicker } from './Actions';
 
 // The sender pane (eM Client's contact sidebar, for mail): everything from the sender of the
 // message on screen, in every folder but Trash and Spam, newest first. Pick some (⌘/Ctrl-click,
-// ⇧-click a range, ⌘/Ctrl+A all) to archive, delete, mark read or forward them at once:
+// ⇧-click a range, ⌘/Ctrl+A all) to archive, delete, move, mark read or forward them at once:
 // clearing out a newsletter takes two keys.
 
 const PAGE = 300;
@@ -30,6 +30,8 @@ export function SenderPane() {
   const [error, setError] = createSignal<string | null>(null);
   const [picked, setPicked] = createSignal<ReadonlySet<number>>(new Set());
   const [busy, setBusy] = createSignal(false);
+  /** The Move button, while its folder picker is open. */
+  const [movePicker, setMovePicker] = createSignal<HTMLElement | null>(null);
   /** The one clicked last (for ⇧-click ranges). */
   let anchor: number | null = null;
   let who: Who | null = null;
@@ -163,7 +165,8 @@ export function SenderPane() {
     e.stopPropagation();
   }
 
-  /** Apply `action` to the ticked ones: one action per folder they're in, one Undo for all. */
+  /** Apply `action` to the ticked ones: one action per folder they're in, one Undo for all.
+   *  `label` says what was done ("Archived"); for a move, it's the folder's name. */
   async function act(action: Action, label: string) {
     const chosen = rows().filter((m) => picked().has(m.id));
     if (!chosen.length || busy()) return;
@@ -171,8 +174,14 @@ export function SenderPane() {
       const n = fmtNum(chosen.length);
       if (!(await confirmDialog(`Delete ${n} messages from ${name()}?`, `Delete ${n} messages`))) return;
     }
+    // Moving: those already in the folder stay as they are.
+    const moving = action.kind === 'move' ? chosen.filter((m) => m.folderId !== action.targetFolderId) : chosen;
+    if (!moving.length) {
+      showToast({ kind: 'ok', text: `Already in ${label}`, ms: 3000 });
+      return;
+    }
     const byFolder = new Map<number, number[]>();
-    for (const m of chosen) byFolder.set(m.folderId, [...(byFolder.get(m.folderId) ?? []), m.id]);
+    for (const m of moving) byFolder.set(m.folderId, [...(byFolder.get(m.folderId) ?? []), m.id]);
     setBusy(true);
     const ops: number[] = [];
     let putBack: (() => void) | null = null;
@@ -181,7 +190,7 @@ export function SenderPane() {
       // Deleting what's open here: the overview moves on to the next email, as its own Delete does.
       // Finding the next one failing (the conversation changed meanwhile) doesn't stop the
       // delete: the reader just doesn't move on.
-      if (action.kind === 'trash' || action.kind === 'archive') putBack = await advancePastRemoved(chosen).catch(() => null);
+      if (action.kind === 'trash' || action.kind === 'archive' || action.kind === 'move') putBack = await advancePastRemoved(moving).catch(() => null);
       for (const [folderId, ids] of byFolder) {
         const res = await api.applyAction(action, ids, folderId);
         if (res.opId != null) {
@@ -192,10 +201,14 @@ export function SenderPane() {
       setPicked(new Set<number>());
       if (action.kind === 'read') return;
       if (!changed) putBack?.();
-      const n = chosen.length;
+      const n = moving.length;
       const toast = showToast({
         kind: 'ok',
-        text: `${label} ${n === 1 ? '1 message' : `${fmtNum(n)} messages`}`,
+        text:
+          action.kind === 'move'
+            ? `Moved ${n === 1 ? '1 message' : `${fmtNum(n)} messages`} to ${label}` +
+              (chosen.length > n ? ` (${fmtNum(chosen.length - n)} already there)` : '')
+            : `${label} ${n === 1 ? '1 message' : `${fmtNum(n)} messages`}`,
         action: ops.length
           ? {
               label: 'Undo',
@@ -279,6 +292,17 @@ export function SenderPane() {
             <button class="icon-btn" title="Mark read" aria-label="Mark read" disabled={busy()} onClick={() => void act({ kind: 'read' }, 'Marked read')}>
               <ReadIcon />
             </button>
+            <button
+              class="icon-btn"
+              title="Move to…"
+              aria-label="Move to folder"
+              aria-haspopup="dialog"
+              aria-expanded={!!movePicker()}
+              disabled={busy()}
+              onClick={(e) => setMovePicker(movePicker() ? null : e.currentTarget)}
+            >
+              <MoveIcon />
+            </button>
             <button class="icon-btn" title="Archive" aria-label="Archive" disabled={busy()} onClick={() => void act({ kind: 'archive' }, 'Archived')}>
               <ArchiveIcon />
             </button>
@@ -287,6 +311,27 @@ export function SenderPane() {
             </button>
           </Show>
         </div>
+        <Show when={movePicker()}>
+          {(btn) => (
+            <MovePicker
+              accountId={page()!.accountId}
+              excludeFolderId={-1}
+              messageIds={rows()
+                .filter((m) => picked().has(m.id))
+                .slice(0, 200)
+                .map((m) => m.id)}
+              anchor={btn()}
+              onClose={(refocus) => {
+                setMovePicker(null);
+                if (refocus) btn().focus();
+              }}
+              onPick={(dest) => {
+                setMovePicker(null);
+                void act({ kind: 'move', targetFolderId: dest.id }, dest.displayName);
+              }}
+            />
+          )}
+        </Show>
         <Show when={allPicked() && total() > rows().length}>
           <button class="link-btn sp-everything" onClick={() => void pickEverything()}>
             Select all {fmtNum(total())}

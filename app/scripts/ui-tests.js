@@ -1602,6 +1602,52 @@ describe('sender pane', () => {
     }
   });
 
+  test('move everything from a sender to a folder, with one Undo', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.fill('.search-field input', 'from:lumengoods');
+      await page.waitForSelector('.search-layer .row');
+      await page.waitForTimeout(400);
+      await page.locator('.search-layer .row').first().click();
+      await page.keyboard.press('ControlOrMeta+2');
+      await page.locator('.sp-row').first().waitFor();
+      const folders = () => page.locator('.sp-row .sp-folder').allTextContents();
+      const before = await folders();
+      assert.ok(before.length >= 2, 'more than one from the sender');
+      assert.ok(before.some((f) => f !== 'Receipts'), 'not all in Receipts yet');
+      // Select all, Move to… › type to find the folder › Enter.
+      await page.locator('.sp-select-all').click();
+      await page.waitForFunction(() => document.querySelectorAll('.sp-row.on').length > 1);
+      await page.locator('.sender-pane [aria-label="Move to folder"]').click();
+      await page.locator('.move-picker .mp-filter').fill('Receipts');
+      await page.keyboard.press('Enter');
+      // All of the sender's mail is picked (not only the rows shown); those already in Receipts
+      // stay as they are and aren't counted.
+      const total = Number((await page.locator('.sp-all').textContent()).split(' of ').pop().replace(/[^\d]/g, ''));
+      const toast = page.locator('.toast', { hasText: /^Moved [\d,]+ messages to Receipts/ });
+      await toast.waitFor();
+      const moved = Number((await toast.textContent()).match(/Moved ([\d,]+)/)[1].replace(/,/g, ''));
+      assert.ok(moved > 0 && moved < total, `moved ${moved} of ${total}: the ones in Receipts already left out`);
+      assert.match(await toast.textContent(), new RegExp(`\\(${(total - moved).toLocaleString('en-US')} already there\\)`), 'and it says how many');
+      await page.waitForFunction(() => [...document.querySelectorAll('.sp-row .sp-folder')].every((e) => e.textContent === 'Receipts'));
+      // One Undo puts them all back where they were.
+      await page.locator('.toast button', { hasText: 'Undo' }).click();
+      await page.waitForFunction(
+        (want) => JSON.stringify([...document.querySelectorAll('.sp-row .sp-folder')].map((e) => e.textContent).sort()) === want,
+        JSON.stringify([...before].sort()),
+      );
+      // One that's in Receipts already: nothing to move, and it says so.
+      await page.locator('.sp-row', { has: page.locator('.sp-folder', { hasText: /^Receipts$/ }) }).first().click();
+      await page.locator('.sender-pane [aria-label="Move to folder"]').click();
+      await page.locator('.move-picker .mp-filter').fill('Receipts');
+      await page.keyboard.press('Enter');
+      await page.locator('.toast', { hasText: 'Already in Receipts' }).waitFor();
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('deleting just the open one opens the next email; Undo goes back', async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {
