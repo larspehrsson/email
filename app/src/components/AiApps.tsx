@@ -3,6 +3,7 @@ import { api, errorMessage, events, type McpConfirm, type McpSettings } from '..
 import { accounts } from '../state';
 import { platform } from '../lib/platform';
 import { showToast } from './Toast';
+import { clock } from '../lib/format';
 
 // AI apps (Claude Desktop, Claude Code, any MCP client) working with the mail: Settings › AI apps
 // (what they may do, how to connect one, what they did), and the app's side of it while they
@@ -54,7 +55,7 @@ export function AiAppsSection() {
       () => showToast({ kind: 'ok', text: 'Copied', ms: 1500 }),
       (e) => showToast({ kind: 'error', text: errorMessage(e) }),
     );
-  const when = (ms: number) => new Date(ms).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+  const when = (ms: number) => new Date(ms).toLocaleString(undefined, clock({ weekday: 'short', hour: 'numeric', minute: '2-digit' }));
 
   return (
     <div class="st-body mcp">

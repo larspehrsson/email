@@ -13,6 +13,7 @@ use serde::Serialize;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 
+mod clock;
 mod default_mail;
 mod mcp;
 mod notify;
@@ -1464,7 +1465,9 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .register_asynchronous_uri_scheme_protocol("mailimg", mail_image_protocol);
+        .register_asynchronous_uri_scheme_protocol("mailimg", mail_image_protocol)
+        // Every window learns the system's clock (24-hour or not) before its scripts run.
+        .plugin(tauri::plugin::Builder::<tauri::Wry>::new("clock").js_init_script(clock::init_script()).build());
     // Updating itself: only a build made by CI with the signing key has the updater's
     // configuration (see `updater`); without it the plugin isn't there and Settings says so.
     let context = tauri::generate_context!();

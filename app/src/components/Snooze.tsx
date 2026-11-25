@@ -2,6 +2,7 @@ import { createMemo, createSignal, For, onMount, Show } from 'solid-js';
 import { monthGrid, parseTime, stepTime } from '../lib/clock';
 import { Portal } from 'solid-js/web';
 import { placeNear, useDismiss } from './Actions';
+import { clock } from '../lib/format';
 
 // Snooze is a reminder: the message stays where it is, and at the chosen time it comes back
 // unread at the top of the Inbox (out of the archive, if it went there), with a notification
@@ -41,7 +42,7 @@ export function pendingSnooze(ms: { snoozedUntil?: number | null }[]): number | 
 /** When a snoozed message comes back: "14:00" today, "Tue 08:00" this week, else "21 Nov". */
 export function fmtWake(until: number, now = new Date()): string {
   const d = new Date(until * 1000);
-  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const time = d.toLocaleTimeString(undefined, clock({ hour: 'numeric', minute: '2-digit' }));
   const days = Math.round((at(d, 0) - at(now, 0)) / 86400);
   if (days === 0) return time;
   if (days > 0 && days < 7) return `${d.toLocaleDateString(undefined, { weekday: 'short' })} ${time}`;
@@ -51,7 +52,7 @@ export function fmtWake(until: number, now = new Date()): string {
 /** The clock shows hours 0–23 here (else 1–12 with am/pm). */
 const H24 = (() => {
   try {
-    const c = new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hourCycle;
+    const c = new Intl.DateTimeFormat(undefined, clock({ hour: 'numeric' })).resolvedOptions().hourCycle;
     return c === 'h23' || c === 'h24';
   } catch {
     return false;
@@ -67,7 +68,7 @@ const FIRST_DAY = (() => {
   }
 })();
 const fmtMinutes = (m: number) =>
-  new Date(2000, 0, 1, Math.floor(m / 60), m % 60).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  new Date(2000, 0, 1, Math.floor(m / 60), m % 60).toLocaleTimeString(undefined, clock({ hour: 'numeric', minute: '2-digit' }));
 const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
 /** A date and time of the user's choosing: a month calendar (click a day, or arrow keys) and a

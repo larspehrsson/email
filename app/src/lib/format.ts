@@ -1,20 +1,38 @@
 import { createSignal } from 'solid-js';
 import { hash } from './accountMarks';
 
+// ------------------------------------------------------------- the clock
+
+/** The system's clock, 24-hour or 12-hour, as the app found it at start (`src-tauri/src/
+ *  clock.rs`: macOS's own setting, which the webview's Intl doesn't follow: it goes by the
+ *  language and region alone); undefined: the language's own (the browser preview, Linux). */
+export const HOUR_CYCLE: 'h12' | 'h23' | undefined = (() => {
+  const v = (globalThis as { __MAIL_HOUR_CYCLE__?: unknown }).__MAIL_HOUR_CYCLE__;
+  return v === 'h12' || v === 'h23' ? v : undefined;
+})();
+
+/** Formatting options for a time of day, on the system's clock. */
+export function clock(o: Intl.DateTimeFormatOptions): Intl.DateTimeFormatOptions {
+  return HOUR_CYCLE ? { ...o, hourCycle: HOUR_CYCLE } : o;
+}
+
 // ------------------------------------------------------------- smart dates
 
-const timeFmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
+const timeFmt = new Intl.DateTimeFormat(undefined, clock({ hour: 'numeric', minute: '2-digit' }));
 const weekdayFmt = new Intl.DateTimeFormat(undefined, { weekday: 'long' });
 const monthDayFmt = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
 const fullDateFmt = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-const longFmt = new Intl.DateTimeFormat(undefined, {
-  weekday: 'long',
-  month: 'long',
-  day: 'numeric',
-  year: 'numeric',
-  hour: 'numeric',
-  minute: '2-digit',
-});
+const longFmt = new Intl.DateTimeFormat(
+  undefined,
+  clock({
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }),
+);
 
 function startOfToday(): number {
   const d = new Date();

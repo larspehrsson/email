@@ -32,9 +32,10 @@ after(async () => {
 });
 
 /** The demo in a fresh window, as a list of messages or of conversations. */
-async function open({ threaded, query = '' }) {
+async function open({ threaded, query = '', init }) {
   const context = await browser.newContext({ viewport: { width: 1400, height: 850 }, locale: 'en-US', timezoneId: 'America/New_York' });
   await context.clock.setFixedTime(NOW);
+  if (init) await context.addInitScript(init);
   await context.addInitScript((t) => localStorage.setItem('ui.threaded', JSON.stringify(t)), threaded);
   // The app's window refuses blob: pictures (its CSP allows data:); a browser tab wouldn't, so
   // make them fail here too.
@@ -305,6 +306,35 @@ describe('reader', () => {
 
       await page.locator('.reader-subject').hover();
       await peek.waitFor({ state: 'detached' });
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('times follow the system\u2019s clock: 24-hour when the app says so, else the language\u2019s', async () => {
+    const shown = async (page) => {
+      await page.locator('.folder-layer .row').first().click();
+      const time = page.locator('.reader time').first();
+      await time.waitFor();
+      return time.textContent();
+    };
+    // en-US on its own: am/pm.
+    let { page, errors, close } = await open({ threaded: false });
+    try {
+      assert.match(await shown(page), /\d:\d\d\s?[AP]M/i);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+    // The app found a 24-hour clock (clock.rs on macOS): no am/pm, in the reader and the list.
+    ({ page, errors, close } = await open({ threaded: false, init: () => (window.__MAIL_HOUR_CYCLE__ = 'h23') }));
+    try {
+      const text = await shown(page);
+      assert.match(text, /\d\d?:\d\d/);
+      assert.doesNotMatch(text, /[AP]M/i, text);
+      const dates = await page.locator('.folder-layer .row .row-date').allTextContents();
+      assert.ok(dates.length > 0 && dates.every((d) => !/[AP]M/i.test(d)), dates.join(', '));
       assert.deepEqual(errors, []);
     } finally {
       await close();

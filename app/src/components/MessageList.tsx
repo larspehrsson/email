@@ -4,7 +4,7 @@ import { api, type Addr, type Folder, type MessageSummary, type SearchField, typ
 import { createPagedList } from '../lib/messageList';
 import { senderPictures } from '../lib/senderIcons';
 import { Avatar } from './Avatar';
-import { dayStart, fmtNum, fmtSize, smartDate } from '../lib/format';
+import { clock, dayStart, fmtNum, fmtSize, smartDate } from '../lib/format';
 import {
   datePeriods,
   insertRow,
@@ -69,7 +69,7 @@ import { openSource } from './SourceView';
 function SnoozeMark(props: { until?: number | null }) {
   return (
     <Show when={(props.until ?? 0) > Date.now() / 1000}>
-      <span class="snooze-mark" title={`Snoozed until ${new Date(props.until! * 1000).toLocaleString()}`}>
+      <span class="snooze-mark" title={`Snoozed until ${new Date(props.until! * 1000).toLocaleString(undefined, clock({ dateStyle: 'medium', timeStyle: 'short' }))}`}>
         <ClockIcon size={12} class="icon marker" />
       </span>
     </Show>
