@@ -104,5 +104,8 @@ fn transport(cfg: &SmtpConfig) -> Result<AsyncSmtpTransport<Tokio1Executor>, Sen
             (SmtpCredentials::new(cfg.user.clone(), access_token.clone()), vec![Mechanism::Xoauth2])
         }
     };
-    Ok(builder.port(cfg.port).credentials(credentials).authentication(mechanisms).timeout(Some(TIMEOUT)).build())
+    // Greet as [127.0.0.1], not this computer's name: servers write the greeting into the
+    // Received header every recipient sees.
+    let hello = lettre::transport::smtp::extension::ClientId::Ipv4(std::net::Ipv4Addr::LOCALHOST);
+    Ok(builder.port(cfg.port).hello_name(hello).credentials(credentials).authentication(mechanisms).timeout(Some(TIMEOUT)).build())
 }

@@ -1,0 +1,1202 @@
+{
+  "spec": "0.1",
+  "subject": {
+    "name": "Email",
+    "repository": "https://github.com/rickhall/email",
+    "commit": "32f1c07 + uncommitted fixes",
+    "version": "0.1.183",
+    "date": "2026-11-24",
+    "platforms": [
+      "linux",
+      "macos",
+      "windows"
+    ]
+  },
+  "summary": [
+    {
+      "statement": "Nothing is sent to the developers: no analytics, crash reports or usage data, and no account with them. The only server the project controls that Email contacts is its GitHub releases page, for updates.",
+      "rests_on": [
+        "developer.none-but-updates",
+        "connections.updates"
+      ]
+    },
+    {
+      "statement": "Your mail stays on your computer, and your passwords are in the system's keychain.",
+      "rests_on": [
+        "storage.mail-list",
+        "storage.messages",
+        "secrets.keychain"
+      ]
+    },
+    {
+      "statement": "Email talks to your own mail servers and GitHub (for updates); everything else it contacts is a service you turn on.",
+      "rests_on": [
+        "connections.mail-servers",
+        "connections.updates",
+        "connections.google-contacts",
+        "connections.microsoft-graph",
+        "connections.ai",
+        "connections.sender-pictures"
+      ]
+    },
+    {
+      "statement": "Pictures and other web content in a message are blocked until you allow them, so senders can't see you opened it until then.",
+      "rests_on": [
+        "connections.message-pictures",
+        "untrusted-input.remote-content"
+      ]
+    },
+    {
+      "statement": "Messages are cleaned of scripts and shown in a frame that allows none.",
+      "rests_on": [
+        "untrusted-input.message-html",
+        "untrusted-input.message-frame"
+      ]
+    },
+    {
+      "statement": "Updates are signed and checked before they're installed.",
+      "rests_on": [
+        "updates.signed"
+      ]
+    },
+    {
+      "statement": "Some protections can be fooled by a sender who forges headers, and mail on disk isn't encrypted by Email: see the weaknesses.",
+      "rests_on": [
+        "weaknesses.forged-senders",
+        "weaknesses.unencrypted-at-rest"
+      ]
+    }
+  ],
+  "sections": {
+    "developer": [
+      {
+        "id": "developer.none-but-updates",
+        "claim": "Nothing is sent to the developers. The only server under the project's control that Email contacts is the GitHub release it checks for updates.",
+        "level": "declared",
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "app/src-tauri/src/updater.rs",
+            "symbol": "check_for_update"
+          },
+          {
+            "kind": "config",
+            "path": ".github/workflows/build.yml",
+            "note": "the Updater step sets the only endpoint: the repository's own latest release"
+          }
+        ],
+        "verify": "List every outgoing connection (see the connections section) and check each one's destination. None may belong to the developers except the updater endpoint, and nothing may carry usage, diagnostics or identifiers to it.",
+        "refuted_if": "Any analytics, crash-reporting, telemetry or remote-configuration call, or any request to a developer-run host other than the update check."
+      }
+    ],
+    "connections": [
+      {
+        "id": "connections.mail-servers",
+        "claim": "Email connects to the mail servers you set up, to read mail (IMAP) and send it (SMTP), over verified TLS. It greets SMTP servers as [127.0.0.1], not by your computer's name, which servers would copy into the Received header every recipient sees.",
+        "level": "declared",
+        "destination": "the user's IMAP and SMTP servers",
+        "operator": "user",
+        "direction": "outgoing",
+        "scope": "internet",
+        "trigger": [
+          "account-sync",
+          "user-action"
+        ],
+        "frequency": "while Email runs: kept open for new mail, and for each action",
+        "default": "on",
+        "control": "add or remove accounts in Settings › Accounts",
+        "encryption": "tls-verified",
+        "sends": [
+          "credentials",
+          "message-content",
+          "message-headers",
+          "attachments"
+        ],
+        "reveals": [
+          "ip-address",
+          "account-identity"
+        ],
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/imap.rs",
+            "symbol": "connect_inner",
+            "note": "TLS from the first byte, certificates checked against the system's roots (tls_config)"
+          },
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/smtp.rs",
+            "symbol": "transport",
+            "note": "implicit TLS on 465, STARTTLS otherwise"
+          },
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/smtp.rs",
+            "symbol": "hello_name"
+          }
+        ],
+        "verify": "Read connect_inner and tls_config: the connection is wrapped in TLS before anything is sent, and certificates are verified. Read smtp::transport.",
+        "refuted_if": "A plaintext IMAP or SMTP path, certificate checks turned off, or a connection to a server the user didn't configure."
+      },
+      {
+        "id": "connections.server-discovery",
+        "claim": "When you add an account whose server Email doesn't know, it looks up your email domain's MX records in DNS to find the provider.",
+        "level": "declared",
+        "destination": "the system's DNS resolver",
+        "operator": "user",
+        "direction": "outgoing",
+        "scope": "internet",
+        "trigger": [
+          "user-action"
+        ],
+        "frequency": "once, when adding an account",
+        "default": "on",
+        "control": "enter the server yourself",
+        "encryption": "plaintext",
+        "sends": [
+          "domain-names"
+        ],
+        "reveals": [
+          "ip-address"
+        ],
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/imap.rs",
+            "symbol": "discover_server"
+          }
+        ],
+        "verify": "Find the callers of discover_server: they must all be part of adding an account.",
+        "refuted_if": "discover_server or another MX lookup is called from sync, startup or incoming mail."
+      },
+      {
+        "id": "connections.sign-in",
+        "claim": "Google and Microsoft accounts sign in through your web browser; Email then exchanges and renews the sign-in with Google's or Microsoft's token service. During sign-in, Email listens on a local port for the browser's answer.",
+        "level": "declared",
+        "destination": "oauth2.googleapis.com, login.microsoftonline.com, and a port on 127.0.0.1 during sign-in",
+        "operator": "third-party",
+        "operator_name": "Google, Microsoft",
+        "direction": "outgoing",
+        "scope": "internet",
+        "trigger": [
+          "user-action",
+          "account-sync"
+        ],
+        "frequency": "when you sign in, and to renew the sign-in about once an hour while in use",
+        "default": "off",
+        "control": "use an app password instead of signing in",
+        "encryption": "tls-verified",
+        "sends": [
+          "credentials"
+        ],
+        "reveals": [
+          "ip-address",
+          "account-identity"
+        ],
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/oauth.rs",
+            "symbol": "https"
+          },
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/oauth.rs",
+            "symbol": "listen",
+            "note": "the local listener binds 127.0.0.1 only"
+          }
+        ],
+        "verify": "Read oauth::https and its callers (token exchange and refresh). Read the listener: it binds 127.0.0.1 and closes after the sign-in.",
+        "refuted_if": "Tokens sent anywhere but the provider's token host, or a listener bound to a non-loopback address."
+      },
+      {
+        "id": "connections.google-contacts",
+        "claim": "If you connect Google Contacts, Email syncs your contacts with Google's People API.",
+        "level": "declared",
+        "destination": "people.googleapis.com",
+        "operator": "third-party",
+        "operator_name": "Google",
+        "direction": "outgoing",
+        "scope": "internet",
+        "trigger": [
+          "user-schedule",
+          "user-action"
+        ],
+        "frequency": "when the address book opens, after you change a contact, and every 15 minutes",
+        "default": "off",
+        "control": "Settings › Accounts › Google Contacts › Disconnect",
+        "encryption": "tls-verified",
+        "sends": [
+          "contacts",
+          "credentials"
+        ],
+        "reveals": [
+          "ip-address",
+          "account-identity"
+        ],
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/gcontacts.rs",
+            "symbol": "PEOPLE_HOST"
+          },
+          {
+            "kind": "code",
+            "path": "app/src/lib/googleContacts.ts",
+            "note": "the 15-minute timer, only for connected accounts"
+          }
+        ],
+        "verify": "Check the sync runs only for accounts with a Google Contacts link (google_links), and find what starts it.",
+        "refuted_if": "A People API call for an account that isn't connected."
+      },
+      {
+        "id": "connections.microsoft-graph",
+        "claim": "If you turn on tags and snooze for a Microsoft account, Email uses Microsoft Graph for them. Marking a message as spam there also reports it to Microsoft.",
+        "level": "declared",
+        "destination": "graph.microsoft.com",
+        "operator": "third-party",
+        "operator_name": "Microsoft",
+        "direction": "outgoing",
+        "scope": "internet",
+        "trigger": [
+          "user-schedule",
+          "user-action"
+        ],
+        "frequency": "every 3 minutes, and when you tag or snooze",
+        "default": "off",
+        "control": "Settings › Accounts › Tags & snooze",
+        "encryption": "tls-verified",
+        "sends": [
+          "message-headers",
+          "credentials"
+        ],
+        "reveals": [
+          "ip-address",
+          "account-identity"
+        ],
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/graph.rs",
+            "symbol": "HOST"
+          },
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/sync/mod.rs",
+            "symbol": "graph_task"
+          },
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/graph.rs",
+            "note": "reportMessage"
+          }
+        ],
+        "verify": "Check graph_task and Graph requests run only for accounts with Graph turned on (accounts.graph).",
+        "refuted_if": "A Graph request for an account without it turned on."
+      },
+      {
+        "id": "connections.ai",
+        "claim": "Writing help contacts Anthropic's API only when you ask. It sends your name and address, the subject and the recipients, the message you're replying to, what you've written, and your instruction, with your own API key. In a message's source view, Ask sends the whole message with its headers.",
+        "level": "declared",
+        "destination": "api.anthropic.com",
+        "operator": "third-party",
+        "operator_name": "Anthropic",
+        "direction": "outgoing",
+        "scope": "internet",
+        "trigger": [
+          "user-action"
+        ],
+        "frequency": "each time you ask",
+        "default": "off",
+        "control": "it does nothing until you add an API key in Settings › AI",
+        "encryption": "tls-verified",
+        "sends": [
+          "message-content",
+          "message-headers",
+          "contacts",
+          "draft-content",
+          "api-key"
+        ],
+        "reveals": [
+          "ip-address"
+        ],
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/ai.rs",
+            "symbol": "run"
+          },
+          {
+            "kind": "code",
+            "path": "app/src-tauri/src/lib.rs",
+            "symbol": "ai_run"
+          },
+          {
+            "kind": "code",
+            "path": "app/src/components/AiPanel.tsx",
+            "symbol": "go"
+          },
+          {
+            "kind": "code",
+            "path": "app/src/components/SourceView.tsx",
+            "note": "Ask sends the raw message"
+          }
+        ],
+        "verify": "Find every caller of ai::run and of the ai_run command: each must start from a user's request in the composer or the source view.",
+        "refuted_if": "Any path from sync, a timer, startup or incoming mail reaches ai::run."
+      },
+      {
+        "id": "connections.sender-pictures",
+        "claim": "If you choose a sender-picture level, Email looks up a sender's domain: a DNS query for its BIMI logo, then its website's icon. The BIMI record and the website can name pictures on other servers, which are fetched too. Everything goes over HTTPS to public addresses only, never this computer or the local network. Your DNS resolver sees each domain looked up.",
+        "level": "tested",
+        "destination": "the sender's domain, servers its BIMI record or website names, and your DNS resolver",
+        "operator": "third-party",
+        "operator_name": "the sender's domain",
+        "direction": "outgoing",
+        "scope": "internet",
+        "trigger": [
+          "content"
+        ],
+        "frequency": "once per domain, kept 30 days (a miss, 7)",
+        "default": "off",
+        "control": "Settings › General › Sender pictures: off, contacts, domains you write to, or all",
+        "encryption": "tls-verified",
+        "sends": [
+          "domain-names"
+        ],
+        "reveals": [
+          "ip-address",
+          "contact-relationships"
+        ],
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/lib.rs",
+            "symbol": "sender_icon",
+            "note": "the level decides; Spam rows ask for none"
+          },
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/icons.rs",
+            "symbol": "fetch"
+          },
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/icons.rs",
+            "symbol": "ICONS",
+            "note": "HTTPS only, public addresses only"
+          },
+          {
+            "kind": "test",
+            "path": "crates/mail-core/src/lib.rs",
+            "symbol": "picture_tests"
+          },
+          {
+            "kind": "test",
+            "path": "crates/mail-core/src/icons.rs",
+            "symbol": "public_addresses"
+          },
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/store.rs",
+            "symbol": "contact_rows",
+            "note": "recipients count only for mail in a Sent folder"
+          }
+        ],
+        "verify": "Check the default level is off (lib/senderIcons.ts), that sender_icon returns before any lookup for the Contacts scope and for unknown domains at the Known scope, and that icons::get refuses non-HTTPS and non-public addresses for ICONS.",
+        "refuted_if": "A lookup with the level off, at Contacts, or for a domain outside the chosen level; a connection to a private address; or (at the 'domains you write to' level) a domain counted as written to because of mail that isn't in a Sent folder."
+      },
+      {
+        "id": "connections.contact-photos",
+        "claim": "For a Google contact with a photo of their own, Email fetches it once from Google's photo servers, and keeps it.",
+        "level": "declared",
+        "destination": "Google's photo servers (the address Google gives for the photo)",
+        "operator": "third-party",
+        "operator_name": "Google",
+        "direction": "outgoing",
+        "scope": "internet",
+        "trigger": [
+          "user-action",
+          "content"
+        ],
+        "frequency": "once per contact photo",
+        "default": "off",
+        "control": "only with Google Contacts connected",
+        "encryption": "tls-verified",
+        "sends": [],
+        "reveals": [
+          "ip-address"
+        ],
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/lib.rs",
+            "symbol": "contact_photo"
+          },
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/lib.rs",
+            "symbol": "card_photo"
+          }
+        ],
+        "verify": "Read contact_photo and card_photo: the URL comes from the synced Google person, and the photo is kept in card_photos.",
+        "refuted_if": "A photo fetched for an account without Google Contacts, or from an address a message can set."
+      },
+      {
+        "id": "connections.message-pictures",
+        "claim": "Pictures and other web content in a message load only after you allow them, for that message, its sender, or the sender's whole domain (the last only for mail your provider confirmed came from there). Then the web view loads them from their servers.",
+        "level": "declared",
+        "destination": "the servers named in a message's pictures",
+        "operator": "third-party",
+        "operator_name": "whoever the message names",
+        "direction": "outgoing",
+        "scope": "internet",
+        "trigger": [
+          "content",
+          "user-action"
+        ],
+        "frequency": "each time an allowed message is shown",
+        "default": "off",
+        "control": "Load images / Always load… over a message; Settings › General lists who's allowed",
+        "encryption": "tls-verified",
+        "sends": [],
+        "reveals": [
+          "ip-address",
+          "reading-activity",
+          "device-info"
+        ],
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "app/src/components/Reader.tsx",
+            "symbol": "buildSrcdoc",
+            "note": "the frame's content policy allows remote images only when allowed"
+          },
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/store.rs",
+            "symbol": "allow_remote"
+          },
+          {
+            "kind": "test",
+            "path": "crates/mail-core/src/store.rs",
+            "symbol": "images_always_from_a_sender"
+          },
+          {
+            "kind": "test",
+            "path": "crates/mail-core/src/mime.rs",
+            "symbol": "a_sender_domain_counts_only_when_the_receiving_server_vouched"
+          }
+        ],
+        "verify": "Read buildSrcdoc's content security policy for both cases, and what decides allowRemote. Check the web view can't load remote content another way (CSS, fonts, iframes, link prefetch).",
+        "refuted_if": "Any remote request from a message before it's allowed, through any element or CSS.",
+        "details": "The tests cover the stored allow rules, not the frame's content policy that does the blocking. Once a message's pictures are allowed, its pictures can be on any server, including ones on your local network: a content policy can't limit them to public addresses."
+      },
+      {
+        "id": "connections.message-pictures-http",
+        "claim": "For an allowed message, a picture from a plain http:// address that fails over https (the web view upgrades it) is fetched by Email itself over plain HTTP, from public addresses only.",
+        "level": "tested",
+        "destination": "the server named in the picture's address",
+        "operator": "third-party",
+        "operator_name": "whoever the message names",
+        "direction": "outgoing",
+        "scope": "internet",
+        "trigger": [
+          "content"
+        ],
+        "frequency": "once per failed picture, at most four at a time",
+        "default": "off",
+        "control": "only for messages whose pictures you allowed",
+        "encryption": "plaintext",
+        "sends": [],
+        "reveals": [
+          "ip-address",
+          "reading-activity"
+        ],
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "app/src/lib/images.ts",
+            "symbol": "rescueHttpImages"
+          },
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/icons.rs",
+            "symbol": "mail_image"
+          },
+          {
+            "kind": "code",
+            "path": "app/src-tauri/src/lib.rs",
+            "symbol": "mail_image_protocol"
+          },
+          {
+            "kind": "test",
+            "path": "crates/mail-core/src/icons.rs",
+            "symbol": "plain_http"
+          }
+        ],
+        "verify": "Check rescueHttpImages runs only when the message's pictures are allowed, that mail_image refuses non-public addresses and addresses with control characters, and what an email itself can do with the mailimg scheme.",
+        "refuted_if": "A fetch for a message whose pictures aren't allowed, to a private address, or one an email can trigger with a crafted address."
+      },
+      {
+        "id": "connections.updates",
+        "claim": "Email asks the project's GitHub release for a newer version 20 seconds after starting and every 6 hours, and downloads it when there is one.",
+        "level": "declared",
+        "destination": "github.com (the repository's latest release)",
+        "operator": "developer",
+        "operator_name": "the project, hosted by GitHub",
+        "direction": "outgoing",
+        "scope": "internet",
+        "trigger": [
+          "app-schedule",
+          "startup",
+          "user-action"
+        ],
+        "frequency": "20 seconds after starting, then every 6 hours",
+        "default": "on",
+        "control": "Settings › Troubleshooting › Updates",
+        "encryption": "tls-verified",
+        "sends": [
+          "app-version"
+        ],
+        "reveals": [
+          "ip-address",
+          "app-version",
+          "device-info"
+        ],
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "app/src/lib/updates.ts",
+            "symbol": "FIRST_CHECK_MS"
+          },
+          {
+            "kind": "code",
+            "path": "app/src-tauri/src/updater.rs",
+            "symbol": "check_for_update"
+          },
+          {
+            "kind": "config",
+            "path": ".github/workflows/build.yml",
+            "note": "the updater endpoint"
+          }
+        ],
+        "verify": "Check the timer in updates.ts respects the off switch, and the endpoint in build.yml.",
+        "refuted_if": "A check with updates turned off, or to another endpoint."
+      },
+      {
+        "id": "connections.ai-apps",
+        "claim": "AI apps (MCP) reach Email through a socket on this computer only, never the network. Until you turn AI apps on, they can see Email's list of tools but can't use any; each permission (reading, drafts, organizing, deleting, sending) is a switch of its own, and deleting and sending ask you every time.",
+        "level": "declared",
+        "destination": "a Unix socket in the data folder",
+        "operator": "user",
+        "direction": "listening",
+        "scope": "this-computer",
+        "trigger": [
+          "startup"
+        ],
+        "frequency": "listening while Email runs",
+        "default": "off",
+        "control": "Settings › AI apps",
+        "encryption": "local-only",
+        "sends": [
+          "message-content",
+          "message-headers",
+          "contacts"
+        ],
+        "reveals": [],
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "app/src-tauri/src/mcp.rs",
+            "symbol": "start"
+          },
+          {
+            "kind": "code",
+            "path": "app/src-tauri/src/mcp.rs",
+            "symbol": "socket_path"
+          }
+        ],
+        "verify": "Check the listener is a Unix socket (no TCP), and that requests are refused until an app is allowed, per permission.",
+        "refuted_if": "A TCP listener, or a tool call that does anything before it's allowed."
+      }
+    ],
+    "third-parties": [
+      {
+        "id": "third-parties.list",
+        "claim": "Besides your own mail servers and GitHub (updates): Google (sign-in, Contacts and contact photos) and Microsoft (sign-in, Graph, and spam reports with Graph) only for the features you use with their accounts; Anthropic only when you ask for writing help; senders' domains, the servers their BIMI records and websites name, and your DNS resolver, as far as the sender-picture level you choose; and the servers of pictures in messages you allow.",
+        "level": "declared",
+        "evidence": [
+          {
+            "kind": "doc",
+            "path": "docs/trust/trust.json",
+            "note": "derived from the connections section"
+          }
+        ],
+        "verify": "Compare with the connections section and with the completeness search.",
+        "refuted_if": "A connection whose operator isn't listed here."
+      }
+    ],
+    "storage": [
+      {
+        "id": "storage.mail-list",
+        "claim": "Folders, message headers, tags, drafts, the address book and the search index of message text are in mail.db in Email's data folder. Your lists of senders and domains whose pictures always load are here too, and stay when an account is removed.",
+        "level": "declared",
+        "location": {
+          "linux": "~/.local/share/dev.mailclient.desktop/mail.db",
+          "macos": "~/Library/Application Support/dev.mailclient.desktop/mail.db",
+          "windows": "%APPDATA%\\dev.mailclient.desktop\\mail.db"
+        },
+        "holds": [
+          "message-headers",
+          "draft-content",
+          "contacts",
+          "message-content"
+        ],
+        "encrypted_by_app": false,
+        "retention": "until the messages are deleted on the server, or the account is removed",
+        "removed_by": [
+          "account-removal",
+          "user-action"
+        ],
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/store.rs",
+            "note": "the schema; body_fts holds message text for search"
+          }
+        ],
+        "verify": "Read the schema in store.rs and where the database is opened.",
+        "refuted_if": "Mail data kept elsewhere, or kept after the account is removed."
+      },
+      {
+        "id": "storage.messages",
+        "claim": "The messages themselves, and attachments if you keep them for offline use, are in bodies.db.",
+        "level": "declared",
+        "location": "bodies.db in the data folder",
+        "holds": [
+          "message-content",
+          "attachments"
+        ],
+        "encrypted_by_app": false,
+        "retention": "as long as the message is kept",
+        "removed_by": [
+          "account-removal",
+          "user-action"
+        ],
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/store.rs"
+          }
+        ],
+        "verify": "Read where bodies are written.",
+        "refuted_if": "Bodies written elsewhere."
+      },
+      {
+        "id": "storage.log",
+        "claim": "The log records what Email did and any problems: account addresses, folder and server names, and timings, and, for actions AI apps take, the message's subject and recipients. No message text.",
+        "level": "declared",
+        "location": {
+          "linux": "~/.local/share/dev.mailclient.desktop/logs",
+          "macos": "~/Library/Logs/dev.mailclient.desktop",
+          "windows": "%LOCALAPPDATA%\\dev.mailclient.desktop\\logs"
+        },
+        "holds": [
+          "diagnostics",
+          "message-headers"
+        ],
+        "encrypted_by_app": false,
+        "retention": "kept, rotated",
+        "removed_by": [
+          "user-action"
+        ],
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "app/src-tauri/src/lib.rs",
+            "symbol": "init_logging"
+          },
+          {
+            "kind": "code",
+            "path": "app/src-tauri/src/mcp.rs",
+            "note": "AI-app action summaries are logged"
+          }
+        ],
+        "verify": "Search tracing:: and log:: calls for fields that could hold a subject, body text or a password.",
+        "refuted_if": "A log line that records message text, a password or a token, or a subject outside AI-app actions."
+      },
+      {
+        "id": "storage.attachment-cache",
+        "claim": "Attachments you open are copied to the system's cache folder for other apps to open, and cleared each time Email starts.",
+        "level": "declared",
+        "location": "the system cache folder, attachments/",
+        "holds": [
+          "attachments"
+        ],
+        "encrypted_by_app": false,
+        "retention": "until Email next starts",
+        "removed_by": [
+          "app-restart"
+        ],
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "app/src-tauri/src/lib.rs",
+            "note": "attachment cache directory, removed at startup"
+          }
+        ],
+        "verify": "Find where opened attachments are written and the startup cleanup.",
+        "refuted_if": "Opened attachments kept elsewhere, or not cleared."
+      },
+      {
+        "id": "storage.draft-files",
+        "claim": "Attachments of drafts opened from the server are copied into draft-files/ in the data folder, and removed at startup once no draft or queued message uses them.",
+        "level": "declared",
+        "location": "draft-files/ in the data folder",
+        "holds": [
+          "attachments"
+        ],
+        "encrypted_by_app": false,
+        "retention": "until the draft is sent or discarded, then the next start",
+        "removed_by": [
+          "app-restart"
+        ],
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "app/src-tauri/src/lib.rs",
+            "symbol": "draft_attachment_files"
+          },
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/lib.rs",
+            "symbol": "unused_draft_file_dirs"
+          }
+        ],
+        "verify": "Read both.",
+        "refuted_if": "Copies kept after no draft refers to them."
+      },
+      {
+        "id": "storage.settings",
+        "claim": "Your choices in Settings and View options are in the web view's own storage, in the data folder.",
+        "level": "declared",
+        "location": "the web view's storage in the data folder",
+        "holds": [
+          "settings"
+        ],
+        "encrypted_by_app": false,
+        "retention": "until changed",
+        "removed_by": [
+          "uninstall"
+        ],
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "app/src/lib/format.ts",
+            "symbol": "savePref"
+          }
+        ],
+        "verify": "Search localStorage use.",
+        "refuted_if": "Message content or credentials kept in localStorage."
+      },
+      {
+        "id": "storage.webview-cache",
+        "claim": "The web view keeps its own cache and cookies, so pictures you loaded and cookies their servers set can stay on disk.",
+        "level": "declared",
+        "location": "the web view's folders in the data folder (WebKitCache, cookies, storage)",
+        "holds": [
+          "usage",
+          "other"
+        ],
+        "encrypted_by_app": false,
+        "retention": "as the web view decides",
+        "removed_by": [
+          "uninstall"
+        ],
+        "evidence": [
+          {
+            "kind": "config",
+            "path": "app/src-tauri/tauri.conf.json"
+          }
+        ],
+        "verify": "Look at the data folder after loading a message's pictures.",
+        "refuted_if": "(A description; refuted if the web view keeps nothing.)"
+      },
+      {
+        "id": "storage.app-files",
+        "claim": "Window sizes and the AI-apps settings are small files in the data folder; saved attachments go to Downloads, and exports where you choose.",
+        "level": "declared",
+        "location": "the data folder (window state, mcp.json); Downloads; your chosen export folder",
+        "holds": [
+          "settings",
+          "attachments",
+          "message-content"
+        ],
+        "encrypted_by_app": false,
+        "retention": "until you delete them",
+        "removed_by": [
+          "user-action"
+        ],
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "app/src-tauri/src/window_state.rs"
+          },
+          {
+            "kind": "code",
+            "path": "app/src-tauri/src/mcp.rs"
+          }
+        ],
+        "verify": "Search for file writes in app/src-tauri/src.",
+        "refuted_if": "Another file written with user data."
+      }
+    ],
+    "secrets": [
+      {
+        "id": "secrets.keychain",
+        "claim": "Account passwords, sign-in tokens, the writing-help API key and your Google sign-in client are kept in the system's keychain (one item, dev.mail-client), never in files, and sent only to the service each belongs to.",
+        "level": "declared",
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/lib.rs",
+            "symbol": "vault_entry"
+          }
+        ],
+        "verify": "Find where credentials are read and written: only through the vault. Check where each one is sent.",
+        "refuted_if": "A credential written to a file or the database, logged, or sent anywhere but its own service."
+      }
+    ],
+    "untrusted-input": [
+      {
+        "id": "untrusted-input.message-html",
+        "claim": "Messages are cleaned before they're shown: scripts, event handlers, javascript: links, links to data: pages, and link targets are removed.",
+        "level": "tested",
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/mime.rs",
+            "symbol": "sanitize_html"
+          },
+          {
+            "kind": "test",
+            "path": "crates/mail-core/src/mime.rs",
+            "symbol": "no_way_to_run_code_survives"
+          },
+          {
+            "kind": "test",
+            "path": "crates/mail-core/src/mime.rs",
+            "symbol": "strips_active_content_keeps_layout"
+          },
+          {
+            "kind": "test",
+            "path": "crates/mail-core/src/mime.rs",
+            "symbol": "no_data_links_or_targets"
+          }
+        ],
+        "verify": "Read the sanitizer's allowed tags, attributes, URL schemes and the attribute filter.",
+        "refuted_if": "Markup that survives cleaning and can run script or open a document of the message's making."
+      },
+      {
+        "id": "untrusted-input.message-frame",
+        "claim": "A message is shown in a sandboxed frame whose content policy allows no scripts; links open in your browser, never in Email.",
+        "level": "declared",
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "app/src/components/Reader.tsx",
+            "symbol": "buildSrcdoc",
+            "note": "script-src 'none'; <base target=_blank>"
+          },
+          {
+            "kind": "code",
+            "path": "app/src/components/AutoHeightFrame.tsx",
+            "note": "the sandbox attribute"
+          },
+          {
+            "kind": "code",
+            "path": "app/src-tauri/src/lib.rs",
+            "symbol": "is_app_url",
+            "note": "navigation outside the app goes to the browser"
+          }
+        ],
+        "verify": "Read the sandbox flags, the content policy, and the window's navigation and new-window handlers. No test covers this; it needs checking in each web view.",
+        "refuted_if": "Any way for message content to run script, reach the app's IPC, or navigate the app window."
+      },
+      {
+        "id": "untrusted-input.remote-content",
+        "claim": "Remote content is blocked by default. A rule for a whole domain counts only for mail whose topmost Authentication-Results header shows DMARC or DKIM passed for that domain. That header is trusted as your provider's own: Gmail and Microsoft add theirs, but on a server that doesn't, a sender can write one.",
+        "level": "tested",
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/mime.rs",
+            "symbol": "verified_sender_domain"
+          },
+          {
+            "kind": "test",
+            "path": "crates/mail-core/src/mime.rs",
+            "symbol": "a_sender_domain_counts_only_when_the_receiving_server_vouched"
+          }
+        ],
+        "verify": "Read verified_sender_domain and where its result gates the domain rule.",
+        "refuted_if": "A domain rule applying to mail without that confirmation.",
+        "details": "The test covers reading the header, not who wrote it."
+      },
+      {
+        "id": "untrusted-input.attachments",
+        "claim": "Only known kinds of documents, pictures, sound, video and zip files open directly; anything else (programs, scripts, shortcuts, disk images, web pages, Office files with macros, unknown types) is only saved. File names are cleaned.",
+        "level": "tested",
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/mime.rs",
+            "symbol": "is_openable"
+          },
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/mime.rs",
+            "symbol": "safe_file_name"
+          },
+          {
+            "kind": "test",
+            "path": "crates/mail-core/src/mime.rs",
+            "symbol": "attachment_helpers"
+          }
+        ],
+        "verify": "Read is_openable (a list of types that open) and where opening checks it.",
+        "refuted_if": "A type that can run code opens directly."
+      }
+    ],
+    "updates": [
+      {
+        "id": "updates.signed",
+        "claim": "Each update is signed with the project's update key and checked against the public key built into Email before it's installed. On Linux, an .rpm update is installed as root (after your password) from a new folder only you can open. The macOS app is signed and notarized by Apple.",
+        "level": "declared",
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "app/src-tauri/src/updater.rs",
+            "note": "Update::download verifies the signature (Tauri's updater plugin)"
+          },
+          {
+            "kind": "config",
+            "path": ".github/workflows/build.yml",
+            "note": "signing with TAURI_SIGNING_PRIVATE_KEY; the public key built in"
+          },
+          {
+            "kind": "code",
+            "path": "app/src-tauri/src/updater.rs",
+            "symbol": "private_dir"
+          }
+        ],
+        "verify": "Read the updater plugin's download and install path, and updater::install_rpm (which installs with --nosignature after that check).",
+        "refuted_if": "A path that installs a download whose signature wasn't checked."
+      }
+    ],
+    "supply-chain": [
+      {
+        "id": "supply-chain.builds",
+        "claim": "Releases are built from the public repository by GitHub Actions; Rust and npm dependencies are pinned by their lock files.",
+        "level": "declared",
+        "evidence": [
+          {
+            "kind": "config",
+            "path": ".github/workflows/build.yml"
+          },
+          {
+            "kind": "config",
+            "path": "Cargo.lock"
+          },
+          {
+            "kind": "config",
+            "path": "app/package-lock.json"
+          }
+        ],
+        "verify": "Read the workflow: what it builds from, and that lock files are used.",
+        "refuted_if": "A release built elsewhere, or dependencies fetched unpinned."
+      }
+    ],
+    "permissions": [
+      {
+        "id": "permissions.system",
+        "claim": "Email uses the network, the system keychain, notifications (on by default, showing the sender and subject; Settings › Notifications), files you choose (open, save, export), and being the default mail app (if you ask; the Linux package registers it for mailto: links at install). It asks for your password to install .rpm updates as root (pkexec). Release builds include the web view's Developer Tools. It doesn't use the camera, microphone, location, the system's contacts, or running at login.",
+        "level": "declared",
+        "evidence": [
+          {
+            "kind": "config",
+            "path": "app/src-tauri/capabilities/default.json"
+          },
+          {
+            "kind": "config",
+            "path": "app/src-tauri/capabilities/macos.json"
+          },
+          {
+            "kind": "config",
+            "path": "app/src-tauri/Cargo.toml",
+            "note": "plugins: dialog, opener, deep-link, single-instance, updater; notify-rust"
+          },
+          {
+            "kind": "config",
+            "path": "app/src-tauri/linux/email.desktop"
+          }
+        ],
+        "verify": "Read the capability files and the plugins used.",
+        "refuted_if": "A permission or plugin not listed here."
+      }
+    ],
+    "weaknesses": [
+      {
+        "id": "weaknesses.unencrypted-at-rest",
+        "claim": "Email doesn't encrypt mail on disk: anyone who can read your files can read your mail. Use your system's disk encryption.",
+        "level": "declared",
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/store.rs",
+            "note": "plain SQLite"
+          }
+        ],
+        "verify": "Check the databases are opened without encryption.",
+        "refuted_if": "(It's a limitation; refuted only if the databases are in fact encrypted.)"
+      },
+      {
+        "id": "weaknesses.pictures-reveal",
+        "claim": "Loading a message's pictures tells their senders you opened it, when, and from which address; a plain-http picture's address can also be seen on the network.",
+        "level": "declared",
+        "evidence": [
+          {
+            "kind": "doc",
+            "path": "docs/trust/trust.json",
+            "symbol": "connections.message-pictures"
+          }
+        ],
+        "verify": "Follows from the connections claims.",
+        "refuted_if": "(A limitation.)"
+      },
+      {
+        "id": "weaknesses.frame-scripts-flag",
+        "claim": "Message frames carry allow-scripts and allow-same-origin so the app's own key and link listeners work; only the content policy (script-src 'none') and the sanitizer keep a message's own code from running.",
+        "level": "declared",
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "app/src/components/AutoHeightFrame.tsx"
+          },
+          {
+            "kind": "code",
+            "path": "app/src/components/Reader.tsx",
+            "symbol": "buildSrcdoc"
+          }
+        ],
+        "verify": "Read the frame's sandbox attribute and the content policy.",
+        "refuted_if": "(A limitation; worth an outside look.)"
+      },
+      {
+        "id": "weaknesses.no-dependency-audit",
+        "claim": "Dependencies aren't yet audited automatically for known vulnerabilities (no cargo audit or npm audit in the build), and Linux and Windows installers aren't signed by the operating system's vendors.",
+        "level": "declared",
+        "evidence": [
+          {
+            "kind": "config",
+            "path": ".github/workflows/build.yml"
+          }
+        ],
+        "verify": "Read the workflow.",
+        "refuted_if": "An audit step in the build."
+      },
+      {
+        "id": "weaknesses.forged-senders",
+        "claim": "A sender's address can be forged. 'Always load pictures from this sender' trusts the From address as written, and on a server that doesn't add its own Authentication-Results header, so can a rule for a whole domain.",
+        "level": "declared",
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/store.rs",
+            "symbol": "allow_remote"
+          },
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/mime.rs",
+            "symbol": "verified_sender_domain"
+          }
+        ],
+        "verify": "Read the evidence.",
+        "refuted_if": "(A limitation.)"
+      },
+      {
+        "id": "weaknesses.local-network-pictures",
+        "claim": "Once a message's pictures are allowed, they can be on servers on your local network, which the web view will request.",
+        "level": "declared",
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "app/src/components/Reader.tsx",
+            "symbol": "buildSrcdoc"
+          }
+        ],
+        "verify": "Read the evidence.",
+        "refuted_if": "(A limitation.)"
+      },
+      {
+        "id": "weaknesses.no-quarantine-flag",
+        "claim": "Saved and opened attachments aren't marked as downloaded from the internet (Windows' Mark of the Web, macOS's quarantine), so the system doesn't warn when you open them later.",
+        "level": "declared",
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "app/src-tauri/src/lib.rs",
+            "symbol": "open_attachment"
+          }
+        ],
+        "verify": "Read the evidence.",
+        "refuted_if": "(A limitation.)"
+      },
+      {
+        "id": "weaknesses.ai-apps-socket",
+        "claim": "AI apps' socket answers which tools exist even while AI apps are off; there's one switch for all AI apps, and an app names itself. The socket is made private just after it's created, and when the data folder's path is too long it's in the shared temporary folder.",
+        "level": "declared",
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "app/src-tauri/src/mcp.rs",
+            "symbol": "socket_path"
+          },
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/mcp.rs"
+          }
+        ],
+        "verify": "Read the evidence.",
+        "refuted_if": "(A limitation.)"
+      },
+      {
+        "id": "weaknesses.unpinned-build-tools",
+        "claim": "The build uses GitHub Actions and the Rust toolchain by movable tags (such as @v4 and stable), in jobs that hold the update-signing key.",
+        "level": "declared",
+        "evidence": [
+          {
+            "kind": "config",
+            "path": ".github/workflows/build.yml"
+          }
+        ],
+        "verify": "Read the evidence.",
+        "refuted_if": "(A limitation.)"
+      },
+      {
+        "id": "weaknesses.hand-written",
+        "claim": "This report is written by hand: nothing yet checks automatically that it lists every connection.",
+        "level": "declared",
+        "evidence": [
+          {
+            "kind": "doc",
+            "path": "docs/trust/SPEC.md"
+          }
+        ],
+        "verify": "Look for a build check comparing the code's connections with this report.",
+        "refuted_if": "(A limitation, until the check exists.)"
+      }
+    ]
+  }
+}

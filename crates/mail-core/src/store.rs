@@ -3590,12 +3590,18 @@ impl Store {
     }
 
     /// (from name, from address, To+Cc, date) of every message: the input for address
-    /// suggestions (`contacts::build`).
+    /// suggestions (`contacts::build`). To+Cc only for a message in a Sent folder: they count as
+    /// people written to (`build` reads them only for mail from the user), and anyone can send
+    /// mail that claims to be from the user's own address; in Sent, it really was sent.
     pub fn contact_rows(&self) -> Result<Vec<(String, String, String, i64)>> {
         let db = self.rdb();
         // Not from Spam: spammers borrow familiar names ("Ya Hall" on a throwaway address).
         let mut stmt = db.prepare(
-            "SELECT m.from_name, m.from_addr, m.to_addrs, m.date FROM messages m
+            "SELECT m.from_name, m.from_addr,
+                    CASE WHEN EXISTS (SELECT 1 FROM entries e JOIN folders f ON f.id = e.folder_id
+                                      WHERE e.message_id = m.id AND f.role = 'sent')
+                         THEN m.to_addrs ELSE '' END,
+                    m.date FROM messages m
              WHERE m.id NOT IN (SELECT e.message_id FROM entries e JOIN folders f ON f.id = e.folder_id
                                 WHERE f.role = 'junk')",
         )?;
@@ -4486,7 +4492,7 @@ mod tests {
         let store = Store::open(&dir).unwrap();
         let acct = store.insert_account("john@example.com", "John", Provider::Imap, "h", 993).unwrap();
         let lf = |name: &str, role| ListedFolder { raw_name: name.into(), path: vec![name.into()], role, selectable: true };
-        store.sync_folder_list(acct.id, &[lf("INBOX", Some(FolderRole::Inbox)), lf("Junk", Some(FolderRole::Junk))]).unwrap();
+        store.sync_folder_list(acct.id, &[lf("INBOX", Some(FolderRole::Inbox)), lf("Junk", Some(FolderRole::Junk)), lf("Sent", Some(FolderRole::Sent))]).unwrap();
         let id = |n: &str| store.folders(acct.id).unwrap().into_iter().find(|f| f.raw_name == n).unwrap().id;
         let rec = |uid: u32, name: &str, addr: &str| HeaderRecord {
             original_message_id: None,
@@ -4512,6 +4518,14 @@ mod tests {
         store.upsert_headers(acct.id, id("Junk"), &[rec(2, "Jane Doe", "jane@spam.example")], &none).unwrap();
         let from: Vec<String> = store.contact_rows().unwrap().into_iter().map(|r| r.1).collect();
         assert_eq!(from, ["jane@example.org"]);
+        // "From me" in the Inbox (anyone can write that) names no one written to; in Sent it does.
+        let mine = |uid: u32, to: &str| HeaderRecord { to_addrs: to.into(), ..rec(uid, "John", "john@example.com") };
+        store.upsert_headers(acct.id, id("INBOX"), &[mine(3, "lure@forged.example")], &none).unwrap();
+        store.upsert_headers(acct.id, id("Sent"), &[mine(4, "ann@example.org")], &none).unwrap();
+        let to: Vec<String> = store.contact_rows().unwrap().into_iter().filter(|r| r.1 == "john@example.com").map(|r| r.2).collect();
+        assert_eq!(to, ["", "ann@example.org"]);
+        let list = crate::contacts::build(store.contact_rows().unwrap(), &["john@example.com".to_string()]);
+        assert!(list.iter().all(|c| c.addr != "lure@forged.example"), "not someone written to");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

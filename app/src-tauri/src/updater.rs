@@ -146,6 +146,25 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
     app.restart();
 }
 
+/// A new folder only this user can open, for the package root installs: in the user's runtime
+/// folder (or their cache), never a shared one like /tmp, where another user could make the
+/// folder first and swap the package between the check and the install. Created fresh (it
+/// fails if the name is taken), with a name no one can guess ahead.
+#[cfg(target_os = "linux")]
+fn private_dir() -> std::io::Result<std::path::PathBuf> {
+    use std::os::unix::fs::DirBuilderExt;
+    let base = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_dir())
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".cache")))
+        .ok_or_else(|| std::io::Error::other("no private folder to use"))?;
+    std::fs::create_dir_all(&base)?;
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let dir = base.join(format!("email-update-{}-{nanos:x}", std::process::id()));
+    std::fs::DirBuilder::new().mode(0o700).create(&dir)?;
+    Ok(dir)
+}
+
 /// An .rpm package (its lead starts with these bytes).
 #[cfg(target_os = "linux")]
 fn is_rpm(bytes: &[u8]) -> bool {
@@ -161,9 +180,7 @@ fn is_rpm(bytes: &[u8]) -> bool {
 /// (`Update::download` verifies its signature), which is what says it's ours.
 #[cfg(target_os = "linux")]
 fn install_rpm(bytes: &[u8]) -> Result<(), String> {
-    let dir = std::env::temp_dir().join(format!("email-update-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("The update couldn't be saved for installing: {e}"))?;
+    let dir = private_dir().map_err(|e| format!("The update couldn't be saved for installing: {e}"))?;
     let pkg = dir.join("email-update.rpm");
     let result = (|| {
         std::fs::write(&pkg, bytes).map_err(|e| format!("The update couldn't be saved for installing: {e}"))?;

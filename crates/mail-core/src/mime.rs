@@ -444,17 +444,25 @@ pub fn stored_attachment_count(raw: &[u8]) -> usize {
     MessageParser::default().parse(raw).map(|m| stored_attachments(&m).len()).unwrap_or(0)
 }
 
-/// Executable and script types are saved but never opened directly by the app: opening them
-/// with the system's default handler can run them (e.g. `.command` on macOS, `.desktop` on Linux).
+/// Whether the app opens an attachment directly (with the system's default app for its type), or
+/// only saves it. Only known kinds of documents, pictures, sound and video open: anything else
+/// (programs, scripts, shortcuts, disk images, web pages, Office files with macros, and types not
+/// listed) is saved, since opening it can run it (`.command` on macOS, `.desktop` on Linux,
+/// `.url` or `.msc` on Windows, a script in an `.html` or `.svg`).
 pub fn is_openable(name: &str) -> bool {
-    const RISKY: &[&str] = &[
-        "exe", "com", "bat", "cmd", "scr", "pif", "msi", "msp", "cpl", "hta", "jar", "js", "jse", "vbs",
-        "vbe", "wsf", "wsh", "ps1", "psm1", "lnk", "reg", "sh", "bash", "zsh", "csh", "command", "tool",
-        "app", "pkg", "mpkg", "run", "bin", "desktop", "appimage", "py", "pl", "rb", "scpt", "workflow",
-        "terminal", "action",
+    const OPENS: &[&str] = &[
+        // documents
+        "pdf", "txt", "csv", "md", "rtf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "pages", "numbers",
+        "key", "ics", "vcf", "eml",
+        // pictures
+        "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "bmp", "tif", "tiff",
+        // sound and video
+        "mp3", "m4a", "wav", "aac", "flac", "ogg", "opus", "mp4", "m4v", "mov", "webm",
+        // archives (opened in an archive viewer; what's inside is opened, or not, from there)
+        "zip",
     ];
     let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
-    !RISKY.contains(&ext.as_str())
+    OPENS.contains(&ext.as_str())
 }
 
 /// A safe file name for writing to disk: no directories, no hidden/dot names, no control or
@@ -550,7 +558,7 @@ pub fn sanitize_html(html: &str, cid_map: &HashMap<String, String>) -> String {
         "border", "cellpadding", "cellspacing", "color", "face", "size", "dir", "lang", "title",
         "colspan", "rowspan", "nowrap", "role", "alt", "src", "srcset", "href", "name", "type",
         "media", "start", "reversed", "datetime", "span", "frame", "rules", "summary", "usemap",
-        "shape", "coords", "target",
+        "shape", "coords",
     ]
     .into();
     let schemes: HashSet<&str> = ["http", "https", "mailto", "tel", "data", "cid"].into();
@@ -563,6 +571,17 @@ pub fn sanitize_html(html: &str, cid_map: &HashMap<String, String>) -> String {
         .generic_attributes(generic)
         .tag_attributes(HashMap::new())
         .url_schemes(schemes)
+        // data: is for pictures (and their sources) only: a link to a data: page would open a
+        // document of the message's own making, where the frame's content policy may not follow
+        // it. (No `target` either: every link opens in the browser, by the frame's <base>.)
+        .attribute_filter(|element, attribute, value| {
+            let data = value.trim_start().get(..5).is_some_and(|p| p.eq_ignore_ascii_case("data:"));
+            let picture = (matches!(element, "img" | "source") && matches!(attribute, "src" | "srcset")) || attribute == "background";
+            if data && !picture {
+                return None;
+            }
+            Some(value.into())
+        })
         .link_rel(Some("noopener noreferrer"))
         .strip_comments(true)
         .clean(&html)
@@ -707,6 +726,18 @@ mod tests {
 
     /// A newsletter's `<head><title>` isn't shown above it (only its `<style>` is kept).
     #[test]
+    fn no_data_links_or_targets() {
+        let out = sanitize_html(
+            r#"<a href="data:text/html,<script>alert(1)</script>" target="_top">a</a><a href=" DATA:text/html;base64,PHNjcmlwdD4=">b</a><a href="https://x.example/" target="_self">c</a><img src="data:image/png;base64,iVBORw0KGgo="><table><tr><td background="data:image/png;base64,AA">d</td></tr></table>"#,
+            &HashMap::new(),
+        );
+        assert!(!out.contains("text/html") && !out.contains("DATA:"), "{out}");
+        assert!(!out.contains("target"), "{out}");
+        assert!(out.contains(r#"href="https://x.example/""#), "{out}");
+        assert!(out.contains(r#"<img src="data:image/png"#) && out.contains(r#"background="data:image/png"#), "pictures keep data: {out}");
+    }
+
+    #[test]
     fn title_is_not_shown() {
         let html = "<!DOCTYPE html><html lang=\"en\"><head><title>bp Australia</title><meta charset=\"utf-8\"><style>p{color:red}</style></head><body><p>Hi Lars,</p></body></html>";
         let out = sanitize_html(html, &HashMap::new());
@@ -754,6 +785,12 @@ mod tests {
         assert_eq!(safe_file_name("a\u{0}b?.pdf"), "a_b_.pdf");
         assert_eq!(safe_file_name(""), "attachment");
         assert!(is_openable("Report.PDF") && !is_openable("setup.exe") && !is_openable("run.command"));
+        for risky in ["a.msc", "b.url", "c.iso", "d.html", "e.svg", "f.docm", "g.xlsm", "h.chm", "i.scf", "j.application", "noext", "k.dmg", "l.deb"] {
+            assert!(!is_openable(risky), "{risky}");
+        }
+        for fine in ["photo.JPG", "notes.docx", "data.csv", "clip.mov", "invite.ics"] {
+            assert!(is_openable(fine), "{fine}");
+        }
 
         let raw = b"From: a@b.c\r\nSubject: t\r\nContent-Type: multipart/mixed; boundary=X\r\n\r\n--X\r\nContent-Type: text/plain\r\n\r\nhi\r\n--X\r\nContent-Type: application/pdf; name=\"r.pdf\"\r\nContent-Disposition: attachment; filename=\"r.pdf\"\r\nContent-Transfer-Encoding: base64\r\n\r\nJVBERi0=\r\n--X--\r\n";
         assert_eq!(stored_attachment_count(raw), 1);

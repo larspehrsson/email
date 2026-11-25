@@ -1,0 +1,537 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trust.schema.json",
+  "title": "Trust report",
+  "description": "What a program does with its users' data and network, as claims that can each be checked against its code. See SPEC.md (draft 0.1).",
+  "type": "object",
+  "required": [
+    "spec",
+    "subject",
+    "summary",
+    "sections"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "spec": {
+      "const": "0.1"
+    },
+    "subject": {
+      "type": "object",
+      "required": [
+        "name",
+        "repository",
+        "commit",
+        "date"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string",
+          "description": "Where the source is (a URL)"
+        },
+        "commit": {
+          "type": "string",
+          "description": "The commit the report describes"
+        },
+        "version": {
+          "type": "string"
+        },
+        "date": {
+          "type": "string",
+          "format": "date"
+        },
+        "platforms": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "required": [
+          "statement",
+          "rests_on"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "statement": {
+            "type": "string"
+          },
+          "rests_on": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            },
+            "description": "Ids of the claims it rests on"
+          }
+        }
+      }
+    },
+    "sections": {
+      "type": "object",
+      "required": [
+        "developer",
+        "connections",
+        "third-parties",
+        "storage",
+        "secrets",
+        "untrusted-input",
+        "updates",
+        "supply-chain",
+        "permissions",
+        "weaknesses"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "developer": {
+          "$ref": "#/$defs/section"
+        },
+        "connections": {
+          "$ref": "#/$defs/connectionSection"
+        },
+        "third-parties": {
+          "$ref": "#/$defs/section"
+        },
+        "storage": {
+          "$ref": "#/$defs/storageSection"
+        },
+        "secrets": {
+          "$ref": "#/$defs/section"
+        },
+        "untrusted-input": {
+          "$ref": "#/$defs/section"
+        },
+        "updates": {
+          "$ref": "#/$defs/section"
+        },
+        "supply-chain": {
+          "$ref": "#/$defs/section"
+        },
+        "permissions": {
+          "$ref": "#/$defs/section"
+        },
+        "weaknesses": {
+          "$ref": "#/$defs/section"
+        }
+      }
+    },
+    "verification": {
+      "description": "A verifier's result (VERIFY.md); kept apart from the report, or published beside it",
+      "$ref": "#/$defs/verification"
+    }
+  },
+  "$defs": {
+    "level": {
+      "enum": [
+        "declared",
+        "tested",
+        "enforced",
+        "audited"
+      ]
+    },
+    "dataCategory": {
+      "enum": [
+        "message-content",
+        "message-headers",
+        "attachments",
+        "contacts",
+        "credentials",
+        "api-key",
+        "draft-content",
+        "settings",
+        "usage",
+        "diagnostics",
+        "domain-names",
+        "app-version",
+        "other"
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "required": [
+        "kind",
+        "path"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "code",
+            "test",
+            "build-check",
+            "config",
+            "doc",
+            "audit"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "description": "A file in the repository, or for an audit, where its report is"
+        },
+        "symbol": {
+          "type": "string",
+          "description": "A function, type, constant or test name in that file"
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "claimFields": {
+      "type": "object",
+      "required": [
+        "id",
+        "claim",
+        "level",
+        "evidence",
+        "verify",
+        "refuted_if"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z-]+\\.[a-z0-9-]+$"
+        },
+        "claim": {
+          "type": "string"
+        },
+        "level": {
+          "$ref": "#/$defs/level"
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "verify": {
+          "type": "string"
+        },
+        "refuted_if": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        }
+      }
+    },
+    "claim": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/$defs/claimFields"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "connectionClaim": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/$defs/claimFields"
+        }
+      ],
+      "required": [
+        "destination",
+        "operator",
+        "direction",
+        "scope",
+        "trigger",
+        "frequency",
+        "default",
+        "control",
+        "encryption",
+        "sends",
+        "reveals"
+      ],
+      "properties": {
+        "destination": {
+          "type": "string"
+        },
+        "operator": {
+          "enum": [
+            "user",
+            "developer",
+            "third-party"
+          ]
+        },
+        "operator_name": {
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "outgoing",
+            "listening"
+          ]
+        },
+        "scope": {
+          "enum": [
+            "internet",
+            "local-network",
+            "this-computer"
+          ]
+        },
+        "trigger": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "user-action",
+              "user-schedule",
+              "app-schedule",
+              "startup",
+              "content",
+              "account-sync"
+            ]
+          }
+        },
+        "frequency": {
+          "type": "string"
+        },
+        "default": {
+          "enum": [
+            "on",
+            "off",
+            "always"
+          ]
+        },
+        "control": {
+          "type": "string"
+        },
+        "encryption": {
+          "enum": [
+            "tls-verified",
+            "tls-unverified",
+            "plaintext",
+            "local-only"
+          ]
+        },
+        "sends": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dataCategory"
+          }
+        },
+        "reveals": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "ip-address",
+              "account-identity",
+              "device-info",
+              "app-version",
+              "reading-activity",
+              "contact-relationships"
+            ]
+          }
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "storageClaim": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/$defs/claimFields"
+        }
+      ],
+      "required": [
+        "location",
+        "holds",
+        "encrypted_by_app",
+        "retention",
+        "removed_by"
+      ],
+      "properties": {
+        "location": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "holds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dataCategory"
+          }
+        },
+        "encrypted_by_app": {
+          "type": "boolean"
+        },
+        "retention": {
+          "type": "string"
+        },
+        "removed_by": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "account-removal",
+              "uninstall",
+              "user-action",
+              "app-restart",
+              "never"
+            ]
+          }
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "none": {
+      "type": "object",
+      "required": [
+        "none",
+        "reason",
+        "claim"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "none": {
+          "const": true
+        },
+        "reason": {
+          "type": "string"
+        },
+        "claim": {
+          "$ref": "#/$defs/claim",
+          "description": "The 'none' itself, as a claim to verify"
+        }
+      }
+    },
+    "section": {
+      "oneOf": [
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/claim"
+          }
+        },
+        {
+          "$ref": "#/$defs/none"
+        }
+      ]
+    },
+    "connectionSection": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/connectionClaim"
+      }
+    },
+    "storageSection": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/storageClaim"
+      }
+    },
+    "verification": {
+      "type": "object",
+      "required": [
+        "verifier",
+        "commit",
+        "date",
+        "claims",
+        "missing"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "verifier": {
+          "type": "string",
+          "description": "Who or what verified it (a person, or an agent and its model)"
+        },
+        "commit": {
+          "type": "string"
+        },
+        "date": {
+          "type": "string",
+          "format": "date"
+        },
+        "claims": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "verdict",
+              "found"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "verdict": {
+                "enum": [
+                  "confirmed",
+                  "refuted",
+                  "unclear"
+                ]
+              },
+              "found": {
+                "type": "string",
+                "description": "What was checked and found, with file:line references"
+              },
+              "level_justified": {
+                "type": "boolean",
+                "description": "Whether the evidence supports the level claimed"
+              }
+            }
+          }
+        },
+        "missing": {
+          "type": "array",
+          "description": "What the report leaves out (completeness)",
+          "items": {
+            "type": "object",
+            "required": [
+              "section",
+              "what",
+              "where"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "section": {
+                "type": "string"
+              },
+              "what": {
+                "type": "string"
+              },
+              "where": {
+                "type": "string",
+                "description": "file:line"
+              },
+              "severity": {
+                "enum": [
+                  "high",
+                  "medium",
+                  "low"
+                ]
+              }
+            }
+          }
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

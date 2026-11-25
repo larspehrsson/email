@@ -1,0 +1,298 @@
+{
+  "verifier": "Claude Code subagent (Claude Opus 5.5, claude-opus-5-5)",
+  "commit": "32f1c07d01d90aac0a4042bbbfb3ee9718a0405e",
+  "date": "2026-11-24",
+  "claims": [
+    {
+      "id": "developer.none-but-updates",
+      "verdict": "confirmed",
+      "found": "Searched every socket/HTTP path (imap.rs:346, smtp.rs:94-107 via lettre, ai.rs:282-289, oauth.rs:270-276, gcontacts.rs:612-627, graph.rs:22/203, icons.rs:432-460, tauri-plugin-updater). No analytics, crash reporting, telemetry or remote config. The only developer-controlled endpoint is the updater URL written by CI (.github/workflows/build.yml:130-140). Side note: Microsoft sign-in uses the project's own Azure app registration (oauth.rs:20), but that server is Microsoft's, not the developers'.",
+      "level_justified": true
+    },
+    {
+      "id": "connections.mail-servers",
+      "verdict": "refuted",
+      "found": "TLS is verified for IMAP (imap.rs:310-322, 346-355, always TLS from the first byte) and required for SMTP (smtp.rs:94-99: relay() on 465, starttls_relay() = STARTTLS required otherwise), so the main statement holds. The reveals field is wrong, though: lettre is built with the 'hostname' feature (crates/mail-core/Cargo.toml:19) and transport() never sets hello_name (smtp.rs:93-107), so EHLO sends the computer's hostname (lettre ClientId::default uses hostname::get()). Many submission servers copy the EHLO name and client IP into the Received header of every sent message, so recipients can see them too. reveals should include device-info.",
+      "level_justified": true
+    },
+    {
+      "id": "connections.server-discovery",
+      "verdict": "confirmed",
+      "found": "Callers of discover_server are add_account (lib.rs:400) and detect_provider (lib.rs:556-559), which the add-account form calls after a pause in typing (app/src/components/AddAccount.tsx:34-35). Nothing calls it from sync, startup or incoming mail. Detail: it can run several times while the address is typed, not just 'once'. The resolver is the system's (hickory builder_tokio, imap.rs:997), usually run by an ISP or other third party, so operator 'user' is generous.",
+      "level_justified": true
+    },
+    {
+      "id": "connections.sign-in",
+      "verdict": "confirmed",
+      "found": "Listener binds 127.0.0.1 port 0 (oauth.rs:126-129), checks the state parameter, and is consumed on the first code or after 5 minutes (oauth.rs:138-165). Token exchange and refresh go only to login.microsoftonline.com / oauth2.googleapis.com through oauth::https (oauth.rs:209-261, 358-400). Access tokens then go to the provider's own IMAP/SMTP/Graph/People hosts. Detail: for Microsoft accounts the browser sign-in is the only way to add one (lib.rs:280-284), so 'default: off / use an app password' only applies to Google, and Google OAuth here is only for Contacts, with the user's own client (oauth.rs:328-333).",
+      "level_justified": true
+    },
+    {
+      "id": "connections.google-contacts",
+      "verdict": "confirmed",
+      "found": "People API calls go to PEOPLE_HOST (gcontacts.rs:612-627); the 15-minute timer is at app/src/lib/googleContacts.ts:51-58. The claim leaves out one Google connection: contact photos are fetched from the URL Google gives (lh3.googleusercontent.com) by icons::get_image without auth (lib.rs:1481-1500, gcontacts.rs:145-160), when a contact's details open (lib.rs:1475) or, with sender pictures on, for any sender who is a Google contact (lib.rs:832-836). See missing.",
+      "level_justified": true
+    },
+    {
+      "id": "connections.microsoft-graph",
+      "verdict": "confirmed",
+      "found": "graph_task returns at once unless shared.graph is set (sync/mod.rs:820-821) and re-runs every 180 s (sync/mod.rs:832). Graph calls go to graph.microsoft.com (graph.rs:22, 203). Detail: marking spam or not-spam on such an account also calls /reportMessage (graph.rs:327-334), which submits the message to Microsoft's junk filtering. That trigger isn't in 'frequency'.",
+      "level_justified": true
+    },
+    {
+      "id": "connections.ai",
+      "verdict": "refuted",
+      "found": "Only user actions reach ai::run (lib.rs:1705-1717, through app/src/lib/ai.ts:40, AiPanel.tsx and SourceView.tsx), so the trigger is right. 'What's sent' is incomplete: prompt() (ai.rs:110-131) also sends <me> (your name and address), the subject and the recipients' addresses. 'Ask' from the source view (SourceView.tsx:62, ai.rs:111-116) sends the message's whole raw source, every header included (Received chains, IPs, Authentication-Results). sends should include message-headers and contacts, and reveals should include account-identity.",
+      "level_justified": true
+    },
+    {
+      "id": "connections.sender-pictures",
+      "verdict": "refuted",
+      "found": "The off default (app/src/lib/senderIcons.ts:18-23) and the early returns for Contacts and unknown domains (lib.rs:838-843) hold, and ICONS is HTTPS + public-only (icons.rs:363, 432-439, test icons.rs:572). But (1) 'domains you write to' can be forged by a stranger: contacts::build counts any non-Spam message whose From is one of your addresses as mail you sent to its To addresses (contacts.rs:126-130, store.rs:3594-3601, used by known_domain lib.rs:1580-1590). A spoofed 'From: you, To: x@attacker.example' message (common in extortion spam) makes attacker.example 'known', and its next message makes Email contact it. That's a lookup outside the chosen level, set off by content. (2) The destination isn't only the sender's domain: the BIMI l= URL (icons.rs:101-128) and the page's <link rel=icon> hrefs (icons.rs:151-229) can name any host, such as a CDN or a BIMI hosting service, so third parties get the request. (3) DNS TXT lookups go through the system resolver (icons.rs:102), which learns every correspondent's domain; the module doc's 'no third party learns who writes to you' (icons.rs:4-5) is false for the resolver.",
+      "level_justified": true
+    },
+    {
+      "id": "connections.message-pictures",
+      "verdict": "confirmed",
+      "found": "buildSrcdoc's CSP (app/src/components/Reader.tsx:26-35): with remote off, img-src data: cid:, style-src 'unsafe-inline' with no remote, font-src data:, default-src 'none'. The sanitizer drops iframe/object/embed/link/meta (mime.rs:537-567). allowRemote comes from store.allow_remote (store.rs:2931-2944). I found no remote load before allowing in the code. Not checked at runtime: DNS prefetch of <a href> hosts by the web view, which a CSP doesn't govern (no x-dns-prefetch-control in the srcdoc). Caveat (see missing): the per-sender rule matches the From address with no authentication (store.rs:2935), so anyone who forges an allowed sender's address gets their pictures loaded. Level: the tests cited cover the stored rules (store.rs:4863, mime.rs:629), not the CSP that actually blocks the loads.",
+      "level_justified": false
+    },
+    {
+      "id": "connections.message-pictures-http",
+      "verdict": "confirmed",
+      "found": "rescueHttpImages runs only when props.remote (app/src/components/AutoHeightFrame.tsx:72). mail_image requires http://, allows 4 at a time (icons.rs:251-266), and get refuses control characters, spaces and user@ (icons.rs:375-404). connect resolves the name and connects only to a public address it checked (icons.rs:432-439). Test icons.rs:599-623 covers private addresses and request injection. An email can name mailimg: only when its pictures are already allowed (Reader.tsx:32), so it gains nothing beyond plain http:.",
+      "level_justified": true
+    },
+    {
+      "id": "connections.updates",
+      "verdict": "confirmed",
+      "found": "Timer at app/src/lib/updates.ts:10-11, 44-55: first check after 20 s, then every 6 h, and each tick checks autoUpdates(). Endpoint is set only in CI (build.yml:130-140). Detail: the request doesn't carry the app's version. The endpoint has no {{current_version}}, and the User-Agent is the plugin's own 'tauri-plugin-updater/2.14.1' (tauri-plugin-updater-2.14.1/src/updater.rs:42, 584). So 'sends app-version' overstates it, in the safe direction. Downloads are then served from GitHub's asset CDN.",
+      "level_justified": true
+    },
+    {
+      "id": "connections.ai-apps",
+      "verdict": "refuted",
+      "found": "It is a Unix socket (mode 0600) or a named pipe with reject_remote_clients, never TCP (app/src-tauri/src/mcp.rs:200-238). But: (1) 'initialize' and 'tools/list' are answered while AI apps are off (crates/mail-core/src/mcp.rs:136-147, tool_list 348-356), returning the app version and an email_status tool. That matches refuted_if, though no mail data is given. (2) There's no per-app allowance: Settings has one 'enabled' switch plus per-capability switches (crates/mail-core/src/mcp.rs:31-40), and the client name is self-reported (mcp.rs:138). Once it's on, any program running as the user can read mail. (3) The socket is bound before chmod 0600 (app mcp.rs:213-214). When the path is too long it falls back to a predictable name in the shared temp dir (app mcp.rs:36-38), where another local user could squat it.",
+      "level_justified": true
+    },
+    {
+      "id": "third-parties.list",
+      "verdict": "refuted",
+      "found": "Leaves out: the system DNS resolver's operator, which sees every looked-up host, including correspondents' domains from sender pictures (icons.rs:102, imap.rs:997); arbitrary hosts named by a domain's BIMI record or icon links (icons.rs:101-229); Google's photo CDN for contact photos (lib.rs:1481-1500); and, through Received headers written by the user's SMTP server, the recipients of sent mail, who can see the computer's hostname (Cargo.toml:19). 'Only as you choose' also isn't true for sender domains, because a forged From can make a domain 'known' (contacts.rs:126-130).",
+      "level_justified": true
+    },
+    {
+      "id": "storage.mail-list",
+      "verdict": "confirmed",
+      "found": "mail.db schema at store.rs:64-345, opened at store.rs:832-834. Removing an account deletes its rows (cascade plus FTS triggers store.rs:327-345), deletes bodies, then VACUUMs (lib.rs:675-700, store.rs:1023-1040). Kept after removing the account, because they aren't per-account: remote_senders (store.rs:276-279), sender_icons, the domains of correspondents (store.rs:282-287), forgotten_addresses, and local address-book cards. Mail data also lives outside mail.db: the web view's HTTP cache and cookies, opened attachments, draft-files, exports, the log (see missing). 'removed_by' correctly leaves out uninstall.",
+      "level_justified": true
+    },
+    {
+      "id": "storage.messages",
+      "verdict": "confirmed",
+      "found": "bodies.db with bodies, stash (vanished bodies kept up to 7 days, store.rs:419-433, 869-872) and attachment_cache (store.rs:438-445). Deleted per account in delete_account (store.rs:1031-1038). The stash's 7-day retention isn't mentioned.",
+      "level_justified": true
+    },
+    {
+      "id": "storage.log",
+      "verdict": "refuted",
+      "found": "The log does record subjects and recipients: every AI-app action is logged with its summary (app/src-tauri/src/mcp.rs:142), and send summaries are 'Sent “<subject>” to <addresses>' (crates/mail-core/src/mcp.rs:854-860). Moves and tags log folder and tag names (crates/mail-core/src/mcp.rs:768, 782). The location is also wrong on macOS and Windows: app_log_dir is ~/Library/Logs/<id> on macOS (comment at app/src-tauri/src/lib.rs:1191-1192), not the data folder. 'removed_by: uninstall' is wrong for the .deb/.rpm/AppImage and macOS: uninstalling doesn't touch per-user folders.",
+      "level_justified": true
+    },
+    {
+      "id": "storage.attachment-cache",
+      "verdict": "confirmed",
+      "found": "Written to app_cache_dir/attachments/<msg>-<idx> (app/src-tauri/src/lib.rs:437-456) and removed at startup (lib.rs:1483-1485). Detail: the files are written without Mark-of-the-Web or quarantine (see missing).",
+      "level_justified": true
+    },
+    {
+      "id": "storage.draft-files",
+      "verdict": "confirmed",
+      "found": "draft_attachment_files writes to app_data_dir/draft-files (app/src-tauri/src/lib.rs:462-479). Cleanup at startup removes dirs no draft state names (app lib.rs:1497-1503, crates/mail-core/src/lib.rs:1210-1222). Removing an account doesn't remove them directly; they go at the next start once the drafts are gone.",
+      "level_justified": true
+    },
+    {
+      "id": "storage.settings",
+      "verdict": "confirmed",
+      "found": "localStorage holds preferences only (keys from savePref: ui.*, notify.*, ai.model, updates.auto, contacts.saveIn), with no message content or credentials (app/src/lib/format.ts:119-128, ContactsView.tsx:94,138, contactSources.ts:30-41). 'removed_by: uninstall' is doubtful on Linux and macOS (see storage.log).",
+      "level_justified": true
+    },
+    {
+      "id": "secrets.keychain",
+      "verdict": "confirmed",
+      "found": "All secrets go through the one vault item dev.mail-client/secrets, split into parts on Windows (crates/mail-core/src/lib.rs:37-125), including the AI key (ai.rs:22) and the Google client (lib.rs:216, 1412-1428). I found none written to files, the database or the log. Each is sent only to its own service (oauth.rs:237-261, 358-400; ai.rs:198-201; imap.rs:367-372; smtp.rs:100-105). The claim doesn't say who can read it: on Linux, any process of the same user can read a Secret Service item.",
+      "level_justified": true
+    },
+    {
+      "id": "untrusted-input.message-html",
+      "verdict": "unclear",
+      "found": "The sanitizer drops scripts, handlers, iframe/object/embed/form/meta/base (mime.rs:531-568), and the srcdoc CSP has script-src 'none' (Reader.tsx:30-33), so I found no direct way to run code. Two things I couldn't settle without running the web views: (a) the sanitizer allows href with the data: scheme and the 'target' attribute (mime.rs:547-555), and the window's navigation handler treats data: as an app URL (app/src-tauri/src/lib.rs:961-964, 994). Whether <a href=\"data:text/html,…\" target=\"_self\"> can load and run script in the frame (allow-scripts is set, AutoHeightFrame.tsx:21) depends on each engine's CSP inheritance for data: documents. (b) Whether Tauri's IPC is exposed to such a frame. Level: the tests (mime.rs:681-711) cover only the sanitizer; nothing tests the CSP or the sandbox, which the claim leans on.",
+      "level_justified": false
+    },
+    {
+      "id": "untrusted-input.remote-content",
+      "verdict": "refuted",
+      "found": "verified_sender_domain takes the topmost Authentication-Results header with no check of its authserv-id (mime.rs:326-331, 335-369). When the receiving server doesn't add Authentication-Results (many self-hosted or smaller IMAP setups), the topmost one is whatever the sender wrote, so a forged 'dmarc=pass header.from=bank.example' unlocks an 'Always load from @bank.example' rule. Separately, the per-address rule needs no verification at all (store.rs:2935). The test (mime.rs:629-) only covers headers as written by honest servers.",
+      "level_justified": false
+    },
+    {
+      "id": "untrusted-input.attachments",
+      "verdict": "refuted",
+      "found": "is_openable is a short denylist (mime.rs:449-458). Types that run code when opened with the system's default handler aren't on it: on Windows .msc, .chm, .url, .scf, .application/.appref-ms, .iso/.img/.vhd(x) (which mount and bypass Mark-of-the-Web), .xll, .settingcontent-ms, .ws/.wsc, .inf; on Linux .deb/.rpm/.flatpakref; on macOS .dmg, .fileloc/.webloc/.inetloc; and .html/.svg, which open in the browser as local files. Opened files are written with no Mark-of-the-Web (Zone.Identifier) or com.apple.quarantine (app/src-tauri/src/lib.rs:451-456), so SmartScreen, Office Protected View and Gatekeeper don't treat them as downloaded. safe_file_name itself is fine (mime.rs:462-, test at mime.rs:733-737).",
+      "level_justified": true
+    },
+    {
+      "id": "updates.signed",
+      "verdict": "refuted",
+      "found": "Update::download checks the signature in memory (app/src-tauri/src/updater.rs:110-117). But on Linux an .rpm update is then written to std::env::temp_dir()/email-update-<pid>/email-update.rpm (updater.rs:163-169), a predictable path in the shared /tmp, and installed as root with 'pkexec rpm -U --nosignature' (updater.rs:170-173). remove_dir_all's failure is ignored and create_dir_all accepts an existing directory. So another local user who creates /tmp/email-update-<pid> beforehand (they own it; the sticky bit stops Email removing it) can swap the file between write and install, and root installs a package whose signature was never checked. The macOS signing and notarization part depends on CI secrets; the workflow falls back to ad-hoc signing (build.yml:150-182), so that half can't be confirmed from the code.",
+      "level_justified": true
+    },
+    {
+      "id": "supply-chain.builds",
+      "verdict": "refuted",
+      "found": "Lock files are used (npm ci, build.yml:190-193; Cargo.lock committed, though the build doesn't pass --locked). But CI fetches unpinned code that runs with contents:write and the update-signing and Apple secrets in the environment: actions pinned by mutable tags (actions/checkout@v7, actions/setup-node@v7, Swatinem/rust-cache@v2, ilammy/setup-nasm@v1, actions/upload-artifact@v7; build.yml:19-21, 39, 77-104, 195, 249), and the Rust toolchain at 'stable' (dtolnay/rust-toolchain@stable, build.yml:20, 88). A changed third-party action could read TAURI_SIGNING_PRIVATE_KEY (exported at build.yml:126-129).",
+      "level_justified": true
+    },
+    {
+      "id": "permissions.system",
+      "verdict": "refuted",
+      "found": "Capabilities and plugins match (capabilities/default.json, macos.json; app/src-tauri/Cargo.toml). Not listed: (1) administrator rights, since rpm updates run 'pkexec rpm -U' as root (updater.rs:170); (2) the app registers itself for mailto: at install through its desktop entry (app/src-tauri/linux/email.desktop: MimeType=x-scheme-handler/mailto) and the deep-link plugin, not only 'if you ask'; (3) on Linux, notifications are on by default with no prompt (notify.rs:18-20), and they pass sender and subject to the system's notification service (notify.rs:73-82); (4) release builds ship web developer tools (Cargo.toml tauri feature 'devtools', menu item at lib.rs:1164).",
+      "level_justified": true
+    },
+    {
+      "id": "weaknesses.unencrypted-at-rest",
+      "verdict": "confirmed",
+      "found": "Plain rusqlite with the bundled SQLite, no encryption (crates/mail-core/Cargo.toml rusqlite features, store.rs:797-806). There's no secure_delete either, though account removal VACUUMs (store.rs:1015-1017).",
+      "level_justified": true
+    },
+    {
+      "id": "weaknesses.pictures-reveal",
+      "verdict": "confirmed",
+      "found": "Follows from Reader.tsx:30-33 and icons.rs:251-266. It's incomplete, though: sender pictures (forgeable, see connections.sender-pictures) and per-sender rules that a forged From triggers aren't listed as weaknesses.",
+      "level_justified": true
+    },
+    {
+      "id": "weaknesses.frame-scripts-flag",
+      "verdict": "confirmed",
+      "found": "sandbox='allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox' (AutoHeightFrame.tsx:21); CSP script-src 'none' (Reader.tsx:32).",
+      "level_justified": true
+    },
+    {
+      "id": "weaknesses.no-dependency-audit",
+      "verdict": "confirmed",
+      "found": "No cargo audit, cargo deny or npm audit step in build.yml. Linux and Windows builds aren't signed (release notes text in build.yml:224, 263).",
+      "level_justified": true
+    },
+    {
+      "id": "weaknesses.hand-written",
+      "verdict": "confirmed",
+      "found": "No build step compares connections with the report (build.yml).",
+      "level_justified": true
+    }
+  ],
+  "missing": [
+    {
+      "section": "connections",
+      "what": "SMTP EHLO sends the computer's hostname (lettre 'hostname' feature, hello_name never set). Submission servers commonly write it, with your IP, into the Received header of every sent message, so recipients see it. mail-servers doesn't list device-info, and no claim says recipients can learn your hostname or IP.",
+      "where": "crates/mail-core/Cargo.toml:19; crates/mail-core/src/smtp.rs:93-107",
+      "severity": "medium"
+    },
+    {
+      "section": "connections",
+      "what": "Sender pictures at the default 'domains you write to' level can be set off by a stranger: any non-Spam message whose From is forged as the user's own address counts as mail the user sent to its To addresses, so the attacker's domain becomes 'known' and Email then contacts it (DNS TXT + HTTPS) when their next message is shown. This is a content-started connection that the report says can't happen.",
+      "where": "crates/mail-core/src/contacts.rs:126-130; crates/mail-core/src/store.rs:3594-3601; crates/mail-core/src/lib.rs:1580-1590",
+      "severity": "high"
+    },
+    {
+      "section": "third-parties",
+      "what": "Sender pictures reach hosts other than the sender's domain: the BIMI record's l= URL and the site's <link rel=icon>/apple-touch-icon hrefs can point at any HTTPS host (CDNs, BIMI hosting services). The system DNS resolver's operator sees default._bimi.<domain> for every correspondent's domain. Neither is listed.",
+      "where": "crates/mail-core/src/icons.rs:101-128, 151-229",
+      "severity": "medium"
+    },
+    {
+      "section": "connections",
+      "what": "Google contact photos are fetched (no auth, plain GET with your IP) from the URL Google gives, typically lh3.googleusercontent.com. This happens when a Google contact's details are shown and, with sender pictures on at any level including 'contacts', for every message from a Google contact. It's not in connections or third-parties; Google learns when such mail is displayed.",
+      "where": "crates/mail-core/src/lib.rs:832-836, 1475, 1481-1500; crates/mail-core/src/gcontacts.rs:145-160",
+      "severity": "medium"
+    },
+    {
+      "section": "untrusted-input",
+      "what": "'Always load images from this sender' matches the From address alone, with no authentication. Anyone who forges an allowed sender's address (a newsletter, a bank) gets remote pictures loaded, which reveals reading. Only the domain rule is gated on verification.",
+      "where": "crates/mail-core/src/store.rs:2931-2944",
+      "severity": "medium"
+    },
+    {
+      "section": "untrusted-input",
+      "what": "Authentication-Results is trusted from the topmost header with no authserv-id check. On servers that don't add their own, the sender's forged header counts as verification for domain-wide image rules.",
+      "where": "crates/mail-core/src/mime.rs:326-369",
+      "severity": "medium"
+    },
+    {
+      "section": "updates",
+      "what": "The .rpm update is written to a predictable /tmp/email-update-<pid>/ directory and installed as root with --nosignature. A local user who pre-creates that directory can replace the verified package before pkexec installs it, gaining root.",
+      "where": "app/src-tauri/src/updater.rs:163-173",
+      "severity": "medium"
+    },
+    {
+      "section": "untrusted-input",
+      "what": "The openable-attachment denylist misses many types that run code through their default handler (.msc, .chm, .url, .scf, .application, .iso/.img/.vhd, .xll, .html/.svg, .dmg, .deb/.rpm…), and opened or saved attachments carry no Mark-of-the-Web or quarantine attribute, so OS protections for downloaded files don't apply.",
+      "where": "crates/mail-core/src/mime.rs:449-458; app/src-tauri/src/lib.rs:440-456, 509-515",
+      "severity": "medium"
+    },
+    {
+      "section": "connections",
+      "what": "AI writing help also sends the user's name and address, the subject and the recipients. 'Ask' in the source view sends the full raw message with all headers. Not in the claim's sends/reveals.",
+      "where": "crates/mail-core/src/ai.rs:110-131; app/src/components/SourceView.tsx:62",
+      "severity": "medium"
+    },
+    {
+      "section": "storage",
+      "what": "The log records subjects, recipients, folder and tag names of AI-app actions (activity summaries are logged), which contradicts storage.log.",
+      "where": "app/src-tauri/src/mcp.rs:142; crates/mail-core/src/mcp.rs:768-860",
+      "severity": "medium"
+    },
+    {
+      "section": "supply-chain",
+      "what": "CI runs third-party GitHub Actions and the Rust toolchain by mutable tags (not commit SHAs) in jobs that hold the update-signing key and Apple credentials.",
+      "where": ".github/workflows/build.yml:19-21, 88, 93, 104, 126-129",
+      "severity": "medium"
+    },
+    {
+      "section": "storage",
+      "what": "The web view's own HTTP cache and cookie store keep remote pictures and tracker cookies from messages whose images were allowed (on WebView2, third-party cookies are kept by default). Not listed, and not removed by account removal.",
+      "where": "app/src-tauri/tauri.conf.json:14 (img-src https: http:); app/src/components/Reader.tsx:32",
+      "severity": "low"
+    },
+    {
+      "section": "storage",
+      "what": "Other stores not listed: exports (one mbox per folder, user-chosen location); attachments saved to Downloads; window-state JSON and mcp.json in the config folder; sender_icons (correspondents' domains) and remote_senders kept after account removal.",
+      "where": "crates/mail-core/src/sync/export.rs:1-10; app/src-tauri/src/lib.rs:483-560; app/src-tauri/src/window_state.rs:53-54, 128-138; app/src-tauri/src/mcp.rs:68; crates/mail-core/src/store.rs:276-287",
+      "severity": "low"
+    },
+    {
+      "section": "connections",
+      "what": "The AI-app socket falls back to a fixed name in the shared temp directory when the data path is long, and is chmod 0600 only after bind. initialize/tools/list are answered while AI apps are off, and there is no per-client allowance once they're on.",
+      "where": "app/src-tauri/src/mcp.rs:36-38, 213-214; crates/mail-core/src/mcp.rs:31-40, 136-147",
+      "severity": "low"
+    },
+    {
+      "section": "connections",
+      "what": "Marking spam on a Graph-enabled Microsoft account submits the message to Microsoft's junk reporting (/reportMessage). Not in microsoft-graph's triggers.",
+      "where": "crates/mail-core/src/graph.rs:327-334",
+      "severity": "low"
+    },
+    {
+      "section": "connections",
+      "what": "With remote content allowed, the web view loads pictures from any host, including localhost and the local network (CSP allows http:/https: with no host limit). The public-only rule applies only to the app's own http fetcher.",
+      "where": "app/src/components/Reader.tsx:32; app/src-tauri/tauri.conf.json:14",
+      "severity": "low"
+    },
+    {
+      "section": "permissions",
+      "what": "Notifications show sender and subject through the OS notification service and are on by default (no prompt on Linux).",
+      "where": "app/src-tauri/src/notify.rs:18-20, 73-82, 115-123",
+      "severity": "low"
+    }
+  ],
+  "notes": "Checked at the working tree of HEAD 32f1c07d01 (the docs/trust files uncommitted, as stated). Read-only: no builds, no tests, no app run, no network. Not verified at runtime: what each web view engine (WebKitGTK, WKWebView, WebView2) does on its own: DNS prefetch of links in a message, data: navigation inside the sandboxed frame, WebView2's own Microsoft connections (SmartScreen, runtime updates), and cookie/cache behavior. These are why untrusted-input.message-html is 'unclear'. I didn't audit the whole 5,400-line store.rs or every MCP tool; mail-cli (a developer tool, not shipped in the bundles) was only skimmed (its TLS is verified, crates/mail-cli/src/probe.rs:63-70). Summary check: (1) 'Nothing is sent to the developers' is supported. (2) 'Your mail stays on your computer' says more than its claims: mail goes to Anthropic when writing help or Ask is used, to AI apps over MCP, and the storage claims don't establish 'stays'. (3) 'talks to your own mail servers, plus only the services you turn on' leaves out the update check (on by default, and not in rests_on), the DNS resolver, and that a forged From can make sender-picture lookups happen without a choice. (4) 'Senders can't see when you read their mail' is weakened by the forgeable per-sender rule, the trusted-from-the-top Authentication-Results, and the sender-picture 'known' spoof. (5) 'Nothing in a message can run code' rests on a claim I couldn't settle, and attachment opening (refuted) is a nearby path. (6) 'Updates are signed and checked before they're installed' is false for the .rpm path when another local user is present. (7) The unencrypted-at-rest statement is supported. Levels: the 'tested' claims are backed by real tests, but those tests check the stored rules and the sanitizer, not the CSP and sandbox that actually block remote loads and scripts."
+}

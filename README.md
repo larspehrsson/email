@@ -35,16 +35,16 @@ doesn't update itself: install the newer one the same way.
 
 - **Nothing is sent to us.** No analytics, crash reports or usage data, and no account with us.
 - **Your mail stays on your computer**, and your passwords are in the system's keychain. Email
-  talks to your own mail servers, plus only the services you turn on.
-- **Senders can't see when you read their mail.** Pictures and other web content are blocked
-  until you allow them, and nothing in a message can run code.
+  talks to your own mail servers and GitHub (for updates), plus only the services you turn on.
+- **Senders can't see that you opened their mail** until you allow its pictures and other web
+  content, which are blocked by default. Messages are cleaned of scripts before they're shown.
 - **You choose what's looked up.** Sender pictures, Google Contacts, writing help and the rest are
   off until you turn them on, and each says what it contacts.
 - **Updates are signed** and checked before they're installed. The code is open, and the builds
   are made from it in public.
 
 The [trust report](docs/TRUST.md) lists every connection Email can make, what it keeps and
-where, and how you're protected, with links to the code.
+where, how you're protected, and the limits worth knowing, with links to the code.
 
 ## Adding your accounts
 

@@ -1959,9 +1959,10 @@ mod picture_tests {
         let _ = std::fs::remove_dir_all(&dir);
         let core = Core::open(&dir, Secrets::memory()).unwrap();
         let acct = core.store.insert_account("john.doe@example.com", "John Doe", Provider::Imap, "imap.example.com", 993).unwrap();
-        let inbox = ListedFolder { raw_name: "INBOX".into(), path: vec!["INBOX".into()], role: Some(FolderRole::Inbox), selectable: true };
-        core.store.sync_folder_list(acct.id, &[inbox]).unwrap();
-        let inbox = core.store.folders(acct.id).unwrap()[0].id;
+        let lf = |name: &str, role| ListedFolder { raw_name: name.into(), path: vec![name.into()], role: Some(role), selectable: true };
+        core.store.sync_folder_list(acct.id, &[lf("INBOX", FolderRole::Inbox), lf("Sent", FolderRole::Sent)]).unwrap();
+        let folder = |n: &str| core.store.folders(acct.id).unwrap().into_iter().find(|f| f.raw_name == n).unwrap().id;
+        let (inbox, sent) = (folder("INBOX"), folder("Sent"));
         let mail = |uid: u32, from: &str, to: &str| HeaderRecord {
             uid,
             subject: format!("m{uid}"),
@@ -1970,14 +1971,18 @@ mod picture_tests {
             date: 1_800_000_000 + uid as i64,
             ..Default::default()
         };
+        let none = std::collections::HashMap::new();
+        // Written to someone at corp.example.org (in Sent); only heard from news.example.net; and
+        // a message in the Inbox that claims to be from John, "to" lure.example.
+        core.store.upsert_headers(acct.id, sent, &[mail(1, "john.doe@example.com", "Jane <jane@corp.example.org>")], &none).unwrap();
         core.store
             .upsert_headers(acct.id, inbox, &[
-                // Written to someone at corp.example.org; only heard from news.example.net.
-                mail(1, "john.doe@example.com", "Jane <jane@corp.example.org>"),
                 mail(2, "deals@news.example.net", "john.doe@example.com"),
-            ], &std::collections::HashMap::new())
+                mail(3, "john.doe@example.com", "x@lure.example"),
+            ], &none)
             .unwrap();
         assert!(core.known_domain("example.org").unwrap(), "written to");
+        assert!(!core.known_domain("lure.example").unwrap(), "a forged 'from me' isn't writing to them");
         assert!(!core.known_domain("example.net").unwrap(), "only mail from them: never contacted");
         assert!(!core.known_domain("spam.example").unwrap());
         // Nothing is looked up for a stranger: no picture, and no network (the domain doesn't
