@@ -138,7 +138,10 @@ export function ContactsView() {
     const f = form();
     if (!f) return;
     try {
-      const id = await api.saveCard({ ...f, emails: f.emails.filter((e) => e.trim()), phones: f.phones.filter((p) => p.trim()) });
+      // A new one made while looking at a group of the account it goes in: in that group.
+      const s = where();
+      const groups = f.id === 0 ? (s.kind === 'group' && f.google === s.id ? [s.group] : []) : f.groups;
+      const id = await api.saveCard({ ...f, emails: f.emails.filter((e) => e.trim()), phones: f.phones.filter((p) => p.trim()), groups });
       if (f.id === 0) {
         try {
           localStorage.setItem('contacts.saveIn', String(f.google ?? 0));

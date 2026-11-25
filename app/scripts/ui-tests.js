@@ -2074,7 +2074,7 @@ describe('google contacts', () => {
 });
 
 describe('contact groups', () => {
-  test('a new contact starts without the last one\'s photo, and shows in My Contacts once Google has it', async () => {
+  test('a new contact: without the last one\'s photo, in the group being looked at, and in My Contacts once Google has it', async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {
       const g = (r) => `contactGroups/${r}`;
@@ -2085,10 +2085,13 @@ describe('contact groups', () => {
         );
         localStorage.setItem(
           'mock.cards',
-          JSON.stringify([{ id: 1, name: 'Olivia Hart', emails: ['olivia.hart@example.com'], phones: [], company: '', notes: '', google: 1, groups: [groups[0].resource] }]),
+          JSON.stringify([{ id: 1, name: 'Olivia Hart', emails: ['olivia.hart@example.com'], phones: [], company: '', notes: '', google: 1, groups: groups.map((x) => x.resource) }]),
         );
-        localStorage.setItem('contacts.source', `group:1:${groups[0].resource}`);
-      }, [{ resource: g('myContacts'), name: 'My Contacts' }]);
+        localStorage.setItem('contacts.source', `group:1:${groups[1].resource}`);
+      }, [
+        { resource: g('myContacts'), name: 'My Contacts' },
+        { resource: g('family1'), name: 'Familie' },
+      ]);
       await page.reload();
       await page.locator('.sidebar [aria-label="Address book"]').click();
       await page.locator('.ct-row', { hasText: 'Olivia Hart' }).click();
@@ -2098,11 +2101,15 @@ describe('contact groups', () => {
       await page.locator('input[aria-label="Name"]').fill('Aaaaa');
       await page.waitForTimeout(100);
       assert.equal(await page.locator('.ct-photo').count(), 0, 'not the last contact\'s photo');
-      // Saved: sent to Google, which puts it in My Contacts; it shows here then, without
-      // another change.
+      // Saved while looking at Familie: in it, at once.
       await page.getByRole('button', { name: 'Save', exact: true }).click();
-      await page.locator('.ct-row', { hasText: 'Aaaaa' }).waitFor({ timeout: 5000 });
+      const row = page.locator('.ct-row', { hasText: 'Aaaaa' });
+      await row.waitFor({ timeout: 1000 });
+      assert.deepEqual(await row.locator('.ct-chip').allTextContents(), ['Familie']);
       assert.equal(await page.locator('.ct-photo').count(), 0);
+      // Sent: Google puts it in My Contacts too, and the list knows without another change.
+      await page.locator('.sidebar .ct-source', { hasText: 'My Contacts' }).click();
+      await page.locator('.ct-row', { hasText: 'Aaaaa' }).waitFor({ timeout: 5000 });
       assert.deepEqual(errors, []);
     } finally {
       await close();

@@ -1986,8 +1986,8 @@ export function createMockBackend(): Backend {
       const all = cardsLoad();
       let sent = false;
       for (const c of all) {
-        if (c.google != null && st.links.some((l) => l.accountId === c.google) && !(c.groups ?? []).length) {
-          c.groups = ['contactGroups/myContacts'];
+        if (c.google != null && st.links.some((l) => l.accountId === c.google) && !(c.groups ?? []).includes('contactGroups/myContacts')) {
+          c.groups = ['contactGroups/myContacts', ...(c.groups ?? [])];
           sent = true;
         }
       }
@@ -2222,8 +2222,16 @@ export function createMockBackend(): Backend {
       };
       if (!c.name && !c.company && !c.emails.length) throw 'Give the contact a name, a company or an address.';
       const all = cardsLoad();
-      if (c.id === 0) c.id = Math.max(0, ...all.map((x) => x.id)) + 1;
-      else if (!all.some((x) => x.id === c.id)) throw 'That contact no longer exists.';
+      if (c.id === 0) {
+        c.id = Math.max(0, ...all.map((x) => x.id)) + 1;
+        // As Core::save_card: a new Google contact in the group it was made in; others none.
+        c.groups = c.google != null ? (card.groups ?? []) : [];
+      } else {
+        const was = all.find((x) => x.id === c.id);
+        if (!was) throw 'That contact no longer exists.';
+        // Groups change in Google, not here.
+        c.groups = was.groups ?? [];
+      }
       localStorage.setItem('mock.cards', JSON.stringify([...all.filter((x) => x.id !== c.id), c]));
       return c.id;
     },
