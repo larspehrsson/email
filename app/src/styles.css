@@ -51,6 +51,8 @@
 
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.05), 0 12px 40px rgba(0, 0, 0, 0.1);
   --focus-ring: 0 0 0 3px rgba(10, 108, 255, 0.3);
+  /* the same ring drawn inside, for controls in a row that clips (the reader's action bar) */
+  --focus-ring-inset: inset 0 0 0 2px rgba(10, 108, 255, 0.55);
   --scroll-thumb: rgba(0, 0, 0, 0.18);
 
   --row-h: 72px;
@@ -105,6 +107,7 @@
 
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 48px rgba(0, 0, 0, 0.45);
   --focus-ring: 0 0 0 3px rgba(61, 139, 255, 0.4);
+  --focus-ring-inset: inset 0 0 0 2px rgba(61, 139, 255, 0.7);
   --scroll-thumb: rgba(255, 255, 255, 0.18);
 }
 
@@ -959,6 +962,10 @@ body.resizing iframe {
 }
 .recips-line {
   overflow-wrap: anywhere;
+}
+.recips-none {
+  color: var(--text-3);
+  font-style: italic;
 }
 .recips-label {
   color: var(--text-3);
@@ -2903,6 +2910,11 @@ html.macos .sidebar-title {
 }
 .act-btn:active {
   background: var(--bg-active);
+}
+/* The bar's row is exactly as tall as the buttons and clips what's outside it: the ring goes
+   inside (after Esc closes a button's menu, focus is back on the button, as it should be). */
+.act-btn:focus-visible {
+  box-shadow: var(--focus-ring-inset);
 }
 .act-btn.danger:hover {
   color: var(--danger);

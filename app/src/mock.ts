@@ -1129,12 +1129,15 @@ export function createMockBackend(): Backend {
       subject: m.subject,
       from: { name: m.fromName, addr: m.fromAddr },
       // Meeting notes go to the whole team: a long To line (folded in the reader).
-      to: /notes from today/i.test(m.subject)
+      // The morning newsletter goes out to everyone as Bcc: no To or Cc ("undisclosed recipients").
+      to: md?.kind === 'brief'
+        ? []
+        : /notes from today/i.test(m.subject)
         ? [{ name: me.name, addr: me.addr }, ...PEOPLE.slice(0, 11).map((p) => ({ name: p.name, addr: p.addr }))]
         : m.to?.length
           ? m.to.map((a) => ({ ...a }))
           : [{ name: me.name, addr: me.addr }],
-      cc: md?.cc ? [pick(rnd, PEOPLE), pick(rnd, PEOPLE)].map((p) => ({ name: p.name, addr: p.addr })) : [],
+      cc: md?.cc && md.kind !== 'brief' ? [pick(rnd, PEOPLE), pick(rnd, PEOPLE)].map((p) => ({ name: p.name, addr: p.addr })) : [],
       date: m.date,
       html,
       text,

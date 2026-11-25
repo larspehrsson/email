@@ -1749,6 +1749,31 @@ describe('sender pane', () => {
   });
 });
 
+describe('recipients', () => {
+  test('mail sent to everyone as Bcc says its recipients weren\u2019t disclosed, once loaded', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.fill('.search-field input', 'from:morningbrief');
+      await page.waitForSelector('.search-layer .row');
+      await page.waitForTimeout(400);
+      await page.locator('.search-layer .row').first().click();
+      const none = page.locator('.reader .recips .recips-none');
+      await none.waitFor();
+      assert.match((await page.locator('.reader .recips').textContent()).trim(), /^To\s*Undisclosed recipients$/);
+      // Mail with recipients shows them, and no such line.
+      await page.fill('.search-field input', 'from:lumengoods');
+      await page.waitForTimeout(600);
+      await page.locator('.search-layer .row').first().click();
+      await page.waitForTimeout(800);
+      assert.equal(await none.count(), 0);
+      assert.match(await page.locator('.reader .recips').textContent(), /John Doe/);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('images', () => {
   test('always from this sender: its other mail loads images too; Settings lists it', async () => {
     const { page, errors, close } = await open({ threaded: false });

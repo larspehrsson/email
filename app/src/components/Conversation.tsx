@@ -15,7 +15,7 @@ import {
   takeConversationFocus,
 } from '../state';
 import { ForwardIcon, ImageIcon, PaperclipIcon, ReplyIcon } from './Icons';
-import { AddrList, AlwaysLoad, AttachmentChips, Avatar, BodySkeleton, buildSrcdoc, PlainBody, ReaderEmpty } from './Reader';
+import { AlwaysLoad, Recipients, AttachmentChips, Avatar, BodySkeleton, buildSrcdoc, PlainBody, ReaderEmpty } from './Reader';
 import { DRAG } from '../lib/platform';
 import { CardActions, HeaderActions, type ActionTarget } from './Actions';
 import { pendingSnooze } from './Snooze';
@@ -129,8 +129,7 @@ function ExpandedCard(props: { m: MessageSummary; me: Me; folderTag?: string; ac
             <Show when={detail()} fallback={<span class="recips-label">&nbsp;</span>}>
               {(d) => (
                 <>
-                  <AddrList label="To" list={d().to} />
-                  <AddrList label="Cc" list={d().cc} />
+                  <Recipients to={d().to} cc={d().cc} bcc={d().bcc} known />
                 </>
               )}
             </Show>

@@ -86,6 +86,32 @@ function addrLabel(a: Addr) {
   return a.name ? a.name : a.addr;
 }
 
+/** To and Cc. With neither (mail sent to everyone as Bcc, "undisclosed-recipients:;"), once the
+ *  message is loaded: its Bcc when it's one of ours, else a line saying they weren't disclosed,
+ *  so the sender never stands alone. */
+export function Recipients(props: { to: Addr[]; cc: Addr[]; bcc?: Addr[]; known: boolean }) {
+  const none = () => props.known && props.to.length === 0 && props.cc.length === 0;
+  return (
+    <>
+      <AddrList label="To" list={props.to} />
+      <AddrList label="Cc" list={props.cc} />
+      <Show when={none()}>
+        <Show
+          when={(props.bcc ?? []).length > 0}
+          fallback={
+            <div class="recips-line">
+              <span class="recips-label">To</span>
+              <span class="recips-none">Undisclosed recipients</span>
+            </div>
+          }
+        >
+          <AddrList label="Bcc" list={props.bcc!} />
+        </Show>
+      </Show>
+    </>
+  );
+}
+
 /** More than this many: the first few, then "and N more" (a click shows them all). */
 const ADDR_FOLD = 5;
 const ADDR_SHOWN = 3;
@@ -359,7 +385,7 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
     const d = detail();
     const s = selectedSummary();
     if (d && d.id === readerMessageId()) {
-      return { subject: d.subject, from: d.from, to: d.to, cc: d.cc, date: d.date, attachments: d.attachments };
+      return { subject: d.subject, from: d.from, to: d.to, cc: d.cc, bcc: d.bcc ?? [], full: true, date: d.date, attachments: d.attachments };
     }
     if (s && s.id === readerMessageId()) {
       return {
@@ -367,6 +393,8 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
         from: { name: s.fromName || null, addr: s.fromAddr },
         to: [] as Addr[],
         cc: [] as Addr[],
+        bcc: [] as Addr[],
+        full: false,
         date: s.date,
         attachments: [] as Attachment[],
       };
@@ -461,8 +489,7 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
                     </Show>
                   </div>
                   <div class="recips">
-                    <AddrList label="To" list={h().to} />
-                    <AddrList label="Cc" list={h().cc} />
+                    <Recipients to={h().to} cc={h().cc} bcc={h().bcc} known={h().full} />
                   </div>
                 </div>
               </div>
