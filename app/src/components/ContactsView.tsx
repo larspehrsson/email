@@ -112,10 +112,16 @@ export function ContactsView() {
 
   // What Google has beyond these fields (photo, title, addresses, birthday…), for a Google
   // contact: shown, and edited in Google. Fetched again only when another contact is chosen.
-  const [details] = createResource(
+  // A resource keeps its last value while it has nothing to fetch (a new contact) or is
+  // fetching another's: shown only when it's this contact's.
+  const [fetched] = createResource(
     () => (form()?.google != null && form()!.id ? form()!.id : null),
-    (id) => api.contactDetails(id).catch(() => null),
+    async (id) => ({ id, d: await api.contactDetails(id).catch(() => null) }),
   );
+  const details = () => {
+    const f = fetched();
+    return f && form()?.google != null && f.id === form()?.id ? f.d : null;
+  };
   /** Google's kind ("Mobile", "Work") for an address or number as typed here. */
   const kindOf = (list: Labeled[] | undefined, value: string) => {
     const v = value.trim().toLowerCase();

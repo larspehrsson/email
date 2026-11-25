@@ -1547,7 +1547,8 @@ impl Core {
         let mut any = false;
         for l in self.store.google_links().unwrap_or_default() {
             if let Ok(r) = self.google_sync(l.account_id).await {
-                any |= r.added + r.changed + r.removed > 0;
+                // Sent counts too: a new contact comes back with Google's groups (My Contacts).
+                any |= r.any();
             }
         }
         any

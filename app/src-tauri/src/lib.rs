@@ -405,7 +405,7 @@ async fn contact_details(core: State<'_, Arc<Core>>, card_id: i64) -> Res<Option
 async fn google_sync(core: State<'_, Arc<Core>>, account_id: Option<i64>) -> Res<bool> {
     let core = core.inner().clone();
     match account_id {
-        Some(id) => core.google_sync(id).await.map(|r| r.added + r.changed + r.removed > 0).map_err(err),
+        Some(id) => core.google_sync(id).await.map(|r| r.any()).map_err(err),
         None => Ok(core.google_sync_all().await),
     }
 }

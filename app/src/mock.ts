@@ -1981,12 +1981,23 @@ export function createMockBackend(): Backend {
     async google_sync() {
       await sleep(20);
       const st = googleLoad();
+      // A contact made here is sent, and comes back in My Contacts (Google puts every new one
+      // there): a change here.
+      const all = cardsLoad();
+      let sent = false;
+      for (const c of all) {
+        if (c.google != null && st.links.some((l) => l.accountId === c.google) && !(c.groups ?? []).length) {
+          c.groups = ['contactGroups/myContacts'];
+          sent = true;
+        }
+      }
+      if (sent) localStorage.setItem('mock.cards', JSON.stringify(all));
       for (const l of st.links) {
         l.synced = Math.floor(Date.now() / 1000);
         l.count = cardsLoad().filter((c) => c.google === l.accountId).length;
       }
       localStorage.setItem('mock.google', JSON.stringify(st));
-      return false;
+      return sent;
     },
     async account_logos() {
       await sleep(3);

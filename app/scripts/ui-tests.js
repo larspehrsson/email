@@ -2074,6 +2074,41 @@ describe('google contacts', () => {
 });
 
 describe('contact groups', () => {
+  test('a new contact starts without the last one\'s photo, and shows in My Contacts once Google has it', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const g = (r) => `contactGroups/${r}`;
+      await page.evaluate((groups) => {
+        localStorage.setItem(
+          'mock.google',
+          JSON.stringify({ clientId: 'x.apps.googleusercontent.com', links: [{ accountId: 1, googleEmail: 'me@gmail.com', synced: 1, error: null, count: 1, groups }] }),
+        );
+        localStorage.setItem(
+          'mock.cards',
+          JSON.stringify([{ id: 1, name: 'Olivia Hart', emails: ['olivia.hart@example.com'], phones: [], company: '', notes: '', google: 1, groups: [groups[0].resource] }]),
+        );
+        localStorage.setItem('contacts.source', `group:1:${groups[0].resource}`);
+      }, [{ resource: g('myContacts'), name: 'My Contacts' }]);
+      await page.reload();
+      await page.locator('.sidebar [aria-label="Address book"]').click();
+      await page.locator('.ct-row', { hasText: 'Olivia Hart' }).click();
+      await page.locator('.ct-photo').waitFor();
+      // A new one: no photo of hers.
+      await page.locator('[aria-label="New contact"]').click();
+      await page.locator('input[aria-label="Name"]').fill('Aaaaa');
+      await page.waitForTimeout(100);
+      assert.equal(await page.locator('.ct-photo').count(), 0, 'not the last contact\'s photo');
+      // Saved: sent to Google, which puts it in My Contacts; it shows here then, without
+      // another change.
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await page.locator('.ct-row', { hasText: 'Aaaaa' }).waitFor({ timeout: 5000 });
+      assert.equal(await page.locator('.ct-photo').count(), 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('the address book by Google account and group, with each contact\'s groups on its row', async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {
