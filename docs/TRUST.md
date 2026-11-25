@@ -59,10 +59,13 @@ Email's data folder:
 | Messages | `bodies.db` | The messages themselves, and attachments if you keep them for offline use |
 | Passwords and tokens | The system keychain (one item, `dev.mail-client`) | Account passwords, sign-in tokens, your writing-help API key, and your Google sign-in client |
 | Log | `logs/` in the data folder (macOS: `~/Library/Logs/dev.mailclient.desktop`; Windows: `%LOCALAPPDATA%\dev.mailclient.desktop\logs`) | What Email did and any problems: account addresses, folder and server names, and timings, and which tools AI apps used; no subjects or message text |
-| Opened attachments | The system's cache folder | Copies to open in other apps; cleared each time Email starts |
+| Opened attachments | The system's cache folder, in a folder only you can open | Copies to open in other apps; cleared each time Email starts |
 | Saved attachments and exports | Downloads, or where you choose | What you saved |
 | Settings | The app's own storage, and a few small files, in the data folder | Your choices in Settings and View options, window sizes, AI apps' permissions |
-| The web view's cache and cookies | The data folder | Pictures you loaded, and cookies their servers set |
+| The web view's cache and cookies | The data folder | Pictures you loaded, and cookies their servers set (a tracker's, typically): removed at every start and every hour |
+
+On Linux and macOS the data folder opens only to you, so other people with accounts on the same
+computer can't read your mail there.
 
 Removing an account deletes its mail and its keychain entries from this computer. It changes
 nothing on the server. Your lists of senders and domains whose pictures always load stay.

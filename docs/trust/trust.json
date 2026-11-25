@@ -646,7 +646,7 @@
     "storage": [
       {
         "id": "storage.mail-list",
-        "claim": "Folders, message headers, tags, drafts, the address book and the search index of message text are in mail.db in Email's data folder. Your lists of senders and domains whose pictures always load, and whether rules for a whole domain are on, are here too, and stay when an account is removed.",
+        "claim": "Folders, message headers, tags, drafts, the address book and the search index of message text are in mail.db in Email's data folder. Your lists of senders and domains whose pictures always load, and whether rules for a whole domain are on, are here too, and stay when an account is removed. On Linux and macOS the data folder holding it opens only to the user.",
         "level": "declared",
         "location": {
           "linux": "~/.local/share/dev.mailclient.desktop/mail.db",
@@ -670,6 +670,12 @@
             "kind": "code",
             "path": "crates/mail-core/src/store.rs",
             "note": "the schema; body_fts holds message text for search"
+          },
+          {
+            "kind": "test",
+            "path": "crates/mail-core/src/store.rs",
+            "symbol": "schema_versions",
+            "note": "the data folder is made 0700 by Store::open"
           }
         ],
         "verify": "Read the schema in store.rs and where the database is opened.",
@@ -733,7 +739,7 @@
       },
       {
         "id": "storage.attachment-cache",
-        "claim": "Attachments you open are copied to the system's cache folder for other apps to open, and cleared each time Email starts.",
+        "claim": "Attachments you open are copied to the system's cache folder for other apps to open, and cleared each time Email starts. The folder opens only to the user on Linux and macOS.",
         "level": "declared",
         "location": "the system cache folder, attachments/",
         "holds": [
@@ -749,6 +755,11 @@
             "kind": "code",
             "path": "app/src-tauri/src/lib.rs",
             "note": "attachment cache directory, removed at startup"
+          },
+          {
+            "kind": "code",
+            "path": "app/src-tauri/src/lib.rs",
+            "symbol": "make_opened_attachments_dir"
           }
         ],
         "verify": "Find where opened attachments are written and the startup cleanup.",
@@ -807,7 +818,7 @@
       },
       {
         "id": "storage.webview-cache",
-        "claim": "The web view keeps its own cache and cookies, so pictures you loaded and cookies their servers set can stay on disk.",
+        "claim": "The web view keeps its own cache and cookies, so pictures you loaded can stay on disk. Cookies their servers set (a tracker's, typically) are removed at every start and every hour after; Email itself uses none.",
         "level": "declared",
         "location": "the web view's folders in the data folder (WebKitCache, cookies, storage)",
         "holds": [
@@ -815,18 +826,21 @@
           "other"
         ],
         "encrypted_by_app": false,
-        "retention": "as the web view decides",
+        "retention": "cache: as the web view decides; cookies: until the next start, or at most an hour",
         "removed_by": [
+          "app-restart",
           "uninstall"
         ],
         "evidence": [
           {
-            "kind": "config",
-            "path": "app/src-tauri/tauri.conf.json"
+            "kind": "code",
+            "path": "app/src-tauri/src/lib.rs",
+            "symbol": "forget_cookies"
           }
         ],
-        "verify": "Look at the data folder after loading a message's pictures.",
-        "refuted_if": "(A description; refuted if the web view keeps nothing.)"
+        "verify": "Read forget_cookies and where it's started; look at the web view's cookie store after loading pictures that set cookies, then a minute after starting Email.",
+        "refuted_if": "Cookies from a picture's server still there more than an hour after they were set while Email runs, or after a restart; or the app relying on a cookie.",
+        "details": "Not covered by a test: it needs a running web view. Between removals, a cookie set by one message's pictures can be sent with another's."
       },
       {
         "id": "storage.app-files",

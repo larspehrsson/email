@@ -460,6 +460,19 @@ fn opened_attachments_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, 
     app.path().app_cache_dir().map(|d| d.join("attachments")).map_err(|e| e.to_string())
 }
 
+/// Create the folder for opened attachments, private to the user (no one else on a shared
+/// computer can read them, whatever the folders above allow).
+fn make_opened_attachments_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = opened_attachments_dir(app)?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+    }
+    Ok(dir)
+}
+
 /// Mark a file written from an email as downloaded from the internet, as browsers do: on
 /// Windows, the Mark of the Web (a `Zone.Identifier` stream; Office then opens it in Protected
 /// View, and Windows warns before running a program); on macOS, the quarantine flag (Gatekeeper
@@ -504,7 +517,7 @@ async fn open_attachment(
     if !mail_core::mime::is_openable(&name) {
         return Err("This file type can't be opened directly. Save it, and open it yourself only if you trust it.".into());
     }
-    let dir = opened_attachments_dir(&app)?.join(format!("{message_id}-{index}"));
+    let dir = make_opened_attachments_dir(&app)?.join(format!("{message_id}-{index}"));
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(mail_core::mime::safe_file_name(&name));
     std::fs::write(&path, &data).map_err(|e| format!("Couldn't write {}: {e}", path.display()))?;
@@ -1023,6 +1036,31 @@ fn is_app_url(url: &tauri::Url) -> bool {
         || matches!(url.host_str(), Some("localhost" | "tauri.localhost" | "127.0.0.1"))
 }
 
+/// Servers of pictures in mail can set cookies (a tracker's, to know you again), and the web
+/// view keeps them on disk. Email itself uses none (its settings are in local storage; sign-ins
+/// happen in the browser), so they're removed at every start and every hour after: none follows
+/// you for long. On a thread of its own: reading them on the main thread deadlocks on Windows.
+/// All windows share one store, so the main one's is enough.
+fn forget_cookies<R: tauri::Runtime>(window: tauri::WebviewWindow<R>) {
+    std::thread::spawn(move || loop {
+        match window.cookies() {
+            Ok(cookies) => {
+                let count = cookies.len();
+                for cookie in cookies {
+                    if let Err(e) = window.delete_cookie(cookie) {
+                        tracing::warn!("removing a web view cookie: {e}");
+                    }
+                }
+                if count > 0 {
+                    tracing::info!(count, "web view cookies removed");
+                }
+            }
+            Err(e) => tracing::warn!("reading the web view's cookies: {e}"),
+        }
+        std::thread::sleep(Duration::from_secs(60 * 60));
+    });
+}
+
 /// Links in email open in the system browser, never inside the app.
 fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
     let opener = app.handle().clone();
@@ -1060,6 +1098,7 @@ fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
         .build()?;
 
     window_state::track(&window, saved, requested, window_state::MAIN);
+    forget_cookies(window.clone());
 
     // Closing the main window quits (macOS too; a compose window still open keeps the app
     // until it's closed). With an export running it asks first ("confirm-close"); stopping it

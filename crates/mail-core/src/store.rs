@@ -847,6 +847,15 @@ impl std::error::Error for NewerDatabase {}
 impl Store {
     pub fn open(dir: &Path) -> Result<Store> {
         std::fs::create_dir_all(dir)?;
+        // Mail, the log and the rest are the user's alone: the folder opens to no one else on a
+        // shared computer, whatever the home folder allows (Windows: a profile's own folders
+        // already are).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+                .with_context(|| format!("making {} private", dir.display()))?;
+        }
         let mut db = open(&dir.join("mail.db"))?;
         let fresh = !db.prepare("SELECT 1 FROM sqlite_master")?.exists([])?;
         let mut version: i64 = if fresh { SCHEMA_VERSION } else { db.query_row("PRAGMA user_version", [], |r| r.get(0))? };
@@ -5340,6 +5349,11 @@ mod tests {
         store.insert_account("x@example.com", "x", Provider::Imap, "h", 993).unwrap();
         drop(store);
         assert_eq!(version(&dir), SCHEMA_VERSION);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700, "the user's alone");
+        }
         // At the base (or later): kept, and brought up to date by the steps since.
         {
             let db = Connection::open(dir.join("mail.db")).unwrap();
