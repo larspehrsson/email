@@ -430,6 +430,36 @@ fn etag_of(p: &Value) -> Option<String> {
     p.get("etag").and_then(Value::as_str).map(str::to_string)
 }
 
+/// The link of a card just made in an account's contacts, still to send: in `groups` (the
+/// group being looked at) from the start, so it shows there before it's sent, and sent in them.
+pub fn new_link(card_id: i64, account_id: i64, groups: &[String]) -> CardLink {
+    let memberships: Vec<Value> = groups
+        .iter()
+        .filter(|g| g.starts_with("contactGroups/"))
+        .map(|g| json!({ "contactGroupMembership": { "contactGroupResourceName": g } }))
+        .collect();
+    let raw = (!memberships.is_empty()).then(|| json!({ "memberships": memberships }).to_string());
+    CardLink { card_id, account_id, resource: None, etag: None, raw, dirty: true }
+}
+
+/// A new contact to create: the card, in the groups it was made in. Not My Contacts: Google
+/// puts every new contact there itself.
+fn person_to_create(raw: &Value, card: &Card) -> Value {
+    let mut p = person_from_card(&json!({}), card);
+    let groups: Vec<Value> = raw
+        .get("memberships")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|m| m.pointer("/contactGroupMembership/contactGroupResourceName").and_then(Value::as_str) != Some("contactGroups/myContacts"))
+        .cloned()
+        .collect();
+    if !groups.is_empty() {
+        p["memberships"] = json!(groups);
+    }
+    p
+}
+
 fn link_with(card_id: i64, account_id: i64, p: &Value) -> CardLink {
     CardLink { card_id, account_id, resource: resource_of(p), etag: etag_of(p), raw: Some(p.to_string()), dirty: false }
 }
@@ -481,7 +511,7 @@ pub async fn sync<A: PeopleApi>(store: &Store, account_id: i64, api: &A, now: i6
         };
         let raw: Value = l.raw.as_deref().and_then(|r| serde_json::from_str(r).ok()).unwrap_or(json!({}));
         let sent = match &l.resource {
-            None => api.create(&person_from_card(&json!({}), &card)).await.map_err(other)?,
+            None => api.create(&person_to_create(&raw, &card)).await.map_err(other)?,
             Some(res) => match api.update(res, &person_from_card(&raw, &card)).await {
                 Ok(p) => p,
                 Err(PeopleError::Conflict) => {
@@ -1108,6 +1138,31 @@ mod tests {
         let there = g.people.borrow()[&ann].clone();
         assert_eq!((there["organizations"][0]["name"].as_str(), there["organizations"][0]["title"].as_str()), (Some("Acme Ltd"), Some("CEO")));
         assert_eq!(store.cards().unwrap()[0].company, "Acme Ltd");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn made_in_a_group() {
+        let (dir, store, acct) = setup("ingroup");
+        let g = Fake::new(10);
+        block(sync(&store, acct, &g, 1)).unwrap();
+        // Made while looking at "Family" (Core::save_card): in it here at once…
+        let id = store.save_card(Card { name: "Kid".into(), ..Default::default() }).unwrap();
+        store.save_card_link(&new_link(id, acct, &["contactGroups/family1".into()])).unwrap();
+        assert_eq!(store.card(id).unwrap().unwrap().groups, ["contactGroups/family1"]);
+        // …and created in it there.
+        block(sync(&store, acct, &g, 2)).unwrap();
+        let there = g.people.borrow().values().next().cloned().unwrap();
+        assert_eq!(groups_of(&there), ["contactGroups/family1"]);
+        assert_eq!(store.card(id).unwrap().unwrap().groups, ["contactGroups/family1"]);
+        // My Contacts isn't sent: Google adds every new contact to it.
+        let id = store.save_card(Card { name: "Other".into(), ..Default::default() }).unwrap();
+        store.save_card_link(&new_link(id, acct, &["contactGroups/myContacts".into()])).unwrap();
+        assert_eq!(store.card(id).unwrap().unwrap().groups, ["contactGroups/myContacts"], "shown in My Contacts meanwhile");
+        let p = person_to_create(&serde_json::from_str(&store.card_link(id).unwrap().unwrap().raw.unwrap()).unwrap(), &store.card(id).unwrap().unwrap());
+        assert!(p.get("memberships").is_none());
+        // None: as before.
+        assert!(new_link(1, acct, &[]).raw.is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

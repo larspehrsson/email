@@ -1387,9 +1387,11 @@ impl Core {
         {
             bail!("Google Contacts isn't connected for that account.");
         }
+        let groups = card.groups.clone();
         let id = self.store.save_card(card)?;
         if let Some(account_id) = new_in {
-            self.store.save_card_link(&gcontacts::CardLink { card_id: id, account_id, resource: None, etag: None, raw: None, dirty: true })?;
+            // In the group it was made in (the one being looked at), here and there.
+            self.store.save_card_link(&gcontacts::new_link(id, account_id, &groups))?;
         } else {
             // One more edit to send (counted, so a sync running now doesn't take it as sent).
             self.store.mark_card_edited(id)?;
@@ -1547,7 +1549,8 @@ impl Core {
         let mut any = false;
         for l in self.store.google_links().unwrap_or_default() {
             if let Ok(r) = self.google_sync(l.account_id).await {
-                any |= r.added + r.changed + r.removed > 0;
+                // Sent counts too: a new contact comes back with Google's groups (My Contacts).
+                any |= r.any();
             }
         }
         any
