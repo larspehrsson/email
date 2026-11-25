@@ -980,16 +980,15 @@ body.resizing iframe {
   font-variant-numeric: tabular-nums;
 }
 
+/* A notice, not a control: a flat tinted strip, its text on the reader's 28px edge. */
 .remote-banner {
   flex: none;
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 0 28px 12px;
-  padding: 6px 12px;
-  border-radius: 8px;
+  margin: 0;
+  padding: 7px 28px;
   background: var(--bg-subtle);
-  border: 1px solid var(--sep);
   color: var(--text-2);
   font-size: 12.5px;
   animation: fade-in 160ms var(--ease);
@@ -1563,7 +1562,8 @@ body.resizing iframe {
   min-height: 17px;
 }
 .cm-banner {
-  margin: 0 16px 10px 66px;
+  margin: 0 0 10px;
+  padding: 6px 18px;
 }
 .cm-body {
   position: relative;
@@ -1572,13 +1572,13 @@ body.resizing iframe {
 .cm-body .plain {
   position: static;
   overflow: visible;
-  padding: 2px 20px 20px 66px;
+  padding: 2px 18px 20px;
 }
 .cm-body .body-loading {
-  padding: 4px 20px 20px 66px;
+  padding: 4px 18px 20px;
 }
 .cm-body .body-error {
-  padding: 12px 20px 20px 66px;
+  padding: 12px 18px 20px;
 }
 .card-frame-wrap {
   background: #fff;
@@ -2716,9 +2716,9 @@ body.resizing iframe {
   padding: 2px 0 10px;
   min-height: 28px;
 }
-/* in the reader: under the sender, lined up with the name */
+/* in the reader: under the sender, on the page's edge like the message */
 .reader-head .att-chips {
-  padding: 12px 0 0 52px;
+  padding: 12px 0 0;
 }
 .att-chips-ph {
   min-height: 38px;
@@ -2774,8 +2774,8 @@ body.resizing iframe {
 /* in a conversation card: under its header, lined up with its text */
 .cm-att,
 .att-chips-ph.cm-att {
-  padding-left: 66px;
-  padding-right: 16px;
+  padding-left: 18px;
+  padding-right: 18px;
 }
 .att-icon {
   flex: none;

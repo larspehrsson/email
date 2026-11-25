@@ -243,7 +243,8 @@ const actionTarget = (): ActionTarget | null => {
 };
 
 /** The reader's page scrolls, not the message's own frame: it grows to its content. */
-const PAGE_FRAME_CSS = 'html{overflow:hidden}';
+// The message's sides on the reader's 28px edge, as the subject, sender, chips and plain text.
+const PAGE_FRAME_CSS = 'html{overflow:hidden}body{padding-left:28px;padding-right:28px}';
 
 export function Reader(props: { ref?: (el: HTMLElement) => void }) {
   let scrollEl: HTMLDivElement | undefined;

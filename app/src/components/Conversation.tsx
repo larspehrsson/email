@@ -32,7 +32,8 @@ import { isTextInput } from './ShortcutsSheet';
 
 /** Extra CSS for card bodies: compact padding, never scroll inside the frame: the conversation
  * does, down and (for a message wider than the pane) sideways. */
-const CARD_FRAME_CSS = 'html{overflow:hidden}body{padding:4px 20px 20px}';
+// The message's sides on the card's 18px edge, as the avatar, chips and plain text.
+const CARD_FRAME_CSS = 'html{overflow:hidden}body{padding:4px 18px 20px}';
 
 
 // ------------------------------------------------------------- cards
