@@ -2290,9 +2290,92 @@ body.resizing iframe {
   gap: 3px;
 }
 
-/* single-message: sender / recipients / chips just below the line, scrolling with the message */
+/* single-message: the sender and recipients are in the band, beside a small avatar, on the
+   two lines the date and actions had to themselves; the band grows only when a folded
+   recipient list is opened. Attachments open the page under it, scrolling with the message. */
+.reader-band.has-from {
+  height: auto;
+  max-height: none;
+  padding-bottom: 8px;
+}
+.reader-band .band-top {
+  flex: none;
+  margin-top: calc(var(--search-bar-h) - 34px);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+.reader-band .band-top .reader-subject {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.reader-band .band-top .act-bar {
+  flex: none;
+  margin-left: auto;
+}
+.reader-band .band-row {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 12px;
+  min-width: 0;
+}
+.band-who {
+  flex: 1;
+  min-width: 0;
+}
+.band-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  height: 22px;
+}
+.band-from {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.reader-band .band-line .band-meta {
+  flex: 1 1 auto;
+  margin-top: 0;
+  justify-content: flex-end;
+}
+.band-recips {
+  margin-top: 1px;
+  display: flex;
+  gap: 14px;
+  min-width: 0;
+  height: 18px;
+  line-height: 18px;
+}
+.band-recips .recips-line {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+}
+.band-recips:has(.recips-line.open) {
+  height: auto;
+  flex-direction: column;
+  gap: 2px;
+}
+.band-recips .recips-line.open {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .reader-head {
   padding: 14px 28px 12px;
+}
+.reader-head.reader-att {
+  padding: 12px 28px 0;
+}
+.reader-head.reader-att .att-chips {
+  padding-left: 0;
 }
 .reader-head + .remote-banner {
   margin-top: 0;

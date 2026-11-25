@@ -127,7 +127,7 @@ export function AddrList(props: { label: string; list: Addr[] }) {
   };
   return (
     <Show when={props.list.length > 0}>
-      <div class="recips-line">
+      <div class="recips-line" classList={{ open: open() }}>
         <span class="recips-label">{props.label}</span>
         <For each={shown()}>
           {(a, i) => (
@@ -418,10 +418,28 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
         {(h) => (
           <>
             {/* Fixed-height band: lines up with the message list's header border. */}
-            <header class="reader-band" data-tauri-drag-region={DRAG}>
-              <h1 class="reader-subject" title={h().subject || '(no subject)'}>
-                {h().subject || '(no subject)'}
-              </h1>
+            <header class="reader-band has-from" data-tauri-drag-region={DRAG}>
+              <div class="band-top" data-tauri-drag-region={DRAG}>
+                <h1 class="reader-subject" title={h().subject || '(no subject)'}>
+                  {h().subject || '(no subject)'}
+                </h1>
+                <HeaderActions target={actionTarget()} />
+              </div>
+              {/* Sender and recipients live in the band: nothing between it and the message. */}
+              <div class="band-row" data-tauri-drag-region={DRAG}>
+              <Avatar name={h().from.name} addr={h().from.addr} size={36} />
+              <div class="band-who" data-tauri-drag-region={DRAG}>
+              <div class="band-line" data-tauri-drag-region={DRAG}>
+              <div class="reader-from-line band-from">
+                <span class="reader-from-name" onContextMenu={(e) => addressMenu(e, h().from)}>
+                  {h().from.name || h().from.addr}
+                </span>
+                <Show when={h().from.name}>
+                  <span class="reader-from-addr" onContextMenu={(e) => addressMenu(e, h().from)}>
+                    &lt;{h().from.addr}&gt;
+                  </span>
+                </Show>
+              </div>
               <div class="band-meta" data-tauri-drag-region={DRAG}>
                 <time dateTime={new Date(h().date * 1000).toISOString()}>{longDate(h().date)}</time>
                 {/* Icon only (title says which): the band's date mustn't be squeezed. */}
@@ -467,40 +485,27 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
                     />
                   )}
                 </Show>
-                <HeaderActions target={actionTarget()} />
+              </div>
+              </div>
+              <div class="recips band-recips">
+                <Recipients to={h().to} cc={h().cc} bcc={h().bcc} known={h().full} />
+              </div>
+              </div>
               </div>
             </header>
             {/* Under the band, one page that scrolls: sender, recipients, attachments and the
                 message together, each as tall as it is (an expanded list just makes it longer). */}
             <div class="reader-scroll" tabIndex={-1} ref={scrollEl}>
             <div class="reader-page">
-            <div class="reader-head">
-              <div class="reader-from">
-                <Avatar name={h().from.name} addr={h().from.addr} size={40} />
-                <div class="reader-from-text">
-                  <div class="reader-from-line">
-                    <span class="reader-from-name" onContextMenu={(e) => addressMenu(e, h().from)}>
-                      {h().from.name || h().from.addr}
-                    </span>
-                    <Show when={h().from.name}>
-                      <span class="reader-from-addr" onContextMenu={(e) => addressMenu(e, h().from)}>
-                        &lt;{h().from.addr}&gt;
-                      </span>
-                    </Show>
-                  </div>
-                  <div class="recips">
-                    <Recipients to={h().to} cc={h().cc} bcc={h().bcc} known={h().full} />
-                  </div>
-                </div>
-              </div>
               {/* Room kept whenever the message has attachments (known from the list row), so
                   nothing moves when the names come in. */}
               <Show when={h().attachments.length > 0 || selectedSummary()?.hasAttachments}>
-                <Show when={h().attachments.length > 0} fallback={<div class="att-chips att-chips-ph" />}>
-                  <AttachmentChips messageId={readerMessageId()!} list={h().attachments} />
-                </Show>
+                <div class="reader-head reader-att">
+                  <Show when={h().attachments.length > 0} fallback={<div class="att-chips att-chips-ph" />}>
+                    <AttachmentChips messageId={readerMessageId()!} list={h().attachments} />
+                  </Show>
+                </div>
               </Show>
-            </div>
             <Show when={ready()?.d.hasRemoteContent && !ready()?.remote && !allowRemote()}>
               <div class="remote-banner">
                 <ImageIcon size={14} />
