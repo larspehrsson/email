@@ -15,6 +15,7 @@ import {
 } from '../state';
 import { hideToast, showToast } from '../components/Toast';
 import { commandFor } from './shortcuts';
+import { clock } from './format';
 
 // ------------------------------------------------------------- list navigation registry
 
@@ -97,7 +98,7 @@ function describe(a: Action, n: number, targetName?: string): string {
     case 'move':
       return `Moved${many} to ${targetName ?? 'folder'}`;
     case 'snooze': {
-      const when = new Date(a.until * 1000).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+      const when = new Date(a.until * 1000).toLocaleString(undefined, clock({ weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }));
       return `Snoozed${many}: back ${when}`;
     }
     case 'unsnooze':
