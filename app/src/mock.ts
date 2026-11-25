@@ -628,8 +628,10 @@ export function createMockBackend(): Backend {
     const a = addr.toLowerCase();
     if (remoteSenders.has(a)) return true;
     const host = a.split('@')[1] ?? '';
-    return [...remoteSenders].some((r) => r.startsWith('@') && (host === r.slice(1) || host.endsWith(`.${r.slice(1)}`)));
+    return domainRules && [...remoteSenders].some((r) => r.startsWith('@') && (host === r.slice(1) || host.endsWith(`.${r.slice(1)}`)));
   };
+  /** Settings › General › Privacy: "Always load…" can cover everyone at a domain */
+  let domainRules = false;
   /** "Always from this sender": lowercase addresses */
   const remoteSenders = new Set<string>();
   /** resolves a pending mock browser sign-in as cancelled */
@@ -2016,9 +2018,18 @@ export function createMockBackend(): Backend {
       await sleep(3);
       const m = byId.get(id);
       const d = m && senderDomainOf(m.fromAddr);
+      if (!domainRules) throw 'Rules for everyone at a domain are off: allow this sender instead.';
       if (!d) throw 'Anyone can have an address there: allow this sender instead.';
       remoteSenders.add(`@${d}`);
       return `@${d}`;
+    },
+    async domain_rules() {
+      await sleep(3);
+      return domainRules;
+    },
+    async set_domain_rules({ on }) {
+      await sleep(3);
+      domainRules = on;
     },
     async remote_senders() {
       await sleep(3);

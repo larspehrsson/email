@@ -3,6 +3,7 @@ import { Portal } from 'solid-js/web';
 import { AiAppsSection } from './AiApps';
 import { GoogleClientNote, GoogleContactsField } from './GoogleContacts';
 import { pictureLevel, setPictureLevel, type PictureLevel } from '../lib/senderIcons';
+import { domainRules, setDomainRules } from '../lib/domainRules';
 import { setTheme, theme, THEMES } from '../lib/theme';
 import { pinFavorites, setPinFavorites } from '../lib/favorites';
 import { accountLogo, logoFromFile, setAccountLogo } from '../lib/accountLogos';
@@ -957,21 +958,38 @@ function RemoteSenders() {
   const [list, { refetch }] = createResource(() => api.remoteSenders().catch(() => [] as string[]));
   return (
     <Field label="Remote images" class="st-field-top st-divided">
-      <Show when={(list() ?? []).length > 0} fallback={<span class="st-muted">No one yet. “Always load…” over a message’s blocked images adds a sender, or everyone at its domain.</span>}>
-        <ul class="st-remote-senders">
-          <li class="st-muted">Always loaded in mail from:</li>
-          <For each={list()}>
-            {(addr) => (
-              <li>
-                <span>{addr}</span>
-                <button class="link-btn" aria-label={`Stop loading images from ${addr}`} onClick={() => void api.setRemoteSender(addr, false).then(refetch)}>
-                  Remove
-                </button>
-              </li>
-            )}
-          </For>
-        </ul>
-      </Show>
+      <div class="st-remote">
+        <label class="st-level">
+          <input type="checkbox" checked={domainRules()} onChange={(e) => void setDomainRules(e.currentTarget.checked)} />
+          <span>
+            Allow “Always load…” for everyone at a company
+            <span class="st-level-note">
+              Where your mail service checks who mail is from (Gmail and Microsoft do), only mail that passes counts. Elsewhere, someone
+              pretending to be from that company could see when you open their message.
+            </span>
+          </span>
+        </label>
+        <Show when={(list() ?? []).length > 0} fallback={<span class="st-muted">No one yet. “Always load…” over a message’s blocked images adds someone here.</span>}>
+          <ul class="st-remote-senders">
+            <li class="st-muted">Always loaded in mail from:</li>
+            <For each={list()}>
+              {(addr) => (
+                <li>
+                  <span>
+                    {addr}
+                    <Show when={addr.startsWith('@') && !domainRules()}>
+                      <span class="st-muted" title="Rules for everyone at a company are off"> (off)</span>
+                    </Show>
+                  </span>
+                  <button class="link-btn" aria-label={`Stop loading images from ${addr}`} onClick={() => void api.setRemoteSender(addr, false).then(refetch)}>
+                    Remove
+                  </button>
+                </li>
+              )}
+            </For>
+          </ul>
+        </Show>
+      </div>
     </Field>
   );
 }

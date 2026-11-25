@@ -166,7 +166,8 @@ between them and Enter opens or closes one.
 attachments as chips with their names under the sender (click to open, right-click to save or
 Save As…; a long list shows three rows and "+N more"); right-click a name in a message to write
 to that person or copy their address; images in messages blocked until you choose to load them
-(for one message, or always from a sender or from everyone at their company). Pictures too wide
+(for one message, or always from a sender, or from everyone at their company once you turn that
+on). Pictures too wide
 for the reader shrink to fit; click one to see it at its actual size. Marking mail as spam or
 not spam also teaches your provider's spam filter.
 

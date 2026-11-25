@@ -8,6 +8,7 @@ export { AttachmentChips };
 import { analyzePlain, collapseHtmlQuotes, QUOTE_FRAME_CSS, type QNode } from '../lib/quotes';
 import { cacheClear, cacheGet, cacheMarkRemoteAllowed, cachePut, onMessageReady, readyAt } from '../lib/body';
 import { linkify, longDate } from '../lib/format';
+import { domainRules } from '../lib/domainRules';
 import { patchSelectedSummary, readerMessageId, restorePending, searchActive, selectedFolderId, selectedMessageId, selectedSummary } from '../state';
 import { HeaderActions, type ActionTarget } from './Actions';
 import { pendingSnooze } from './Snooze';
@@ -56,8 +57,9 @@ ${extraCss}
 // ------------------------------------------------------------- small pieces
 
 /** Over blocked images: always load them, from this sender or from everyone at its domain
- *  (only when the receiving server vouched the message is from there, and not for gmail.com and
- *  the like). A menu, so the banner stays one short line. */
+ *  (when the user turned such rules on, the core offers a domain: not gmail.com and the like,
+ *  nor where the server checks senders and this one failed). A menu, so the banner stays one
+ *  short line. */
 export function AlwaysLoad(props: { addr: string; domain: string | null; onPick: (who: 'sender' | 'domain') => void }) {
   return (
     <Select
@@ -70,7 +72,7 @@ export function AlwaysLoad(props: { addr: string; domain: string | null; onPick:
       value={null}
       options={[
         { value: 'sender' as const, label: `From ${props.addr}` },
-        ...(props.domain ? [{ value: 'domain' as const, label: `From everyone at ${props.domain}` }] : []),
+        ...(props.domain && domainRules() ? [{ value: 'domain' as const, label: `From everyone at ${props.domain}` }] : []),
       ]}
       onChange={(who) => props.onPick(who)}
     />

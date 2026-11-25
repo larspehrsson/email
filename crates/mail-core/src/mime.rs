@@ -297,8 +297,9 @@ pub fn render(id: i64, raw: &[u8], date: i64) -> Option<MessageDetail> {
         None => t.into_owned(),
     });
     let has_remote_content = html.as_deref().is_some_and(has_remote);
-    let sender_domain = verified_sender_domain(&msg, &from_addr);
+    let sender_domain = crate::icons::icon_domain(&from_addr);
     let sender_verified = sender_vouched(&msg, &from_addr);
+    let auth_server = auth_server(&msg);
 
     Some(MessageDetail {
         id,
@@ -315,39 +316,43 @@ pub fn render(id: i64, raw: &[u8], date: i64) -> Option<MessageDetail> {
         remote_allowed: false,
         sender_domain,
         sender_verified,
+        auth_server,
         tags: Vec::new(),
     })
 }
 
-/// The sender's domain ("acme.com", the registered part), when the receiving server vouched
-/// for it: its Authentication-Results say DMARC passed for the From domain, or DKIM passed for a
-/// signature by it. Only the topmost Authentication-Results counts, the one the user's own
-/// provider added on arrival: the ones below it could have been written by the sender. None for
-/// gmail.com and the like (anyone has an address there), and when nothing vouches for it: a From
-/// address is easy to make up, and "everyone at acme.com" mustn't let a made-up one in.
-pub fn verified_sender_domain(msg: &mail_parser::Message, from_addr: &str) -> Option<String> {
-    let domain = crate::icons::icon_domain(from_addr)?;
-    sender_vouched(msg, from_addr).then_some(domain)
-}
-
 /// Whether the topmost Authentication-Results vouches for the From address's domain (its
-/// registrable part), shared mail services included: the check behind "always load pictures
-/// from this sender" on accounts whose provider writes that header (`Core::provider_vouches`).
+/// registrable part), shared mail services included: DMARC passed for it, or DKIM for a
+/// signature by it. Only the topmost counts, the one the user's own server added on arrival
+/// where it adds one: the ones below it could have been written by the sender. It's believed
+/// only where the account's server is known to write one (`Core::from_believed`).
 pub fn sender_vouched(msg: &mail_parser::Message, from_addr: &str) -> bool {
     let Some(domain) = crate::icons::registrable_domain(from_addr) else { return false };
-    // In order from the top (header_raw would give the last one).
-    msg.headers_raw()
-        .find(|(name, _)| name.eq_ignore_ascii_case("Authentication-Results"))
-        .is_some_and(|(_, results)| auth_results_vouch(results, &domain))
+    top_auth_results(msg).is_some_and(|results| auth_results_vouch(results, &domain))
 }
 
-/// Whether an Authentication-Results value (RFC 8601) has a DMARC or DKIM pass for `domain`
-/// (or one of its subdomains).
-fn auth_results_vouch(results: &str, domain: &str) -> bool {
-    // Comments in parentheses can say anything: leave them out.
-    let mut plain = String::with_capacity(results.len());
+/// The registrable domain of the server that wrote the topmost Authentication-Results, by the
+/// name it signed it with (its authserv-id, RFC 8601): "fastmail.com" from "mx.fastmail.com;
+/// dkim=pass …". None when there's none, or no name (Microsoft writes none).
+pub fn auth_server(msg: &mail_parser::Message) -> Option<String> {
+    let plain = without_comments(top_auth_results(msg)?);
+    let id = plain.split(';').next()?.split_whitespace().next()?;
+    if id.contains('=') {
+        return None;
+    }
+    crate::icons::registrable_domain(&format!("x@{id}"))
+}
+
+/// The topmost Authentication-Results value (header_raw would give the last one).
+fn top_auth_results<'a>(msg: &'a mail_parser::Message) -> Option<&'a str> {
+    msg.headers_raw().find(|(name, _)| name.eq_ignore_ascii_case("Authentication-Results")).map(|(_, v)| v)
+}
+
+/// The text without its comments in parentheses (they can say anything).
+fn without_comments(text: &str) -> String {
+    let mut plain = String::with_capacity(text.len());
     let mut depth = 0u32;
-    for c in results.chars() {
+    for c in text.chars() {
         match c {
             '(' => depth += 1,
             ')' if depth > 0 => depth -= 1,
@@ -355,6 +360,13 @@ fn auth_results_vouch(results: &str, domain: &str) -> bool {
             _ => {}
         }
     }
+    plain
+}
+
+/// Whether an Authentication-Results value (RFC 8601) has a DMARC or DKIM pass for `domain`
+/// (or one of its subdomains).
+fn auth_results_vouch(results: &str, domain: &str) -> bool {
+    let plain = without_comments(results);
     let ours = |v: &str| {
         let v = v.trim().trim_matches('"');
         let host = v.rsplit_once('@').map_or(v, |(_, d)| d);
@@ -658,7 +670,10 @@ mod tests {
     #[test]
     fn a_sender_domain_counts_only_when_the_receiving_server_vouched() {
         let msg = |headers: &str| format!("{headers}From: Ann <ann@mail.example.com>\r\nTo: john@example.org\r\nSubject: Hi\r\n\r\nHello\r\n");
-        let domain = |raw: &str| verified_sender_domain(&MessageParser::default().parse(raw.as_bytes()).unwrap(), "ann@mail.example.com");
+        let domain = |raw: &str| {
+            let parsed = MessageParser::default().parse(raw.as_bytes()).unwrap();
+            sender_vouched(&parsed, "ann@mail.example.com").then(|| crate::icons::icon_domain("ann@mail.example.com")).flatten()
+        };
         // DMARC passed for the From domain (Gmail's wording, a comment with a ; in it).
         let gmail = "Authentication-Results: mx.google.com;\r\n       dkim=pass header.i=@other.example header.s=s1;\r\n       spf=pass (google.com: x; y) smtp.mailfrom=bounce@other.example;\r\n       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=mail.example.com\r\n";
         assert_eq!(domain(&msg(gmail)).as_deref(), Some("example.com"));
@@ -680,11 +695,23 @@ mod tests {
         let shared = "From: Ann <ann@gmail.com>\r\nAuthentication-Results: mx.google.com; dkim=pass header.i=@gmail.com; dmarc=pass header.from=gmail.com\r\nSubject: Hi\r\n\r\nHello\r\n";
         let parsed = MessageParser::default().parse(shared.as_bytes()).unwrap();
         assert!(sender_vouched(&parsed, "ann@gmail.com"));
-        assert_eq!(verified_sender_domain(&parsed, "ann@gmail.com"), None);
+        assert_eq!(crate::icons::icon_domain("ann@gmail.com"), None);
         assert!(!sender_vouched(&parsed, "ann@other.example"), "someone else's domain");
         // Only the topmost counts: one below it may be the sender's own.
         let forged = format!("Authentication-Results: mx.example.net; dmarc=fail header.from=mail.example.com\r\n{}", gmail);
         assert_eq!(domain(&msg(&forged)), None);
+    }
+
+    #[test]
+    fn the_server_that_checked_is_named_by_the_topmost_results() {
+        let server = |headers: &str| auth_server(&MessageParser::default().parse(format!("{headers}From: ann@example.com\r\nSubject: Hi\r\n\r\nHello\r\n").as_bytes()).unwrap());
+        assert_eq!(server("Authentication-Results: mx.mail.example.net; dmarc=pass header.from=example.com\r\n").as_deref(), Some("example.net"));
+        assert_eq!(server("Authentication-Results: (a comment) mx.example.org 1; dkim=none\r\n").as_deref(), Some("example.org"));
+        // Microsoft names none; none at all.
+        assert_eq!(server("Authentication-Results: spf=pass smtp.mailfrom=example.com; dmarc=pass header.from=example.com\r\n"), None);
+        assert_eq!(server(""), None);
+        // The topmost only.
+        assert_eq!(server("Authentication-Results: mx.example.org; spf=none\r\nAuthentication-Results: mx.example.net; spf=none\r\n").as_deref(), Some("example.org"));
     }
 
     #[test]

@@ -345,12 +345,16 @@ pub struct MessageDetail {
     /// The user chose "Load images" for this message before.
     pub remote_allowed: bool,
     /// The sender's own domain ("papercut.com", from "ann@mail.papercut.com"), for "Always from
-    /// everyone at …"; None for mail services anyone has an address at (gmail.com…).
+    /// everyone at …"; None for mail services anyone has an address at (gmail.com…), and when
+    /// the account's server checks senders and this one didn't pass (`Core::from_believed`).
     pub sender_domain: Option<String>,
     /// The topmost Authentication-Results vouches for the sender's own domain (any domain,
     /// gmail.com too); for the app's own use, not sent to the frontend.
     #[serde(skip)]
     pub sender_verified: bool,
+    /// Who wrote the topmost Authentication-Results (`mime::auth_server`); the app's own use.
+    #[serde(skip)]
+    pub auth_server: Option<String>,
     pub tags: Vec<String>,
 }
 

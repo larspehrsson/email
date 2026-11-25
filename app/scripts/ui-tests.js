@@ -1733,7 +1733,7 @@ describe('images', () => {
       await banner.waitFor();
       const always = banner.locator('.sel.remote-always');
       assert.equal((await always.textContent()).trim(), 'Always load…');
-      assert.deepEqual(await optionsOf(always), ['From news@lumengoods.com', 'From everyone at lumengoods.com']);
+      assert.deepEqual(await optionsOf(always), ['From news@lumengoods.com'], 'rules for a whole domain are off by default');
       await choose(always, 'From news@lumengoods.com');
       await page.waitForTimeout(500);
       assert.equal(await banner.count(), 0, 'loaded');
@@ -1755,9 +1755,16 @@ describe('images', () => {
 });
 
 describe('images from a domain', () => {
-  test('everyone at the sender\u2019s domain: listed as @domain in Settings', async () => {
+  test('everyone at the sender\u2019s domain, once turned on in Settings: listed as @domain', async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'General' }).click();
+      const optIn = page.locator('.st-remote input[type=checkbox]');
+      assert.equal(await optIn.isChecked(), false, 'off by default');
+      await optIn.check();
+      await page.keyboard.press('Escape');
+      await page.locator('.st-nav-item').first().waitFor({ state: 'detached' });
       await page.fill('.search-field input', 'from:lumengoods');
       await page.waitForSelector('.search-layer .row');
       await page.waitForTimeout(400);
@@ -1775,6 +1782,9 @@ describe('images from a domain', () => {
       await page.locator('.st-nav-item', { hasText: 'General' }).click();
       await page.locator('.st-remote-senders li').first().waitFor();
       assert.match(await page.locator('.st-remote-senders').textContent(), /@lumengoods\.com/);
+      // Turned off again: the rule stays listed, marked as not in use.
+      await page.locator('.st-remote input[type=checkbox]').uncheck();
+      assert.match(await page.locator('.st-remote-senders').textContent(), /@lumengoods\.com \(off\)/);
       assert.deepEqual(errors, []);
     } finally {
       await close();

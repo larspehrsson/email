@@ -305,6 +305,9 @@ export const api = {
   allowRemoteSender: (id: number): Promise<string> => call('allow_remote_sender', { id }),
   /** Always load images in mail from everyone at the sender's domain; returns "@domain". */
   allowRemoteDomain: (id: number): Promise<string> => call('allow_remote_domain', { id }),
+  /** Whether "Always load…" can cover everyone at a domain (Settings › General › Privacy). */
+  domainRules: (): Promise<boolean> => call('domain_rules', undefined),
+  setDomainRules: (on: boolean): Promise<void> => call('set_domain_rules', { on }),
   /** Senders whose images always load. */
   remoteSenders: (): Promise<string[]> => call('remote_senders', undefined),
   setRemoteSender: (addr: string, on: boolean): Promise<void> => call('set_remote_sender', { addr, on }),

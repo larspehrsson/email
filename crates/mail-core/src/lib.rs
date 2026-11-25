@@ -1768,16 +1768,14 @@ impl Core {
             Some(raw) => {
                 let mut detail = mime::render(id, &raw, self.store.message_date(id)?);
                 if let Some(d) = detail.as_mut() {
-                    // The Authentication-Results header counts only where the provider writes
-                    // its own on top (otherwise a sender can write it): there, rules for a
-                    // sender or a domain need it to vouch for the sender. Elsewhere there's no
-                    // domain rule, and a sender's rule trusts the From address as written.
-                    let vouches = self.provider_vouches(id)?;
-                    if !vouches {
+                    // Rules trust the From address only as far as the account's server checks
+                    // it (`from_believed`); a whole domain's only when the user turned those on.
+                    let believed = self.from_believed(id, d.auth_server.as_deref(), d.sender_verified)?;
+                    if !believed {
                         d.sender_domain = None;
                     }
-                    let sender_ok = !vouches || d.sender_verified;
-                    d.remote_allowed = self.store.allow_remote(id, d.sender_domain.is_some(), sender_ok)?;
+                    let domains = d.sender_domain.is_some() && self.store.domain_rules()?;
+                    d.remote_allowed = self.store.allow_remote(id, domains, believed)?;
                     d.tags = self.store.message_tags(id)?;
                 }
                 // Attachments not downloaded yet are still listed, numbered after the stored ones.
@@ -1824,30 +1822,52 @@ impl Core {
         Ok(addr)
     }
 
-    /// Whether message `id`'s account is with a provider that writes its own Authentication-
-    /// Results header on every message it receives (Gmail, Microsoft), so the topmost one is
-    /// theirs and can be believed. Other servers may not, and then a sender can write one.
-    fn provider_vouches(&self, id: i64) -> Result<bool> {
+    /// Whether picture rules may believe message `id` is from its From address. Where the
+    /// account's server checks senders, only when that check vouched for the sender's domain
+    /// (`vouched`, `mime::sender_vouched`); elsewhere the address is taken as written, and a
+    /// rule is only as safe as that. A server checks when it's Gmail or Microsoft (they write
+    /// their own Authentication-Results on top of every message they receive), or when the
+    /// topmost one carries the name of the account's own server (`auth_server`): then that's
+    /// the one it wrote. A server that writes none leaves the sender free to write one, so a
+    /// name that doesn't match proves nothing, and only ever makes this stricter.
+    fn from_believed(&self, id: i64, auth_server: Option<&str>, vouched: bool) -> Result<bool> {
         let Some(account_id) = self.store.message_account(id)? else { return Ok(false) };
-        Ok(self.store.accounts()?.into_iter().any(|a| a.id == account_id && matches!(a.provider, Provider::Gmail | Provider::Outlook)))
+        let Some(account) = self.store.accounts()?.into_iter().find(|a| a.id == account_id) else { return Ok(false) };
+        let own = |host: &str| icons::registrable_domain(&format!("x@{host}"));
+        let checks = matches!(account.provider, Provider::Gmail | Provider::Outlook)
+            || auth_server.is_some_and(|s| {
+                [Some(account.imap_host.as_str()), account.smtp_host.as_deref()].into_iter().flatten().any(|h| own(h).as_deref() == Some(s))
+            });
+        Ok(!checks || vouched)
     }
 
     /// Always load remote images in mail from everyone at this message's sender's domain;
-    /// returns it ("@papercut.com"). Only when the receiving server vouched that the message is
-    /// from there (`mime::verified_sender_domain`), and not for gmail.com and the like: anyone
-    /// can write from there.
+    /// returns it ("@papercut.com"). Only when the user turned such rules on (Settings ›
+    /// General › Privacy), not for gmail.com and the like (anyone can write from there), and
+    /// where the account's server checks senders, only when it vouched for this one.
     pub fn allow_remote_from_domain(&self, id: i64) -> Result<String> {
+        if !self.store.domain_rules()? {
+            bail!("Rules for everyone at a domain are off: allow this sender instead.");
+        }
         let raw = self.store.body(id)?.ok_or_else(|| anyhow!("This message isn't downloaded yet."))?;
         let msg = mail_parser::MessageParser::default().parse(&raw).ok_or_else(|| anyhow!("This message can't be read."))?;
         let addr = self.store.message_from_addr(id)?.filter(|a| !a.trim().is_empty()).ok_or_else(|| anyhow!("This message has no sender."))?;
-        if !self.provider_vouches(id)? {
-            bail!("This account's server doesn't confirm where mail comes from: allow this sender instead.");
+        let domain = icons::icon_domain(&addr).ok_or_else(|| anyhow!("Anyone can have an address there: allow this sender instead."))?;
+        if !self.from_believed(id, mime::auth_server(&msg).as_deref(), mime::sender_vouched(&msg, &addr))? {
+            bail!("Nothing shows this message is really from {domain}: allow this sender instead.");
         }
-        let domain = mime::verified_sender_domain(&msg, &addr)
-            .ok_or_else(|| anyhow!("Nothing shows this message is really from that domain: allow this sender instead."))?;
         let entry = format!("@{domain}");
         self.store.set_remote_sender(&entry, true)?;
         Ok(entry)
+    }
+
+    /// Whether "Always load…" can cover everyone at a domain (off unless the user turns it on).
+    pub fn domain_rules(&self) -> Result<bool> {
+        self.store.domain_rules()
+    }
+
+    pub fn set_domain_rules(&self, on: bool) -> Result<()> {
+        self.store.set_domain_rules(on)
     }
 
     pub fn remote_senders(&self) -> Result<Vec<String>> {
@@ -2015,6 +2035,74 @@ mod picture_tests {
         // Someone in the address book: their domain is known.
         core.store.save_card(addressbook::Card { name: "Sam".into(), emails: vec!["sam@shop.example.com".into()], ..Default::default() }).unwrap();
         assert!(core.known_domain("example.com").unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod remote_rule_tests {
+    use super::*;
+    use crate::store::{HeaderRecord, ListedFolder};
+
+    /// Picture rules believe a From address as far as the account's server checks it, and
+    /// cover a whole domain only when the user turned that on.
+    #[test]
+    fn rules_trust_senders_as_far_as_the_server_checks() {
+        let dir = std::env::temp_dir().join(format!("mail-core-remote-rules-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let core = Core::open(&dir, Secrets::memory()).unwrap();
+        let none = std::collections::HashMap::new();
+        // One message in an account's Inbox, with the headers given above From; its id.
+        let deliver = |provider: Provider, host: &str, headers: &str| {
+            let n = core.store.accounts().unwrap().len();
+            let acct = core.store.insert_account(&format!("john.doe{n}@example.com"), "John Doe", provider, host, 993).unwrap();
+            let lf = ListedFolder { raw_name: "INBOX".into(), path: vec!["INBOX".into()], role: Some(FolderRole::Inbox), selectable: true };
+            core.store.sync_folder_list(acct.id, &[lf]).unwrap();
+            let inbox = core.store.folders(acct.id).unwrap()[0].id;
+            let rec = HeaderRecord { uid: 1, subject: "Hi".into(), from_addr: "news@shop.example.net".into(), date: 1_800_000_000, ..Default::default() };
+            core.store.upsert_headers(acct.id, inbox, &[rec], &none).unwrap();
+            let id = core.store.message_ids_for_uids(inbox, &[1]).unwrap()[0];
+            let raw = format!("{headers}From: News <news@shop.example.net>\r\nTo: john.doe@example.com\r\nSubject: Hi\r\nContent-Type: text/html\r\n\r\n<img src=\"https://shop.example.net/a.png\">\r\n");
+            core.store.store_body(id, raw.as_bytes(), None, false, None).unwrap();
+            id
+        };
+        let pass = "Authentication-Results: mx.example.com; dmarc=pass header.from=shop.example.net\r\n";
+        let fail = "Authentication-Results: mx.example.com; dmarc=fail header.from=shop.example.net\r\n";
+        let elsewhere = "Authentication-Results: mx.other.example; dmarc=fail header.from=shop.example.net\r\n";
+        let detail = |id| core.get_message(id).unwrap().unwrap();
+
+        let gmail_pass = deliver(Provider::Gmail, "imap.gmail.com", pass);
+        let gmail_fail = deliver(Provider::Gmail, "imap.gmail.com", fail);
+        let own_fail = deliver(Provider::Imap, "imap.example.com", fail); // its own server's name
+        let other_fail = deliver(Provider::Imap, "imap.example.com", elsewhere); // anyone's
+        let plain = deliver(Provider::Imap, "imap.example.com", "");
+
+        // Off by default: no domain rule is offered or added, and a saved one doesn't count.
+        assert!(!core.domain_rules().unwrap());
+        assert!(core.allow_remote_from_domain(gmail_pass).is_err());
+        core.set_remote_sender("@example.net", true).unwrap();
+        assert!(!detail(gmail_pass).remote_allowed);
+        assert!(!detail(plain).remote_allowed);
+
+        core.set_domain_rules(true).unwrap();
+        // The server checked and vouched; or it doesn't check, so the address is taken as written.
+        for id in [gmail_pass, other_fail, plain] {
+            let d = detail(id);
+            assert_eq!(d.sender_domain.as_deref(), Some("example.net"), "{id}");
+            assert!(d.remote_allowed, "{id}");
+        }
+        // The server checked and it failed: neither rule counts, and none can be added.
+        for id in [gmail_fail, own_fail] {
+            let d = detail(id);
+            assert_eq!(d.sender_domain, None, "{id}");
+            assert!(!d.remote_allowed, "{id}");
+            assert!(core.allow_remote_from_domain(id).is_err(), "{id}");
+        }
+        core.set_remote_sender("@example.net", false).unwrap();
+        core.set_remote_sender("news@shop.example.net", true).unwrap();
+        assert!(detail(plain).remote_allowed && detail(gmail_pass).remote_allowed);
+        assert!(!detail(own_fail).remote_allowed, "a sender's rule needs the check too");
+        assert_eq!(core.allow_remote_from_domain(plain).unwrap(), "@example.net");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

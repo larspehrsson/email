@@ -73,9 +73,10 @@ nothing on the server. Your lists of senders and domains whose pictures always l
   scripts, event handlers, `javascript:` links and links to `data:` pages removed, and shown in a
   sandboxed frame whose content policy allows no scripts (`mime::sanitize_html`, `buildSrcdoc`).
 - **Remote content is blocked by default,** so senders can't tell you opened a message until you
-  allow it. On Gmail and Microsoft accounts, a rule to always load a sender's (or a whole
-  domain's) pictures counts only for mail the provider confirmed really came from there (DMARC
-  or DKIM).
+  allow it. Where your mail service checks who mail is from (Gmail and Microsoft always do, and
+  others that sign their check with their own name), a rule to always load a sender's pictures
+  counts only for mail that passed that check (DMARC or DKIM). Rules for everyone at a company
+  are off unless you turn them on (Settings › General › Privacy).
 - **Links that deceive are flagged** when you point at them: text naming one site that leads to
   another, look-alike letters, bare internet addresses, and links that go nowhere.
 - **Fetches Email makes for pictures stay on the public internet.** They never reach this
@@ -96,9 +97,10 @@ nothing on the server. Your lists of senders and domains whose pictures always l
   use your system's disk encryption.
 - **Loading a message's pictures tells the sender** you opened it, when, and from which address.
   A plain-`http://` picture's address can also be seen on the network.
-- **Sender addresses can be forged.** On accounts other than Gmail and Microsoft, "always load
-  pictures from this sender" trusts the From address as written (those servers don't confirm
-  senders in a way Email can rely on), and there's no rule for a whole domain.
+- **Sender addresses can be forged.** Where your mail service doesn't check who mail is from in a
+  way Email can rely on, "always load pictures from this sender" trusts the From address as
+  written, and so does a rule for everyone at a company if you turn those on. Someone pretending
+  to be that sender could then see when you open their message.
 - **Pictures you allow can be on your local network,** and the web view will request them.
 - **On Linux, saved attachments carry no "downloaded from the internet" mark:** Linux has no
   standard one.

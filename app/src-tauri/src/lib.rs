@@ -127,6 +127,17 @@ async fn allow_remote_domain(core: State<'_, Arc<Core>>, id: i64) -> Res<String>
     core.allow_remote_from_domain(id).map_err(err)
 }
 
+/// Whether "Always load…" can cover everyone at a domain.
+#[tauri::command]
+async fn domain_rules(core: State<'_, Arc<Core>>) -> Res<bool> {
+    core.domain_rules().map_err(err)
+}
+
+#[tauri::command]
+async fn set_domain_rules(core: State<'_, Arc<Core>>, on: bool) -> Res<()> {
+    core.set_domain_rules(on).map_err(err)
+}
+
 #[tauri::command]
 async fn remote_senders(core: State<'_, Arc<Core>>) -> Res<Vec<String>> {
     core.remote_senders().map_err(err)
@@ -1614,6 +1625,8 @@ pub fn run() {
             contact_details,
             set_account_logo,
             remote_senders,
+            domain_rules,
+            set_domain_rules,
             set_remote_sender,
             get_thread,
             update_password,

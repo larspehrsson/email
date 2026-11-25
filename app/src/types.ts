@@ -768,6 +768,8 @@ export interface CommandMap {
   allow_remote_sender: { args: { id: number }; ret: string };
   allow_remote_domain: { args: { id: number }; ret: string };
   remote_senders: { args: undefined; ret: string[] };
+  domain_rules: { args: undefined; ret: boolean };
+  set_domain_rules: { args: { on: boolean }; ret: void };
   set_remote_sender: { args: { addr: string; on: boolean }; ret: void };
   update_password: { args: { accountId: number; password: string }; ret: void };
   set_keep_attachments: { args: { accountId: number; keep: boolean }; ret: void };

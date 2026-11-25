@@ -5062,6 +5062,12 @@ body.dragging-message * {
   margin: 2px 0 0;
   accent-color: var(--accent);
 }
+.st-remote {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
 .st-level-note {
   display: block;
   margin-top: 1px;

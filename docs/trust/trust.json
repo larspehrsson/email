@@ -640,7 +640,7 @@
     "storage": [
       {
         "id": "storage.mail-list",
-        "claim": "Folders, message headers, tags, drafts, the address book and the search index of message text are in mail.db in Email's data folder. Your lists of senders and domains whose pictures always load are here too, and stay when an account is removed.",
+        "claim": "Folders, message headers, tags, drafts, the address book and the search index of message text are in mail.db in Email's data folder. Your lists of senders and domains whose pictures always load, and whether rules for a whole domain are on, are here too, and stay when an account is removed.",
         "level": "declared",
         "location": {
           "linux": "~/.local/share/dev.mailclient.desktop/mail.db",
@@ -925,13 +925,13 @@
       },
       {
         "id": "untrusted-input.remote-content",
-        "claim": "Remote content is blocked by default. On Gmail and Microsoft accounts, whose servers add their own Authentication-Results header to every message, a rule to always load a sender's pictures counts only when that header confirms the message came from the sender's domain, and a rule for a whole domain likewise. On other accounts the header could be the sender's own, so there are no rules for a whole domain, and a sender's rule trusts the From address.",
+        "claim": "Remote content is blocked by default. A rule to always load pictures believes a message's From address as far as the account's server checks it. Gmail and Microsoft add their own Authentication-Results header to every message, and other servers can sign theirs with their own name; where the topmost header is one of these, a rule counts only when it confirms the message came from the sender's domain (DMARC, or DKIM signed by it). Elsewhere the header could be the sender's own, so a rule trusts the From address. Rules for everyone at a domain are off unless the user turns them on, and never cover shared mail services such as gmail.com.",
         "level": "tested",
         "evidence": [
           {
             "kind": "code",
             "path": "crates/mail-core/src/lib.rs",
-            "symbol": "provider_vouches"
+            "symbol": "from_believed"
           },
           {
             "kind": "code",
@@ -940,8 +940,18 @@
           },
           {
             "kind": "code",
+            "path": "crates/mail-core/src/mime.rs",
+            "symbol": "auth_server"
+          },
+          {
+            "kind": "code",
             "path": "crates/mail-core/src/store.rs",
             "symbol": "allow_remote"
+          },
+          {
+            "kind": "test",
+            "path": "crates/mail-core/src/lib.rs",
+            "symbol": "rules_trust_senders_as_far_as_the_server_checks"
           },
           {
             "kind": "test",
@@ -950,13 +960,18 @@
           },
           {
             "kind": "test",
+            "path": "crates/mail-core/src/mime.rs",
+            "symbol": "the_server_that_checked_is_named_by_the_topmost_results"
+          },
+          {
+            "kind": "test",
             "path": "crates/mail-core/src/store.rs",
             "symbol": "images_always_from_a_sender"
           }
         ],
-        "verify": "Read get_message: which account kinds trust the header, and how sender_verified and sender_domain reach allow_remote.",
-        "refuted_if": "On a Gmail or Microsoft account, a rule applying to mail whose header doesn't confirm the sender; or a domain rule on any other account.",
-        "details": "The tests cover reading the header and the stored rules, not which server wrote the header."
+        "verify": "Read get_message and allow_remote_from_domain: when from_believed requires the header's confirmation, how sender_verified and sender_domain reach allow_remote, and that domain rules need the setting.",
+        "refuted_if": "Where the account's server checks senders (Gmail, Microsoft, or a topmost header carrying its server's name), a rule applying to mail the header doesn't confirm; a domain rule applying, or one being added, while the setting is off; or a domain rule for a shared mail service.",
+        "details": "A server that writes no Authentication-Results lets the sender write one under any name, so a header naming the account's server proves the server checked only if that server removes forged copies of its own (RFC 8601 says it should). Matching a name only ever makes the check stricter, never looser. Existing domain rules turned the setting on when it was added, so they kept working."
       },
       {
         "id": "untrusted-input.attachments",
@@ -1127,18 +1142,18 @@
       },
       {
         "id": "weaknesses.forged-senders",
-        "claim": "On accounts other than Gmail and Microsoft, 'always load pictures from this sender' trusts the From address as written, which a sender can forge.",
+        "claim": "Where the account's server doesn't check senders in a way Email can rely on, 'always load pictures from this sender' trusts the From address as written, which a sender can forge; so does a rule for everyone at a domain, when the user has turned those on.",
         "level": "declared",
         "evidence": [
           {
             "kind": "code",
-            "path": "crates/mail-core/src/store.rs",
-            "symbol": "allow_remote"
+            "path": "crates/mail-core/src/lib.rs",
+            "symbol": "from_believed"
           },
           {
             "kind": "code",
-            "path": "crates/mail-core/src/mime.rs",
-            "symbol": "verified_sender_domain"
+            "path": "crates/mail-core/src/store.rs",
+            "symbol": "allow_remote"
           }
         ],
         "verify": "Read the evidence.",

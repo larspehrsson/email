@@ -278,6 +278,13 @@ CREATE TABLE IF NOT EXISTS remote_senders (
     added INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
+-- The user's choices the core acts on ("domain_rules": "1" lets "Always load…" cover everyone
+-- at a domain). Missing: the default.
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 -- Sender pictures by domain (crate::icons): mime + data, or both NULL for "has none"; when.
 CREATE TABLE IF NOT EXISTS sender_icons (
     domain  TEXT PRIMARY KEY,
@@ -408,6 +415,14 @@ const MIGRATIONS: &[fn(&Connection) -> Result<()>] = &[
     |db| Ok(db.execute_batch("ALTER TABLE accounts ADD COLUMN graph INTEGER;")?),
     // 13: search in the text of messages (body_fts, filled by `index_bodies`)
     |db| Ok(db.execute_batch("ALTER TABLE messages ADD COLUMN body_indexed INTEGER NOT NULL DEFAULT 0;")?),
+    // 14: settings; rules for a whole domain became opt-in, on for those who already had one
+    |db| {
+        Ok(db.execute_batch(
+            "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT OR IGNORE INTO settings (key, value)
+               SELECT 'domain_rules', '1' WHERE EXISTS (SELECT 1 FROM remote_senders WHERE addr LIKE '@%');",
+        )?)
+    },
 ];
 const SCHEMA_VERSION: i64 = BASE_VERSION + MIGRATIONS.len() as i64;
 
@@ -2926,10 +2941,9 @@ impl Store {
 
     /// "Load images" chosen for this message, or always for its sender or the sender's domain
     /// ("@papercut.com" takes ann@papercut.com and ann@mail.papercut.com, not ann@xpapercut.com).
-    /// The domain's rule counts only when `domain_verified`: the receiving server vouched that
-    /// the message is from there (`mime::verified_sender_domain`).
-    /// `sender_verified`: a rule for the sender's own address counts (false where the provider
-    /// confirms senders and didn't confirm this one).
+    /// `domain_verified`: a domain's rule counts (domain rules are on, and the From address is
+    /// believed, `Core::from_believed`). `sender_verified`: a rule for the sender's own address
+    /// counts (false where the server checks senders and didn't vouch for this one).
     pub fn allow_remote(&self, id: i64, domain_verified: bool, sender_verified: bool) -> Result<bool> {
         Ok(self
             .rdb()
@@ -2989,6 +3003,23 @@ impl Store {
         } else {
             self.db().execute("DELETE FROM remote_senders WHERE addr=?1", [&addr])?;
         }
+        Ok(())
+    }
+
+    /// Whether "Always load…" can cover everyone at a domain (`settings`, off by default).
+    pub fn domain_rules(&self) -> Result<bool> {
+        Ok(self
+            .rdb()
+            .query_row("SELECT value FROM settings WHERE key='domain_rules'", [], |r| r.get::<_, String>(0))
+            .optional()?
+            .is_some_and(|v| v == "1"))
+    }
+
+    pub fn set_domain_rules(&self, on: bool) -> Result<()> {
+        self.db().execute(
+            "INSERT INTO settings (key, value) VALUES ('domain_rules', ?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [if on { "1" } else { "0" }],
+        )?;
         Ok(())
     }
 
@@ -5318,8 +5349,20 @@ mod tests {
         assert_eq!(store.accounts().unwrap().len(), 1);
         assert!(!store.keeps_attachments(store.accounts().unwrap()[0].id).unwrap());
         assert!(store.signatures().unwrap().signatures.is_empty());
+        assert!(!store.domain_rules().unwrap(), "no rule for a domain: domain rules stay off");
         drop(store);
         assert_eq!(version(&dir), SCHEMA_VERSION);
+        // Someone who had a rule for a domain before they became a setting keeps them working.
+        {
+            let db = Connection::open(dir.join("mail.db")).unwrap();
+            db.execute_batch(&format!(
+                "DROP TABLE settings; INSERT INTO remote_senders (addr) VALUES ('@example.net');
+                 PRAGMA user_version={};",
+                SCHEMA_VERSION - 1
+            ))
+            .unwrap();
+        }
+        assert!(Store::open(&dir).unwrap().domain_rules().unwrap());
         // From a newer build: refused, untouched.
         set_version(&dir, SCHEMA_VERSION + 1);
         assert!(Store::open(&dir).is_err());
