@@ -31,6 +31,21 @@ and `.rpm` get updated too, asking for your password.) A copy you build yourself
 a fork without the update signing key (**Updates** in [DEVELOPING](docs/DEVELOPING.md)),
 doesn't update itself: install the newer one the same way.
 
+## Privacy and trust
+
+- **Nothing is sent to us.** No analytics, crash reports or usage data, and no account with us.
+- **Your mail stays on your computer**, and your passwords are in the system's keychain. Email
+  talks to your own mail servers, plus only the services you turn on.
+- **Senders can't see when you read their mail.** Pictures and other web content are blocked
+  until you allow them, and nothing in a message can run code.
+- **You choose what's looked up.** Sender pictures, Google Contacts, writing help and the rest are
+  off until you turn them on, and each says what it contacts.
+- **Updates are signed** and checked before they're installed. The code is open, and the builds
+  are made from it in public.
+
+The [trust report](docs/TRUST.md) lists every connection Email can make, what it keeps and
+where, and how you're protected, with links to the code.
+
 ## Adding your accounts
 
 The first time Email starts, it asks for your address. Add more accounts in Settings ›
