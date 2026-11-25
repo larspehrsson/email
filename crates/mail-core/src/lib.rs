@@ -1768,7 +1768,16 @@ impl Core {
             Some(raw) => {
                 let mut detail = mime::render(id, &raw, self.store.message_date(id)?);
                 if let Some(d) = detail.as_mut() {
-                    d.remote_allowed = self.store.allow_remote(id, d.sender_domain.is_some())?;
+                    // The Authentication-Results header counts only where the provider writes
+                    // its own on top (otherwise a sender can write it): there, rules for a
+                    // sender or a domain need it to vouch for the sender. Elsewhere there's no
+                    // domain rule, and a sender's rule trusts the From address as written.
+                    let vouches = self.provider_vouches(id)?;
+                    if !vouches {
+                        d.sender_domain = None;
+                    }
+                    let sender_ok = !vouches || d.sender_verified;
+                    d.remote_allowed = self.store.allow_remote(id, d.sender_domain.is_some(), sender_ok)?;
                     d.tags = self.store.message_tags(id)?;
                 }
                 // Attachments not downloaded yet are still listed, numbered after the stored ones.
@@ -1815,6 +1824,14 @@ impl Core {
         Ok(addr)
     }
 
+    /// Whether message `id`'s account is with a provider that writes its own Authentication-
+    /// Results header on every message it receives (Gmail, Microsoft), so the topmost one is
+    /// theirs and can be believed. Other servers may not, and then a sender can write one.
+    fn provider_vouches(&self, id: i64) -> Result<bool> {
+        let Some(account_id) = self.store.message_account(id)? else { return Ok(false) };
+        Ok(self.store.accounts()?.into_iter().any(|a| a.id == account_id && matches!(a.provider, Provider::Gmail | Provider::Outlook)))
+    }
+
     /// Always load remote images in mail from everyone at this message's sender's domain;
     /// returns it ("@papercut.com"). Only when the receiving server vouched that the message is
     /// from there (`mime::verified_sender_domain`), and not for gmail.com and the like: anyone
@@ -1823,6 +1840,9 @@ impl Core {
         let raw = self.store.body(id)?.ok_or_else(|| anyhow!("This message isn't downloaded yet."))?;
         let msg = mail_parser::MessageParser::default().parse(&raw).ok_or_else(|| anyhow!("This message can't be read."))?;
         let addr = self.store.message_from_addr(id)?.filter(|a| !a.trim().is_empty()).ok_or_else(|| anyhow!("This message has no sender."))?;
+        if !self.provider_vouches(id)? {
+            bail!("This account's server doesn't confirm where mail comes from: allow this sender instead.");
+        }
         let domain = mime::verified_sender_domain(&msg, &addr)
             .ok_or_else(|| anyhow!("Nothing shows this message is really from that domain: allow this sender instead."))?;
         let entry = format!("@{domain}");

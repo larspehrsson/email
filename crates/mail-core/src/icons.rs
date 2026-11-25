@@ -60,6 +60,20 @@ const UNDER_CC: &[&str] = &["co", "com", "org", "net", "ac", "gov", "edu", "ltd"
 /// The domain whose picture stands for an address: its registrable part ("mail.github.com" →
 /// "github.com", "x.co.uk" kept as "x.co.uk"). None for shared mail services and nonsense.
 pub fn icon_domain(addr: &str) -> Option<String> {
+    let (d, base) = domains(addr)?;
+    if SHARED.contains(&base.as_str()) || SHARED.contains(&d.as_str()) {
+        return None;
+    }
+    Some(base)
+}
+
+/// The registrable part of an address's domain, shared mail services included ("gmail.com").
+pub fn registrable_domain(addr: &str) -> Option<String> {
+    domains(addr).map(|(_, base)| base)
+}
+
+/// (the domain as written, lowercase; its registrable part).
+fn domains(addr: &str) -> Option<(String, String)> {
     let d = addr.rsplit_once('@')?.1.trim().trim_end_matches(['>', '.']).to_ascii_lowercase();
     if d.is_empty() || !d.contains('.') || !d.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
         return None;
@@ -71,10 +85,7 @@ pub fn icon_domain(addr: &str) -> Option<String> {
     let n = labels.len();
     let keep = if n >= 3 && labels[n - 1].len() == 2 && UNDER_CC.contains(&labels[n - 2]) { 3 } else { 2 };
     let base = labels[n.saturating_sub(keep)..].join(".");
-    if SHARED.contains(&base.as_str()) || SHARED.contains(&d.as_str()) {
-        return None;
-    }
-    Some(base)
+    Some((d, base))
 }
 
 /// Biggest picture worth keeping.

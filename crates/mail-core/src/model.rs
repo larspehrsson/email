@@ -347,6 +347,10 @@ pub struct MessageDetail {
     /// The sender's own domain ("papercut.com", from "ann@mail.papercut.com"), for "Always from
     /// everyone at …"; None for mail services anyone has an address at (gmail.com…).
     pub sender_domain: Option<String>,
+    /// The topmost Authentication-Results vouches for the sender's own domain (any domain,
+    /// gmail.com too); for the app's own use, not sent to the frontend.
+    #[serde(skip)]
+    pub sender_verified: bool,
     pub tags: Vec<String>,
 }
 

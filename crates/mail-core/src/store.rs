@@ -2928,15 +2928,17 @@ impl Store {
     /// ("@papercut.com" takes ann@papercut.com and ann@mail.papercut.com, not ann@xpapercut.com).
     /// The domain's rule counts only when `domain_verified`: the receiving server vouched that
     /// the message is from there (`mime::verified_sender_domain`).
-    pub fn allow_remote(&self, id: i64, domain_verified: bool) -> Result<bool> {
+    /// `sender_verified`: a rule for the sender's own address counts (false where the provider
+    /// confirms senders and didn't confirm this one).
+    pub fn allow_remote(&self, id: i64, domain_verified: bool, sender_verified: bool) -> Result<bool> {
         Ok(self
             .rdb()
             .query_row(
-                "SELECT m.allow_remote != 0 OR EXISTS (SELECT 1 FROM remote_senders r WHERE r.addr = lower(m.from_addr)
+                "SELECT m.allow_remote != 0 OR EXISTS (SELECT 1 FROM remote_senders r WHERE (?3 AND r.addr = lower(m.from_addr))
                    OR (?2 AND substr(r.addr, 1, 1) = '@'
                        AND substr(lower(m.from_addr), -length(r.addr)) IN (r.addr, '.' || substr(r.addr, 2))))
                  FROM messages m WHERE m.id=?1",
-                rusqlite::params![id, domain_verified],
+                rusqlite::params![id, domain_verified, sender_verified],
                 |r| r.get(0),
             )
             .optional()?
@@ -4888,11 +4890,13 @@ mod tests {
             .collect();
         store.upsert_headers(acct.id, inbox, &recs, &HashMap::new()).unwrap();
         let ids: Vec<i64> = store.list_messages(inbox, 0, 10).unwrap().messages.iter().map(|m| m.id).collect();
-        assert!(ids.iter().all(|&id| !store.allow_remote(id, false).unwrap()));
+        assert!(ids.iter().all(|&id| !store.allow_remote(id, false, true).unwrap()));
         store.set_remote_sender("news@shop.com", true).unwrap();
         let from_shop = |id: i64| store.message_from_addr(id).unwrap().unwrap() == "News@Shop.com";
         for &id in &ids {
-            assert_eq!(store.allow_remote(id, false).unwrap(), from_shop(id), "case aside, only that sender");
+            assert_eq!(store.allow_remote(id, false, true).unwrap(), from_shop(id), "case aside, only that sender");
+            // Where the provider confirms senders and didn't confirm this one: the rule doesn't count.
+            assert!(!store.allow_remote(id, false, false).unwrap(), "unconfirmed sender");
         }
         assert_eq!(store.remote_senders().unwrap(), ["news@shop.com"]);
         store.set_remote_sender("NEWS@shop.com", false).unwrap();
@@ -4907,9 +4911,9 @@ mod tests {
         for m in store.list_messages(inbox, 0, 10).unwrap().messages {
             let from = store.message_from_addr(m.id).unwrap().unwrap();
             let want = matches!(from.as_str(), "other@y.com" | "ann@Y.com" | "bo@mail.y.com");
-            assert_eq!(store.allow_remote(m.id, true).unwrap(), want, "{from}");
+            assert_eq!(store.allow_remote(m.id, true, true).unwrap(), want, "{from}");
             // Not vouched for: the domain's rule doesn't count (and no one here is allowed alone).
-            assert!(!store.allow_remote(m.id, false).unwrap(), "{from}, unverified");
+            assert!(!store.allow_remote(m.id, false, true).unwrap(), "{from}, unverified");
         }
         assert_eq!(store.remote_senders().unwrap(), ["@y.com"]);
         let _ = std::fs::remove_dir_all(&dir);

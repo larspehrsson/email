@@ -42,9 +42,9 @@ default* means nothing is sent until you turn it on.
 - **Your computer's name:** Email greets your outgoing mail server as `[127.0.0.1]`, so the
   name doesn't end up in the headers recipients see.
 - **AI apps** (Claude Desktop, Claude Code and other MCP apps) reach Email through a socket on
-  this computer only. They're off by default (while off, they can see which tools exist, but
-  use none). Each permission is a switch of its own, and sending or deleting asks you every
-  time.
+  this computer only, in a folder only you can open. They're off by default, and get no mail
+  tools until you turn them on. Each permission is a switch of its own, and sending or deleting
+  asks you every time.
 
 ## What's kept, and where
 
@@ -58,7 +58,7 @@ Email's data folder:
 | Mail list | `mail.db` | Folders, message headers (sender, recipients, subject, date), tags, drafts, the address book, and the search index of message text |
 | Messages | `bodies.db` | The messages themselves, and attachments if you keep them for offline use |
 | Passwords and tokens | The system keychain (one item, `dev.mail-client`) | Account passwords, sign-in tokens, your writing-help API key, and your Google sign-in client |
-| Log | `logs/` in the data folder (macOS: `~/Library/Logs/dev.mailclient.desktop`; Windows: `%LOCALAPPDATA%\dev.mailclient.desktop\logs`) | What Email did and any problems: account addresses, folder and server names, and timings, and, for actions AI apps take, the message's subject and recipients; no message text |
+| Log | `logs/` in the data folder (macOS: `~/Library/Logs/dev.mailclient.desktop`; Windows: `%LOCALAPPDATA%\dev.mailclient.desktop\logs`) | What Email did and any problems: account addresses, folder and server names, and timings, and which tools AI apps used; no subjects or message text |
 | Opened attachments | The system's cache folder | Copies to open in other apps; cleared each time Email starts |
 | Saved attachments and exports | Downloads, or where you choose | What you saved |
 | Settings | The app's own storage, and a few small files, in the data folder | Your choices in Settings and View options, window sizes, AI apps' permissions |
@@ -73,8 +73,9 @@ nothing on the server. Your lists of senders and domains whose pictures always l
   scripts, event handlers, `javascript:` links and links to `data:` pages removed, and shown in a
   sandboxed frame whose content policy allows no scripts (`mime::sanitize_html`, `buildSrcdoc`).
 - **Remote content is blocked by default,** so senders can't tell you opened a message until you
-  allow it. A rule for a whole domain counts only for mail your provider confirmed really came
-  from there (DMARC or DKIM).
+  allow it. On Gmail and Microsoft accounts, a rule to always load a sender's (or a whole
+  domain's) pictures counts only for mail the provider confirmed really came from there (DMARC
+  or DKIM).
 - **Links that deceive are flagged** when you point at them: text naming one site that leads to
   another, look-alike letters, bare internet addresses, and links that go nowhere.
 - **Fetches Email makes for pictures stay on the public internet.** They never reach this
@@ -82,6 +83,8 @@ nothing on the server. Your lists of senders and domains whose pictures always l
   picture.
 - **Only known kinds of documents, pictures, sound and video open directly.** Anything else
   (programs, scripts, shortcuts, disk images, web pages, Office files with macros) is only saved.
+  On Windows and macOS, what Email saves or opens is marked as downloaded from the internet, so
+  the system warns, or opens it in a protected mode.
 - **Connections are verified.** Every server's certificate is checked, except for the
   plain-`http://` pictures above.
 - **Updates are signed** and checked before they're installed; the macOS app is also notarized
@@ -93,18 +96,17 @@ nothing on the server. Your lists of senders and domains whose pictures always l
   use your system's disk encryption.
 - **Loading a message's pictures tells the sender** you opened it, when, and from which address.
   A plain-`http://` picture's address can also be seen on the network.
-- **Sender addresses can be forged.** "Always load pictures from this sender" trusts the From
-  address as written. A rule for a whole domain relies on your provider's Authentication-Results
-  header: Gmail and Microsoft add one, but on a server that doesn't, a sender can write their own.
+- **Sender addresses can be forged.** On accounts other than Gmail and Microsoft, "always load
+  pictures from this sender" trusts the From address as written (those servers don't confirm
+  senders in a way Email can rely on), and there's no rule for a whole domain.
 - **Pictures you allow can be on your local network,** and the web view will request them.
-- **Saved attachments aren't marked as downloaded** (Windows' Mark of the Web, macOS's
-  quarantine), so the system won't warn you about them later.
+- **On Linux, saved attachments carry no "downloaded from the internet" mark:** Linux has no
+  standard one.
 - **Notifications show the sender and subject** of new mail (Settings › Notifications).
-- **AI apps:** while off, they can see which tools Email has, but use none. There's one switch
-  for all AI apps, and an app names itself.
-- **The build** uses GitHub Actions and the Rust toolchain by movable tags, in jobs that hold the
-  update-signing key. Dependencies aren't yet audited automatically, and the Linux and Windows
-  installers aren't signed by the operating system's vendors.
+- **AI apps:** one switch turns them on for every AI app, and an app names itself.
+- **The build:** dependencies aren't yet audited automatically for known vulnerabilities, and
+  the Linux and Windows installers aren't signed by the operating system's vendors. (Every build
+  step is pinned to an exact version.)
 - **Release builds include the web view's Developer Tools.**
 
 ## Keeping this report honest *(planned)*

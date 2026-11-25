@@ -438,6 +438,39 @@ fn opened_attachments_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, 
     app.path().app_cache_dir().map(|d| d.join("attachments")).map_err(|e| e.to_string())
 }
 
+/// Mark a file written from an email as downloaded from the internet, as browsers do: on
+/// Windows, the Mark of the Web (a `Zone.Identifier` stream; Office then opens it in Protected
+/// View, and Windows warns before running a program); on macOS, the quarantine flag (Gatekeeper
+/// checks it before it runs). Linux has no such mark. A failure only means no mark.
+fn mark_downloaded(path: &std::path::Path) {
+    #[cfg(target_os = "windows")]
+    {
+        let mut stream = path.as_os_str().to_os_string();
+        stream.push(":Zone.Identifier");
+        if let Err(e) = std::fs::write(&stream, "[ZoneTransfer]\r\nZoneId=3\r\n") {
+            tracing::warn!("marking {} as downloaded: {e}", path.display());
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        // flags;time;agent;event id: 0083 = downloaded, quarantined (as Mail sets it)
+        let value = format!("0083;{secs:08x};Email;");
+        let (Ok(file), Ok(name)) = (std::ffi::CString::new(path.as_os_str().as_bytes()), std::ffi::CString::new("com.apple.quarantine")) else {
+            return;
+        };
+        // SAFETY: both strings are NUL-terminated and live through the call; the value is
+        // passed with its length.
+        let r = unsafe { libc::setxattr(file.as_ptr(), name.as_ptr(), value.as_ptr().cast(), value.len(), 0, 0) };
+        if r != 0 {
+            tracing::warn!("marking {} as downloaded: {}", path.display(), std::io::Error::last_os_error());
+        }
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let _ = path;
+}
+
 #[tauri::command]
 async fn open_attachment(
     app: tauri::AppHandle,
@@ -453,6 +486,7 @@ async fn open_attachment(
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(mail_core::mime::safe_file_name(&name));
     std::fs::write(&path, &data).map_err(|e| format!("Couldn't write {}: {e}", path.display()))?;
+    mark_downloaded(&path);
     app.opener().open_path(path.to_string_lossy(), None::<&str>).map_err(|e| format!("Couldn't open {name}: {e}"))
 }
 
@@ -488,6 +522,7 @@ async fn save_attachment(
 ) -> Res<String> {
     let (name, _mime, data) = core.attachment(message_id, index).await.map_err(err)?;
     let path = write_unique(&downloads_dir(&app)?, &name, &data)?;
+    mark_downloaded(&path);
     Ok(path.to_string_lossy().into_owned())
 }
 
@@ -513,6 +548,7 @@ async fn save_attachment_as(
     let Some(chosen) = rx.await.map_err(|e| e.to_string())? else { return Ok(None) };
     let path = chosen.into_path().map_err(|e| e.to_string())?;
     std::fs::write(&path, &data).map_err(|e| format!("Couldn't write {}: {e}", path.display()))?;
+    mark_downloaded(&path);
     Ok(Some(path.to_string_lossy().into_owned()))
 }
 
@@ -560,7 +596,9 @@ async fn save_all_attachments(app: tauri::AppHandle, core: State<'_, Arc<Core>>,
     let mut paths = Vec::with_capacity(count);
     for index in 0..count {
         let (name, _mime, data) = core.attachment(message_id, index).await.map_err(err)?;
-        paths.push(write_unique(&downloads, &name, &data)?.to_string_lossy().into_owned());
+        let path = write_unique(&downloads, &name, &data)?;
+        mark_downloaded(&path);
+        paths.push(path.to_string_lossy().into_owned());
     }
     Ok(paths)
 }

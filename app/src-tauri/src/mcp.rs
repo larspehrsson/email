@@ -34,9 +34,16 @@ pub fn socket_path() -> PathBuf {
     } else {
         std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).unwrap_or_else(|| home.join(".local/share"))
     };
-    let p = data.join(IDENTIFIER).join("mcp.sock");
-    // A Unix socket's path has room for about 100 bytes.
-    if p.as_os_str().len() < 100 { p } else { std::env::temp_dir().join(format!("{IDENTIFIER}-mcp.sock")) }
+    // In a folder only this user can open (`listen` makes it so): another user can't reach the
+    // socket, not even in the moment between creating it and restricting it.
+    let p = data.join(IDENTIFIER).join("ai-apps").join("mcp.sock");
+    // A Unix socket's path has room for about 100 bytes; past that, the user's own runtime
+    // folder (private, unlike /tmp), or on macOS the user's own temporary folder.
+    if p.as_os_str().len() < 100 {
+        return p;
+    }
+    let short = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).filter(|d| d.is_absolute()).unwrap_or_else(std::env::temp_dir);
+    short.join(format!("{IDENTIFIER}-ai-apps")).join("mcp.sock")
 }
 
 #[cfg(windows)]
@@ -139,7 +146,9 @@ impl Host for AppHost {
     }
 
     fn activity(&self, a: Activity) {
-        tracing::info!(client = a.client, tool = a.tool, ok = a.ok, "ai app: {}", a.summary);
+        // The tool and whether it worked; not the summary, which names subjects and recipients
+        // (it's shown in Settings › AI apps, which keeps it in memory only).
+        tracing::info!(client = a.client, tool = a.tool, ok = a.ok, "ai app used a tool");
         let entry = LogEntry {
             at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0),
             client: a.client.clone(),
@@ -202,6 +211,7 @@ async fn listen(core: Arc<Core>, host: Arc<AppHost>) -> anyhow::Result<()> {
     let path = socket_path();
     if let Some(d) = path.parent() {
         std::fs::create_dir_all(d)?;
+        std::fs::set_permissions(d, std::fs::Permissions::from_mode(0o700))?;
     }
     // A socket left behind by a crash: gone. One another copy of the app serves: left alone.
     if path.exists() {

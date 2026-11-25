@@ -298,6 +298,7 @@ pub fn render(id: i64, raw: &[u8], date: i64) -> Option<MessageDetail> {
     });
     let has_remote_content = html.as_deref().is_some_and(has_remote);
     let sender_domain = verified_sender_domain(&msg, &from_addr);
+    let sender_verified = sender_vouched(&msg, &from_addr);
 
     Some(MessageDetail {
         id,
@@ -313,6 +314,7 @@ pub fn render(id: i64, raw: &[u8], date: i64) -> Option<MessageDetail> {
         has_remote_content,
         remote_allowed: false,
         sender_domain,
+        sender_verified,
         tags: Vec::new(),
     })
 }
@@ -325,9 +327,18 @@ pub fn render(id: i64, raw: &[u8], date: i64) -> Option<MessageDetail> {
 /// address is easy to make up, and "everyone at acme.com" mustn't let a made-up one in.
 pub fn verified_sender_domain(msg: &mail_parser::Message, from_addr: &str) -> Option<String> {
     let domain = crate::icons::icon_domain(from_addr)?;
+    sender_vouched(msg, from_addr).then_some(domain)
+}
+
+/// Whether the topmost Authentication-Results vouches for the From address's domain (its
+/// registrable part), shared mail services included: the check behind "always load pictures
+/// from this sender" on accounts whose provider writes that header (`Core::provider_vouches`).
+pub fn sender_vouched(msg: &mail_parser::Message, from_addr: &str) -> bool {
+    let Some(domain) = crate::icons::registrable_domain(from_addr) else { return false };
     // In order from the top (header_raw would give the last one).
-    let results = msg.headers_raw().find(|(name, _)| name.eq_ignore_ascii_case("Authentication-Results"))?.1;
-    auth_results_vouch(results, &domain).then_some(domain)
+    msg.headers_raw()
+        .find(|(name, _)| name.eq_ignore_ascii_case("Authentication-Results"))
+        .is_some_and(|(_, results)| auth_results_vouch(results, &domain))
 }
 
 /// Whether an Authentication-Results value (RFC 8601) has a DMARC or DKIM pass for `domain`
@@ -347,7 +358,7 @@ fn auth_results_vouch(results: &str, domain: &str) -> bool {
     let ours = |v: &str| {
         let v = v.trim().trim_matches('"');
         let host = v.rsplit_once('@').map_or(v, |(_, d)| d);
-        crate::icons::icon_domain(&format!("x@{host}")).as_deref() == Some(domain)
+        crate::icons::registrable_domain(&format!("x@{host}")).as_deref() == Some(domain)
     };
     // The first part names the server that checked; the results follow.
     plain.split(';').skip(1).any(|result| {
@@ -664,6 +675,13 @@ mod tests {
         ] {
             assert_eq!(domain(&msg(bad)), None, "{bad}");
         }
+        // A sender at a shared mail service: their own address can be confirmed (sender rules),
+        // though there's no domain to allow everyone at.
+        let shared = "From: Ann <ann@gmail.com>\r\nAuthentication-Results: mx.google.com; dkim=pass header.i=@gmail.com; dmarc=pass header.from=gmail.com\r\nSubject: Hi\r\n\r\nHello\r\n";
+        let parsed = MessageParser::default().parse(shared.as_bytes()).unwrap();
+        assert!(sender_vouched(&parsed, "ann@gmail.com"));
+        assert_eq!(verified_sender_domain(&parsed, "ann@gmail.com"), None);
+        assert!(!sender_vouched(&parsed, "ann@other.example"), "someone else's domain");
         // Only the topmost counts: one below it may be the sender's own.
         let forged = format!("Authentication-Results: mx.example.net; dmarc=fail header.from=mail.example.com\r\n{}", gmail);
         assert_eq!(domain(&msg(&forged)), None);

@@ -3,7 +3,7 @@
   "subject": {
     "name": "Email",
     "repository": "https://github.com/rickhall/email",
-    "commit": "32f1c07 + uncommitted fixes",
+    "commit": "a51e147 + uncommitted fixes",
     "version": "0.1.183",
     "date": "2026-11-24",
     "platforms": [
@@ -586,7 +586,7 @@
       },
       {
         "id": "connections.ai-apps",
-        "claim": "AI apps (MCP) reach Email through a socket on this computer only, never the network. Until you turn AI apps on, they can see Email's list of tools but can't use any; each permission (reading, drafts, organizing, deleting, sending) is a switch of its own, and deleting and sending ask you every time.",
+        "claim": "AI apps (MCP) reach Email through a socket on this computer only, never the network, in a folder only you can open. Until you turn AI apps on, they get no mail tools; each permission (reading, drafts, organizing, deleting, sending) is a switch of its own, and deleting and sending ask you every time.",
         "level": "declared",
         "destination": "a Unix socket in the data folder",
         "operator": "user",
@@ -617,7 +617,7 @@
             "symbol": "socket_path"
           }
         ],
-        "verify": "Check the listener is a Unix socket (no TCP), and that requests are refused until an app is allowed, per permission.",
+        "verify": "Check the listener is a Unix socket (no TCP) in a 0700 folder, and that tool_list and tool calls give nothing until allowed.",
         "refuted_if": "A TCP listener, or a tool call that does anything before it's allowed."
       }
     ],
@@ -695,7 +695,7 @@
       },
       {
         "id": "storage.log",
-        "claim": "The log records what Email did and any problems: account addresses, folder and server names, and timings, and, for actions AI apps take, the message's subject and recipients. No message text.",
+        "claim": "The log records what Email did and any problems: account addresses, folder and server names, and timings, and which tools AI apps used. No subjects or message text.",
         "level": "declared",
         "location": {
           "linux": "~/.local/share/dev.mailclient.desktop/logs",
@@ -703,8 +703,7 @@
           "windows": "%LOCALAPPDATA%\\dev.mailclient.desktop\\logs"
         },
         "holds": [
-          "diagnostics",
-          "message-headers"
+          "diagnostics"
         ],
         "encrypted_by_app": false,
         "retention": "kept, rotated",
@@ -720,11 +719,11 @@
           {
             "kind": "code",
             "path": "app/src-tauri/src/mcp.rs",
-            "note": "AI-app action summaries are logged"
+            "note": "an AI app's action is logged as the tool used, not its summary"
           }
         ],
         "verify": "Search tracing:: and log:: calls for fields that could hold a subject, body text or a password.",
-        "refuted_if": "A log line that records message text, a password or a token, or a subject outside AI-app actions."
+        "refuted_if": "A log line that records a subject, message text, a password or a token."
       },
       {
         "id": "storage.attachment-cache",
@@ -926,27 +925,42 @@
       },
       {
         "id": "untrusted-input.remote-content",
-        "claim": "Remote content is blocked by default. A rule for a whole domain counts only for mail whose topmost Authentication-Results header shows DMARC or DKIM passed for that domain. That header is trusted as your provider's own: Gmail and Microsoft add theirs, but on a server that doesn't, a sender can write one.",
+        "claim": "Remote content is blocked by default. On Gmail and Microsoft accounts, whose servers add their own Authentication-Results header to every message, a rule to always load a sender's pictures counts only when that header confirms the message came from the sender's domain, and a rule for a whole domain likewise. On other accounts the header could be the sender's own, so there are no rules for a whole domain, and a sender's rule trusts the From address.",
         "level": "tested",
         "evidence": [
           {
             "kind": "code",
+            "path": "crates/mail-core/src/lib.rs",
+            "symbol": "provider_vouches"
+          },
+          {
+            "kind": "code",
             "path": "crates/mail-core/src/mime.rs",
-            "symbol": "verified_sender_domain"
+            "symbol": "sender_vouched"
+          },
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/store.rs",
+            "symbol": "allow_remote"
           },
           {
             "kind": "test",
             "path": "crates/mail-core/src/mime.rs",
             "symbol": "a_sender_domain_counts_only_when_the_receiving_server_vouched"
+          },
+          {
+            "kind": "test",
+            "path": "crates/mail-core/src/store.rs",
+            "symbol": "images_always_from_a_sender"
           }
         ],
-        "verify": "Read verified_sender_domain and where its result gates the domain rule.",
-        "refuted_if": "A domain rule applying to mail without that confirmation.",
-        "details": "The test covers reading the header, not who wrote it."
+        "verify": "Read get_message: which account kinds trust the header, and how sender_verified and sender_domain reach allow_remote.",
+        "refuted_if": "On a Gmail or Microsoft account, a rule applying to mail whose header doesn't confirm the sender; or a domain rule on any other account.",
+        "details": "The tests cover reading the header and the stored rules, not which server wrote the header."
       },
       {
         "id": "untrusted-input.attachments",
-        "claim": "Only known kinds of documents, pictures, sound, video and zip files open directly; anything else (programs, scripts, shortcuts, disk images, web pages, Office files with macros, unknown types) is only saved. File names are cleaned.",
+        "claim": "Only known kinds of documents, pictures, sound, video and zip files open directly; anything else (programs, scripts, shortcuts, disk images, web pages, Office files with macros, unknown types) is only saved. File names are cleaned. On Windows and macOS, attachments Email saves or opens are marked as downloaded from the internet (the Mark of the Web, the quarantine flag), so the system warns or opens them in a protected mode.",
         "level": "tested",
         "evidence": [
           {
@@ -963,6 +977,11 @@
             "kind": "test",
             "path": "crates/mail-core/src/mime.rs",
             "symbol": "attachment_helpers"
+          },
+          {
+            "kind": "code",
+            "path": "app/src-tauri/src/lib.rs",
+            "symbol": "mark_downloaded"
           }
         ],
         "verify": "Read is_openable (a list of types that open) and where opening checks it.",
@@ -998,7 +1017,7 @@
     "supply-chain": [
       {
         "id": "supply-chain.builds",
-        "claim": "Releases are built from the public repository by GitHub Actions; Rust and npm dependencies are pinned by their lock files.",
+        "claim": "Releases are built from the public repository by GitHub Actions. Every action is pinned to a commit and Rust to a version, so the jobs that hold the signing keys run only what was reviewed; Rust and npm dependencies are pinned by their lock files.",
         "level": "declared",
         "evidence": [
           {
@@ -1014,8 +1033,8 @@
             "path": "app/package-lock.json"
           }
         ],
-        "verify": "Read the workflow: what it builds from, and that lock files are used.",
-        "refuted_if": "A release built elsewhere, or dependencies fetched unpinned."
+        "verify": "Read the workflow: every uses: names a commit, and the toolchain a version; lock files are used.",
+        "refuted_if": "A uses: by tag or branch, or dependencies fetched unpinned."
       }
     ],
     "permissions": [
@@ -1095,7 +1114,7 @@
       },
       {
         "id": "weaknesses.no-dependency-audit",
-        "claim": "Dependencies aren't yet audited automatically for known vulnerabilities (no cargo audit or npm audit in the build), and Linux and Windows installers aren't signed by the operating system's vendors.",
+        "claim": "Dependencies aren't yet audited automatically for known vulnerabilities (no cargo audit or npm audit in the build), and the Linux and Windows installers aren't signed by the operating system's vendors.",
         "level": "declared",
         "evidence": [
           {
@@ -1108,7 +1127,7 @@
       },
       {
         "id": "weaknesses.forged-senders",
-        "claim": "A sender's address can be forged. 'Always load pictures from this sender' trusts the From address as written, and on a server that doesn't add its own Authentication-Results header, so can a rule for a whole domain.",
+        "claim": "On accounts other than Gmail and Microsoft, 'always load pictures from this sender' trusts the From address as written, which a sender can forge.",
         "level": "declared",
         "evidence": [
           {
@@ -1141,13 +1160,13 @@
       },
       {
         "id": "weaknesses.no-quarantine-flag",
-        "claim": "Saved and opened attachments aren't marked as downloaded from the internet (Windows' Mark of the Web, macOS's quarantine), so the system doesn't warn when you open them later.",
+        "claim": "On Linux, saved attachments carry no mark that they came from the internet: Linux has no standard one.",
         "level": "declared",
         "evidence": [
           {
             "kind": "code",
             "path": "app/src-tauri/src/lib.rs",
-            "symbol": "open_attachment"
+            "symbol": "mark_downloaded"
           }
         ],
         "verify": "Read the evidence.",
@@ -1155,30 +1174,18 @@
       },
       {
         "id": "weaknesses.ai-apps-socket",
-        "claim": "AI apps' socket answers which tools exist even while AI apps are off; there's one switch for all AI apps, and an app names itself. The socket is made private just after it's created, and when the data folder's path is too long it's in the shared temporary folder.",
+        "claim": "AI apps: one switch turns them on for every AI app, and an app names itself. While off, an app can see that Email is there and a tool saying why no others are available.",
         "level": "declared",
         "evidence": [
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/mcp.rs",
+            "symbol": "tool_list"
+          },
           {
             "kind": "code",
             "path": "app/src-tauri/src/mcp.rs",
             "symbol": "socket_path"
-          },
-          {
-            "kind": "code",
-            "path": "crates/mail-core/src/mcp.rs"
-          }
-        ],
-        "verify": "Read the evidence.",
-        "refuted_if": "(A limitation.)"
-      },
-      {
-        "id": "weaknesses.unpinned-build-tools",
-        "claim": "The build uses GitHub Actions and the Rust toolchain by movable tags (such as @v4 and stable), in jobs that hold the update-signing key.",
-        "level": "declared",
-        "evidence": [
-          {
-            "kind": "config",
-            "path": ".github/workflows/build.yml"
           }
         ],
         "verify": "Read the evidence.",

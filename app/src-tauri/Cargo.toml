@@ -29,6 +29,8 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10.1"
+# The quarantine flag on attachments written to disk (mark_downloaded).
+libc = "0.2.191"
 # Notifications through UNUserNotificationCenter (notify.rs): the API macOS shows and lists.
 block2 = "0.6.2"
 objc2 = "0.6.5"
