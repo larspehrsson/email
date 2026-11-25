@@ -15,6 +15,11 @@ on:
     paths-ignore: [site/**, .github/workflows/pages.yml]
   workflow_dispatch:
 
+# Fork: major.minor of the versions this fork publishes (the patch is the run number). 0.2:
+# above the 0.1.<commit count> versions it published before.
+env:
+  FORK_VERSION: "0.2"
+
 # One run at a time per branch: a newer push waits, so the "latest" release never mixes two
 # builds' files (and latest.json names the files beside it).
 concurrency:
@@ -86,9 +91,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          # The whole history: the version counts the commits.
-          fetch-depth: 0
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
@@ -115,16 +117,15 @@ jobs:
         if: startsWith(matrix.os, 'windows')
         uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1
 
-      # Version = major.minor from tauri.conf.json + the number of commits as the patch: the
-      # same for a commit on every platform and in local builds (see app/src-tauri/build.rs),
-      # and higher with every commit (dnf/rpm and macOS see it as an update). Bump major.minor
-      # in tauri.conf.json by hand. Written into the config here for the bundles' metadata.
+      # Fork: version = FORK_VERSION + this workflow's run number. release/current is rebuilt
+      # from scratch every time, so its commit count can go down (a branch dropped or merged
+      # by Richard); the run number only goes up, which is what an installed copy needs to take
+      # it as an update. Exported as APP_VERSION, which app/src-tauri/build.rs then shows too.
       - name: Set version
         shell: bash
         run: |
           f=app/src-tauri/tauri.conf.json
-          base=$(node -p "require('./$f').version")
-          v="${base%.*}.$(git rev-list --count HEAD)"
+          v="$FORK_VERSION.$GITHUB_RUN_NUMBER"
           node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('$f'));c.version='$v';fs.writeFileSync('$f',JSON.stringify(c,null,2)+'\n')"
           echo "APP_VERSION=$v" >> "$GITHUB_ENV"
           echo "Building version $v"
@@ -270,8 +271,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          base=$(node -p "require('./app/src-tauri/tauri.conf.json').version")
-          v="${base%.*}.$(git rev-list --count HEAD)"
+          v="$FORK_VERSION.$GITHUB_RUN_NUMBER"
           git push --force origin "$GITHUB_SHA:refs/tags/latest"
           # The date in the title: GitHub shows when the release was first published, which
           # editing it doesn't change.

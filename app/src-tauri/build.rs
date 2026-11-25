@@ -23,10 +23,13 @@ fn version() {
         .find_map(|l| l.trim().strip_prefix("\"version\": \"")?.split('"').next().map(str::to_string))
         .unwrap_or_else(|| "0.1.0".into());
     let (count, commit) = (git(&["rev-list", "--count", "HEAD"]), git(&["rev-parse", "--short=7", "HEAD"]));
-    let version = match &count {
-        Some(n) => format!("{}.{n}", base.rsplit_once('.').map_or(base.as_str(), |(mm, _)| mm)),
-        None => base,
+    // Fork: CI sets APP_VERSION (its run number as the patch); use that when it's there.
+    let version = match (std::env::var("APP_VERSION").ok().filter(|v| !v.is_empty()), &count) {
+        (Some(v), _) => v,
+        (None, Some(n)) => format!("{}.{n}", base.rsplit_once('.').map_or(base.as_str(), |(mm, _)| mm)),
+        (None, None) => base,
     };
+    println!("cargo:rerun-if-env-changed=APP_VERSION");
     println!("cargo:rustc-env=APP_VERSION={version}");
     println!("cargo:rustc-env=APP_COMMIT={}", commit.unwrap_or_default());
     // Recomputed when HEAD moves (a commit, a checkout).
