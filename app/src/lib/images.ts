@@ -58,9 +58,17 @@ export function keepImageShapes(html: string): string {
  * Only for a message allowed to load remote pictures. Call on each load of the frame.
  */
 export function rescueHttpImages(doc: Document, proxy: (url: string) => string | null): void {
-  const plain = (img: HTMLImageElement) => /^\s*http:\/\//i.test(img.getAttribute('src') ?? '');
+  // The address as the browser reads it (`src`, not the attribute's raw text): resolved, with
+  // tabs and line breaks taken out and spaces encoded. One that still has a control character
+  // or a space isn't tried: the app writes the address into its request as it is.
+  const address = (img: HTMLImageElement): string | null => {
+    const u = img.src;
+    return /^http:\/\//i.test(u) && !/[\s\x00-\x1f\x7f]/.test(u) ? u : null;
+  };
+  const plain = (img: HTMLImageElement) => address(img) != null;
   const retry = (img: HTMLImageElement) => {
-    const via = proxy((img.getAttribute('src') ?? '').trim().replace(/^http:/i, 'http:'));
+    const url = address(img);
+    const via = url && proxy(url);
     if (!via || img.dataset.mailRetried) return;
     img.dataset.mailRetried = '1';
     img.removeAttribute('srcset');

@@ -172,7 +172,15 @@ test('a plain-http picture that failed gets one more try through the app', () =>
       getAttribute: (k) => attrs.get(k) ?? null,
       removeAttribute: (k) => attrs.delete(k),
       set src(v) { attrs.set('src', v); },
-      get src() { return attrs.get('src'); },
+      // As a browser gives it: tabs and line breaks out, resolved (scheme in lower case, spaces encoded).
+      get src() {
+        const raw = attrs.get('src');
+        try {
+          return new URL(raw.replace(/[\t\n\r]/g, '').trim()).href;
+        } catch {
+          return raw;
+        }
+      },
       addEventListener: (type, fn) => { listeners[type] = fn; },
       fire: (type) => listeners[type]?.(),
       has: (k) => attrs.has(k),
@@ -188,12 +196,17 @@ test('a plain-http picture that failed gets one more try through the app', () =>
   assert.equal(broken.has('srcset'), false);
   assert.equal(fine.src, 'http://x.com/b.png');
   assert.equal(secure.src, 'https://x.com/c.png', 'https pictures are left to the webview');
-  assert.equal(loading.src, ' HTTP://x.com/d.png', 'still loading: only if it fails');
+  assert.equal(loading.src, 'http://x.com/d.png', 'still loading: only if it fails');
   loading.fire('error');
   assert.equal(loading.src, proxy('http://x.com/d.png'));
   // One try only; and nothing outside the app.
   rescueHttpImages({ images: [broken] }, proxy);
   assert.equal(broken.src, 'mailimg://localhost/http%3A%2F%2Fx.com%2Fa.png%3Ft%3D1%26u%3D2');
+  // A line break in the attribute can't reach the app's request: the address is the browser's.
+  const sneaky = img('http://x.com/f.png\nX-Extra: 1', true, 0);
+  rescueHttpImages({ images: [sneaky] }, proxy);
+  const asked = decodeURIComponent(sneaky.src.replace('mailimg://localhost/', ''));
+  assert.ok(!/[\s\x00-\x1f]/.test(asked), `no line break or space in ${JSON.stringify(asked)}`);
   const preview = img('http://x.com/e.png', true, 0);
   rescueHttpImages({ images: [preview] }, () => null);
   assert.equal(preview.src, 'http://x.com/e.png');

@@ -254,6 +254,10 @@ pub async fn mail_image(url: &str) -> Result<Icon> {
     if !url.starts_with("http://") {
         bail!("not an http address");
     }
+    // A few at a time: each may hold up to MAIL_IMAGE_MAX while it comes in, and a newsletter
+    // can have dozens.
+    static AT_ONCE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
+    let _turn = AT_ONCE.acquire().await?;
     let (_, status, mime, body) = get(url, 5, MAIL_IMAGES).await?;
     if !(200..300).contains(&status) || body.is_empty() {
         bail!("{status}");
@@ -307,8 +311,9 @@ struct Fetch {
     public_only: bool,
 }
 
-/// Sender pictures: HTTPS only, to the sender's own domain.
-const ICONS: Fetch = Fetch { plain_http: false, limit: 4 * 1024 * 1024, public_only: false };
+/// Sender pictures: HTTPS only, to the sender's own domain, and never on this machine or the
+/// local network (a domain's name can point anywhere).
+const ICONS: Fetch = Fetch { plain_http: false, limit: 4 * 1024 * 1024, public_only: true };
 /// Pictures in messages (`mail_image`).
 const MAIL_IMAGES: Fetch = Fetch { plain_http: true, limit: MAIL_IMAGE_MAX, public_only: true };
 
@@ -317,6 +322,11 @@ const MAIL_IMAGES: Fetch = Fetch { plain_http: true, limit: MAIL_IMAGE_MAX, publ
 async fn get(url: &str, hops: u32, how: Fetch) -> Result<(String, u16, String, Vec<u8>)> {
     let mut url = url.to_string();
     for _ in 0..=hops {
+        // Written into the request as it is: no control characters, spaces or other text that
+        // could end its line and add to it (a message's address, or a server's redirect).
+        if !url.bytes().all(|b| (0x21..0x7f).contains(&b)) {
+            bail!("not a plain address");
+        }
         let (tls, rest) = if let Some(rest) = url.strip_prefix("https://") {
             (true, rest)
         } else if let Some(rest) = url.strip_prefix("http://")
@@ -336,6 +346,10 @@ async fn get(url: &str, hops: u32, how: Fetch) -> Result<(String, u16, String, V
             Some((h, p)) if p.chars().all(|c| c.is_ascii_digit()) => (h, p.parse().unwrap_or(default_port)),
             _ => (hostport, default_port),
         };
+        // A name (letters, digits, dots, dashes), or an address; nothing else (no user@ part).
+        if host.is_empty() || !host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '[' | ']' | ':')) {
+            bail!("not a host name: {host}");
+        }
         let (status, headers, body) = request(host, port, path, tls, how).await?;
         if (300..400).contains(&status)
             && let Some(loc) = header(&headers, "location")
@@ -382,14 +396,33 @@ fn is_public(ip: IpAddr) -> bool {
                 || v.is_documentation()
                 || v.is_multicast()
                 || o[0] == 0
-                || (o[0] == 100 && (o[1] & 0xc0) == 64))
+                || (o[0] == 100 && (o[1] & 0xc0) == 64)
+                || (o[0] == 192 && o[1] == 0 && o[2] == 0)
+                || (o[0] == 198 && (o[1] & 0xfe) == 18)
+                || o[0] >= 240)
         }
         IpAddr::V6(v) => {
             if let Some(v4) = v.to_ipv4_mapped() {
                 return is_public(IpAddr::V4(v4));
             }
-            let s = v.segments()[0];
-            !(v.is_loopback() || v.is_unspecified() || v.is_multicast() || (s & 0xfe00) == 0xfc00 || (s & 0xffc0) == 0xfe80)
+            let seg = v.segments();
+            let embedded = |hi: u16, lo: u16| IpAddr::V4(std::net::Ipv4Addr::new((hi >> 8) as u8, hi as u8, (lo >> 8) as u8, lo as u8));
+            // NAT64 (64:ff9b::/96) and 6to4 (2002::/16) carry an IPv4 address: check that one.
+            if seg[0] == 0x64 && seg[1] == 0xff9b && seg[2..6] == [0, 0, 0, 0] {
+                return is_public(embedded(seg[6], seg[7]));
+            }
+            if seg[0] == 0x2002 {
+                return is_public(embedded(seg[1], seg[2]));
+            }
+            let s = seg[0];
+            !(v.is_loopback()
+                || v.is_unspecified()
+                || v.is_multicast()
+                || (s & 0xfe00) == 0xfc00
+                || (s & 0xffc0) == 0xfe80
+                || (s & 0xffc0) == 0xfec0
+                || (s == 0x2001 && seg[1] == 0x0db8)
+                || seg[..6] == [0, 0, 0, 0, 0, 0])
         }
     }
 }
@@ -537,10 +570,14 @@ mod tests {
 
     #[test]
     fn public_addresses() {
-        for ip in ["8.8.8.8", "203.0.114.1", "2606:4700::1111"] {
+        for ip in ["8.8.8.8", "203.0.114.1", "2606:4700::1111", "64:ff9b::808:808", "2002:808:808::1"] {
             assert!(is_public(ip.parse().unwrap()), "{ip}");
         }
-        for ip in ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "0.0.0.0", "100.64.0.1", "::1", "fd00::1", "fe80::1", "::ffff:192.168.1.1"] {
+        for ip in [
+            "127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "0.0.0.0", "100.64.0.1", "198.18.0.1", "192.0.0.8",
+            "240.0.0.1", "::1", "fd00::1", "fe80::1", "fec0::1", "2001:db8::1", "::ffff:192.168.1.1", "::127.0.0.1",
+            "64:ff9b::7f00:1", "64:ff9b::c0a8:101", "2002:c0a8:0101::1", "2002:7f00:1::",
+        ] {
             assert!(!is_public(ip.parse().unwrap()), "{ip}");
         }
     }
@@ -576,6 +613,11 @@ mod tests {
         let err = mail_image(&format!("http://127.0.0.1:{port}/a.png")).await.unwrap_err();
         assert!(format!("{err:#}").contains("isn't a public address"), "{err:#}");
         assert!(mail_image("https://example.com/a.png").await.is_err());
+        // Nothing that could add to the request's lines, in the address or the host.
+        for bad in ["http://x.com/a.png\nX-Extra: 1", "http://x.com/a b.png", "http://x.com\r\n/a.png", "http://user@x.com/a.png", "http://x.com/\u{7f}"] {
+            let err = mail_image(bad).await.unwrap_err();
+            assert!(format!("{err:#}").contains("not a"), "{bad:?}: {err:#}");
+        }
     }
 
     /// Real lookups (network): `cargo test -p mail-core icons::tests::live -- --ignored`.
