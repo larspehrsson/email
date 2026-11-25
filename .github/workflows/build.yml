@@ -5,8 +5,10 @@ name: build
 # To update one, look up the tag's commit (gh api repos/OWNER/REPO/commits/TAG -q .sha).
 
 on:
+  # This fork: its own build is release/current (Richard's main with Lars's branches on top,
+  # made by scripts/release.sh), and that's what the installed copies update to.
   push:
-    branches: [main]
+    branches: [release/current]
     # The website (pages.yml) alone doesn't make a new build.
     paths-ignore: [site/**, .github/workflows/pages.yml]
   pull_request:
@@ -223,12 +225,12 @@ jobs:
             ${{ matrix.bundle }}/macos/*.app.tar.gz
           if-no-files-found: ignore
 
-      # Every build of main: its files on the "latest" pre-release, as plain downloads with
+      # Every build of release/current: its files on the "latest" pre-release, as plain downloads with
       # stable links (artifacts come zipped, need a login, expire, and their download service
       # fails at times). Each platform replaces only its own files there. With the updater key,
       # also the update files: each installer's signature (.sig), and macOS's Email.app.tar.gz.
       - name: Publish to the latest release
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/release/current'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -242,7 +244,7 @@ jobs:
           # The first build creates the release (the platforms may try at once: one wins).
           gh release view latest >/dev/null 2>&1 \
             || gh release create latest --prerelease --target "$GITHUB_SHA" --title "Latest build" \
-                 --notes "The newest build of main. Unsigned on Linux and Windows; on macOS signed and notarized when built with the Apple secrets, otherwise signed ad-hoc." \
+                 --notes "The newest build of release/current. Unsigned on Linux and Windows; on macOS signed and notarized when built with the Apple secrets, otherwise signed ad-hoc." \
             || gh release view latest >/dev/null
           for a in $(gh release view latest --json assets --jq '.assets[].name'); do
             case "$PLATFORM:$a" in
@@ -256,7 +258,7 @@ jobs:
   # The "latest" tag and notes follow the commit just published.
   release:
     needs: bundle
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/release/current'
     runs-on: ubuntu-latest
     permissions:
       contents: write
