@@ -2311,9 +2311,19 @@ body.resizing iframe {
   flex: 1 1 auto;
   min-width: 0;
 }
-.reader-band .band-top .act-bar {
+.band-line2 {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+.band-line2 .band-recips {
+  flex: 1 1 auto;
+  margin-top: 4px;
+}
+.band-line2 .act-bar {
   flex: none;
-  margin-left: auto;
+  margin-right: -6px;
 }
 .reader-band .band-row {
   flex: none;
@@ -2352,12 +2362,27 @@ body.resizing iframe {
   height: 18px;
   line-height: 18px;
 }
+/* one line: the names shorten ("…"), the label and "and N more" always show */
 .band-recips .recips-line {
+  display: flex;
   min-width: 0;
   white-space: nowrap;
+  overflow-wrap: normal;
+}
+.band-recips .recips-line > * {
+  flex: none;
+}
+.band-recips .recips-line > .recips-names {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  overflow-wrap: normal;
+}
+.band-recips .recips-more {
+  margin-left: 4px;
+}
+.band-recips .recips-line.open {
+  display: block;
 }
 .band-recips:has(.recips-line.open) {
   height: auto;

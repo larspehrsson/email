@@ -129,6 +129,7 @@ export function AddrList(props: { label: string; list: Addr[] }) {
     <Show when={props.list.length > 0}>
       <div class="recips-line" classList={{ open: open() }}>
         <span class="recips-label">{props.label}</span>
+        <span class="recips-names">
         <For each={shown()}>
           {(a, i) => (
             <>
@@ -139,6 +140,7 @@ export function AddrList(props: { label: string; list: Addr[] }) {
             </>
           )}
         </For>
+        </span>
         <Show when={folds()}>
           {' '}
           <button
@@ -423,7 +425,6 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
                 <h1 class="reader-subject" title={h().subject || '(no subject)'}>
                   {h().subject || '(no subject)'}
                 </h1>
-                <HeaderActions target={actionTarget()} />
               </div>
               {/* Sender and recipients live in the band: nothing between it and the message. */}
               <div class="band-row" data-tauri-drag-region={DRAG}>
@@ -487,8 +488,11 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
                 </Show>
               </div>
               </div>
-              <div class="recips band-recips">
-                <Recipients to={h().to} cc={h().cc} bcc={h().bcc} known={h().full} />
+              <div class="band-line2" data-tauri-drag-region={DRAG}>
+                <div class="recips band-recips">
+                  <Recipients to={h().to} cc={h().cc} bcc={h().bcc} known={h().full} />
+                </div>
+                <HeaderActions target={actionTarget()} />
               </div>
               </div>
               </div>
