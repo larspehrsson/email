@@ -54,6 +54,14 @@ export * from './types';
 
 export const isTauri: boolean = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
+/** The app's own address for a message's plain-`http://` picture (`mailimg:`, fetched by the
+ *  core; see `rescueHttpImages`); null outside the app. */
+export function mailImageUrl(url: string): string | null {
+  if (!isTauri) return null;
+  const internals = (window as unknown as { __TAURI_INTERNALS__: { convertFileSrc(path: string, protocol: string): string } }).__TAURI_INTERNALS__;
+  return internals.convertFileSrc(url, 'mailimg');
+}
+
 async function createTauriBackend(): Promise<Backend> {
   const [{ invoke }, { listen }] = await Promise.all([
     import('@tauri-apps/api/core'),

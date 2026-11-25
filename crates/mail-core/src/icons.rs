@@ -8,10 +8,11 @@
 //! Mail services everyone has an address at (gmail.com, outlook.com…) have no picture: their
 //! logo would say nothing about the person.
 
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 /// Whose pictures may be looked up (the user's choice, Settings › General › Sender pictures).
@@ -129,7 +130,7 @@ fn bimi_location(record: &str) -> Option<String> {
 /// The best icon a website's front page names, else its /favicon.ico.
 async fn website_icon(host: &str) -> Result<Option<Icon>> {
     let page_url = format!("https://{host}/");
-    let (final_url, status, mime, body) = get(&page_url, 4).await?;
+    let (final_url, status, mime, body) = get(&page_url, 4, ICONS).await?;
     let mut candidates = Vec::new();
     if (200..300).contains(&status) && mime.contains("html") {
         let html = String::from_utf8_lossy(&body[..body.len().min(256 * 1024)]);
@@ -229,7 +230,7 @@ fn absolute(href: &str, base: &str) -> Option<String> {
 
 /// A picture at `url`: an image type (by the answer's type, or its first bytes), not too big.
 pub(crate) async fn get_image(url: &str) -> Result<Icon> {
-    let (_, status, mime, body) = get(url, 4).await?;
+    let (_, status, mime, body) = get(url, 4, ICONS).await?;
     if !(200..300).contains(&status) || body.is_empty() {
         bail!("{status}");
     }
@@ -238,6 +239,45 @@ pub(crate) async fn get_image(url: &str) -> Result<Icon> {
     }
     let mime = sniff(&body).map(str::to_string).or_else(|| mime.starts_with("image/").then_some(mime)).ok_or_else(|| anyhow!("not an image"))?;
     Ok(Icon { mime, data: body })
+}
+
+/// Most a picture in a message may weigh.
+const MAIL_IMAGE_MAX: usize = 15 * 1024 * 1024;
+
+/// A picture a message shows from a plain `http://` address, fetched by the app (the reader's
+/// `mailimg:` scheme). The webview upgrades such a picture to https, as any secure page does,
+/// and a server without a working certificate there then shows a broken image; the frame asks
+/// for it here instead, only when it failed that way and the message may load remote pictures.
+/// Only public addresses are reached (never this machine or the local network), and only
+/// pictures are handed back.
+pub async fn mail_image(url: &str) -> Result<Icon> {
+    if !url.starts_with("http://") {
+        bail!("not an http address");
+    }
+    let (_, status, mime, body) = get(url, 5, MAIL_IMAGES).await?;
+    if !(200..300).contains(&status) || body.is_empty() {
+        bail!("{status}");
+    }
+    let mime = sniff(&body).map(str::to_string).or_else(|| mime.starts_with("image/").then_some(mime)).ok_or_else(|| anyhow!("not an image"))?;
+    Ok(Icon { mime, data: body })
+}
+
+/// The address in a `mailimg:` request's path (`/` and the address, percent-encoded).
+pub fn mail_image_url(path: &str) -> Option<String> {
+    let enc = path.strip_prefix('/').unwrap_or(path).as_bytes();
+    let mut out = Vec::with_capacity(enc.len());
+    let mut i = 0;
+    while i < enc.len() {
+        if enc[i] == b'%' {
+            let hex = std::str::from_utf8(enc.get(i + 1..i + 3)?).ok()?;
+            out.push(u8::from_str_radix(hex, 16).ok()?);
+            i += 3;
+        } else {
+            out.push(enc[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok()
 }
 
 /// The image type its first bytes say.
@@ -258,31 +298,111 @@ fn sniff(b: &[u8]) -> Option<&'static str> {
     }
 }
 
-/// GET over HTTPS, following up to `hops` redirects: (final URL, status, content type, body).
-async fn get(url: &str, hops: u32) -> Result<(String, u16, String, Vec<u8>)> {
+/// How a GET may go: whether plain HTTP is allowed, the most the answer may weigh, and
+/// whether only public addresses may be reached.
+#[derive(Clone, Copy)]
+struct Fetch {
+    plain_http: bool,
+    limit: usize,
+    public_only: bool,
+}
+
+/// Sender pictures: HTTPS only, to the sender's own domain.
+const ICONS: Fetch = Fetch { plain_http: false, limit: 4 * 1024 * 1024, public_only: false };
+/// Pictures in messages (`mail_image`).
+const MAIL_IMAGES: Fetch = Fetch { plain_http: true, limit: MAIL_IMAGE_MAX, public_only: true };
+
+/// GET over HTTPS (or plain HTTP, if `how` allows), following up to `hops` redirects:
+/// (final URL, status, content type, body).
+async fn get(url: &str, hops: u32, how: Fetch) -> Result<(String, u16, String, Vec<u8>)> {
     let mut url = url.to_string();
     for _ in 0..=hops {
-        let rest = url.strip_prefix("https://").ok_or_else(|| anyhow!("not https"))?;
+        let (tls, rest) = if let Some(rest) = url.strip_prefix("https://") {
+            (true, rest)
+        } else if let Some(rest) = url.strip_prefix("http://")
+            && how.plain_http
+        {
+            (false, rest)
+        } else {
+            bail!("not https");
+        };
         let (hostport, path) = match rest.find('/') {
             Some(i) => (&rest[..i], &rest[i..]),
             None => (rest, "/"),
         };
         let path = path.split('#').next().unwrap_or("/");
+        let default_port = if tls { 443 } else { 80 };
         let (host, port) = match hostport.rsplit_once(':') {
-            Some((h, p)) if p.chars().all(|c| c.is_ascii_digit()) => (h, p.parse().unwrap_or(443)),
-            _ => (hostport, 443u16),
+            Some((h, p)) if p.chars().all(|c| c.is_ascii_digit()) => (h, p.parse().unwrap_or(default_port)),
+            _ => (hostport, default_port),
         };
-        let (status, headers, body) = request(host, port, path).await?;
+        let (status, headers, body) = request(host, port, path, tls, how).await?;
         if (300..400).contains(&status)
             && let Some(loc) = header(&headers, "location")
         {
-            url = absolute(&loc, &url).ok_or_else(|| anyhow!("redirect to {loc}"))?;
+            let next = if how.plain_http { redirect_target(&loc, &url) } else { absolute(&loc, &url) };
+            url = next.ok_or_else(|| anyhow!("redirect to {loc}"))?;
             continue;
         }
         let mime = header(&headers, "content-type").unwrap_or_default().split(';').next().unwrap_or("").trim().to_ascii_lowercase();
         return Ok((url, status, mime, body));
     }
     bail!("too many redirects")
+}
+
+/// A redirect's `Location` resolved against the URL that answered (http or https).
+fn redirect_target(loc: &str, base: &str) -> Option<String> {
+    let loc = loc.trim();
+    if loc.starts_with("https://") || loc.starts_with("http://") {
+        return Some(loc.to_string());
+    }
+    let (scheme, rest) = base.split_once("://")?;
+    if let Some(r) = loc.strip_prefix("//") {
+        return Some(format!("{scheme}://{r}"));
+    }
+    let host = rest.split(['/', '?', '#']).next()?;
+    if loc.starts_with('/') {
+        return Some(format!("{scheme}://{host}{loc}"));
+    }
+    let path = rest[host.len()..].split(['?', '#']).next().unwrap_or("");
+    let dir = &path[..path.rfind('/').map(|i| i + 1).unwrap_or(0)];
+    Some(format!("{scheme}://{host}{}{loc}", if dir.is_empty() { "/" } else { dir }))
+}
+
+/// An address on the internet: not this machine, the local network, link-local or the like.
+fn is_public(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v) => {
+            let o = v.octets();
+            !(v.is_loopback()
+                || v.is_private()
+                || v.is_link_local()
+                || v.is_unspecified()
+                || v.is_broadcast()
+                || v.is_documentation()
+                || v.is_multicast()
+                || o[0] == 0
+                || (o[0] == 100 && (o[1] & 0xc0) == 64))
+        }
+        IpAddr::V6(v) => {
+            if let Some(v4) = v.to_ipv4_mapped() {
+                return is_public(IpAddr::V4(v4));
+            }
+            let s = v.segments()[0];
+            !(v.is_loopback() || v.is_unspecified() || v.is_multicast() || (s & 0xfe00) == 0xfc00 || (s & 0xffc0) == 0xfe80)
+        }
+    }
+}
+
+/// A connection to `host`; with `public_only`, to one of its public addresses (the address
+/// checked is the one connected to, so a name can't change its answer in between).
+async fn connect(host: &str, port: u16, public_only: bool) -> Result<TcpStream> {
+    if !public_only {
+        return Ok(TcpStream::connect((host, port)).await?);
+    }
+    let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host, port)).await?.collect();
+    let addr = addrs.into_iter().find(|a| is_public(a.ip())).ok_or_else(|| anyhow!("{host} isn't a public address"))?;
+    Ok(TcpStream::connect(addr).await?)
 }
 
 fn header(head: &str, name: &str) -> Option<String> {
@@ -292,34 +412,23 @@ fn header(head: &str, name: &str) -> Option<String> {
     })
 }
 
-/// One GET: status, the response head, and the body (chunked or not), at most a few MB.
-async fn request(host: &str, port: u16, path: &str) -> Result<(u16, String, Vec<u8>)> {
-    let tcp = tokio::time::timeout(Duration::from_secs(6), TcpStream::connect((host, port)))
+/// One GET: status, the response head, and the body (chunked or not), at most `how.limit`.
+async fn request(host: &str, port: u16, path: &str, tls: bool, how: Fetch) -> Result<(u16, String, Vec<u8>)> {
+    let tcp = tokio::time::timeout(Duration::from_secs(6), connect(host, port, how.public_only))
         .await
         .map_err(|_| anyhow!("connecting to {host} timed out"))?
         .with_context(|| format!("connecting to {host}"))?;
-    let name = tokio_rustls::rustls::pki_types::ServerName::try_from(host.to_string())?;
-    let mut tls = tokio_rustls::TlsConnector::from(crate::imap::tls_config()).connect(name, tcp).await?;
     let req = format!(
         "GET {path} HTTP/1.1\r\nHost: {host}\r\nAccept: text/html,image/*;q=0.9,*/*;q=0.5\r\nAccept-Encoding: identity\r\nConnection: close\r\nUser-Agent: Mozilla/5.0 (compatible; Email)\r\n\r\n"
     );
-    tls.write_all(req.as_bytes()).await?;
-    let mut raw = Vec::new();
-    let read = async {
-        let mut buf = [0u8; 16 * 1024];
-        loop {
-            match tls.read(&mut buf).await {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    raw.extend_from_slice(&buf[..n]);
-                    if raw.len() > 4 * 1024 * 1024 {
-                        break;
-                    }
-                }
-            }
-        }
+    let raw = if tls {
+        let name = tokio_rustls::rustls::pki_types::ServerName::try_from(host.to_string())?;
+        let mut tls = tokio_rustls::TlsConnector::from(crate::imap::tls_config()).connect(name, tcp).await?;
+        exchange(&mut tls, &req, how.limit, host).await?
+    } else {
+        let mut tcp = tcp;
+        exchange(&mut tcp, &req, how.limit, host).await?
     };
-    tokio::time::timeout(Duration::from_secs(10), read).await.map_err(|_| anyhow!("{host} took too long"))?;
     let split = raw.windows(4).position(|w| w == b"\r\n\r\n").ok_or_else(|| anyhow!("incomplete answer"))?;
     let head = String::from_utf8_lossy(&raw[..split]).to_string();
     let status: u16 = head.split(' ').nth(1).and_then(|s| s.parse().ok()).ok_or_else(|| anyhow!("no HTTP status"))?;
@@ -341,6 +450,28 @@ async fn request(host: &str, port: u16, path: &str) -> Result<(u16, String, Vec<
         body = out;
     }
     Ok((status, head, body))
+}
+
+/// Send `req` and read the whole answer (refused past `limit`, or after 10 s).
+async fn exchange<S: AsyncRead + AsyncWrite + Unpin>(s: &mut S, req: &str, limit: usize, host: &str) -> Result<Vec<u8>> {
+    s.write_all(req.as_bytes()).await?;
+    let mut raw = Vec::new();
+    let read = async {
+        let mut buf = [0u8; 16 * 1024];
+        loop {
+            match s.read(&mut buf).await {
+                Ok(0) | Err(_) => return Ok(()),
+                Ok(n) => {
+                    raw.extend_from_slice(&buf[..n]);
+                    if raw.len() > limit {
+                        bail!("too big");
+                    }
+                }
+            }
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(10), read).await.map_err(|_| anyhow!("{host} took too long"))??;
+    Ok(raw)
 }
 
 #[cfg(test)]
@@ -385,6 +516,66 @@ mod tests {
         assert_eq!(sniff(b"\x89PNG\r\n"), Some("image/png"));
         assert_eq!(sniff(b"<?xml version='1.0'?><svg xmlns=..."), Some("image/svg+xml"));
         assert_eq!(sniff(b"<html>"), None);
+    }
+
+    #[test]
+    fn mail_image_addresses() {
+        assert_eq!(mail_image_url("/http%3A%2F%2Fx.com%2Fa.png%3Ftxt%3D1%26y%3D2").as_deref(), Some("http://x.com/a.png?txt=1&y=2"));
+        assert_eq!(mail_image_url("/http%3A%2F%2Fx.com%2F%C3%A6.png").as_deref(), Some("http://x.com/æ.png"));
+        assert_eq!(mail_image_url("/%zz"), None);
+        assert_eq!(mail_image_url("/%4"), None);
+    }
+
+    #[test]
+    fn redirects() {
+        assert_eq!(redirect_target("https://y.com/b", "http://x.com/a").as_deref(), Some("https://y.com/b"));
+        assert_eq!(redirect_target("//y.com/b", "http://x.com/a").as_deref(), Some("http://y.com/b"));
+        assert_eq!(redirect_target("/b?q=1", "http://x.com/d/a?z").as_deref(), Some("http://x.com/b?q=1"));
+        assert_eq!(redirect_target("b.png", "http://x.com/d/a.png?z=/q").as_deref(), Some("http://x.com/d/b.png"));
+        assert_eq!(redirect_target("b.png", "http://x.com").as_deref(), Some("http://x.com/b.png"));
+    }
+
+    #[test]
+    fn public_addresses() {
+        for ip in ["8.8.8.8", "203.0.114.1", "2606:4700::1111"] {
+            assert!(is_public(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "0.0.0.0", "100.64.0.1", "::1", "fd00::1", "fe80::1", "::ffff:192.168.1.1"] {
+            assert!(!is_public(ip.parse().unwrap()), "{ip}");
+        }
+    }
+
+    /// A one-shot HTTP server on this machine answering `answer` to whatever it's asked.
+    async fn serve(answer: Vec<u8>) -> u16 {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut s, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = s.read(&mut buf).await;
+            s.write_all(&answer).await.unwrap();
+        });
+        port
+    }
+
+    #[tokio::test]
+    async fn plain_http() {
+        let mut answer = b"HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nTransfer-Encoding: chunked\r\n\r\n6\r\n\x89PNG\r\n\r\n0\r\n\r\n".to_vec();
+        let port = serve(answer.clone()).await;
+        let how = Fetch { plain_http: true, limit: 1024, public_only: false };
+        let (_, status, mime, body) = get(&format!("http://127.0.0.1:{port}/a.png"), 0, how).await.unwrap();
+        assert_eq!((status, mime.as_str(), &body[..]), (200, "image/png", &b"\x89PNG\r\n"[..]));
+
+        // Past the limit: refused, not cut short.
+        answer.extend(std::iter::repeat_n(b'x', 2000));
+        let port = serve(answer).await;
+        assert!(get(&format!("http://127.0.0.1:{port}/a.png"), 0, how).await.is_err());
+
+        // Sender pictures stay on HTTPS; messages' pictures never reach this machine.
+        assert!(get(&format!("http://127.0.0.1:{port}/a.png"), 0, ICONS).await.is_err());
+        let err = mail_image(&format!("http://127.0.0.1:{port}/a.png")).await.unwrap_err();
+        assert!(format!("{err:#}").contains("isn't a public address"), "{err:#}");
+        assert!(mail_image("https://example.com/a.png").await.is_err());
     }
 
     /// Real lookups (network): `cargo test -p mail-core icons::tests::live -- --ignored`.
