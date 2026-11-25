@@ -308,6 +308,9 @@ export const api = {
   /** Whether "Always load…" can cover everyone at a domain (Settings › General › Privacy). */
   domainRules: (): Promise<boolean> => call('domain_rules', undefined),
   setDomainRules: (on: boolean): Promise<void> => call('set_domain_rules', { on }),
+  /** Whether a picture that only loads over plain http may be fetched that way. */
+  httpPictures: (): Promise<boolean> => call('http_pictures', undefined),
+  setHttpPictures: (on: boolean): Promise<void> => call('set_http_pictures', { on }),
   /** Senders whose images always load. */
   remoteSenders: (): Promise<string[]> => call('remote_senders', undefined),
   setRemoteSender: (addr: string, on: boolean): Promise<void> => call('set_remote_sender', { addr, on }),
@@ -353,7 +356,8 @@ export const api = {
   setAccountMark: (accountId: number, letter: string | null, color: string | null): Promise<void> =>
     call('set_account_mark', { accountId, letter, color }),
   /** Desktop notifications for new mail in an Inbox (while the window isn't in use). */
-  setNotifications: (enabled: boolean, whileInUse: boolean): Promise<void> => call('set_notifications', { enabled, whileInUse }),
+  setNotifications: (enabled: boolean, whileInUse: boolean, details: boolean): Promise<void> =>
+    call('set_notifications', { enabled, whileInUse, details }),
   /** Show a notification now, whatever the window: to see that they come through. */
   testNotification: (): Promise<void> => call('test_notification', undefined),
 };

@@ -3,7 +3,7 @@ import { Portal } from 'solid-js/web';
 import { AiAppsSection } from './AiApps';
 import { GoogleClientNote, GoogleContactsField } from './GoogleContacts';
 import { pictureLevel, setPictureLevel, type PictureLevel } from '../lib/senderIcons';
-import { domainRules, setDomainRules } from '../lib/domainRules';
+import { domainRules, httpPictures, setDomainRules, setHttpPictures } from '../lib/privacy';
 import { setTheme, theme, THEMES } from '../lib/theme';
 import { pinFavorites, setPinFavorites } from '../lib/favorites';
 import { accountLogo, logoFromFile, setAccountLogo } from '../lib/accountLogos';
@@ -25,7 +25,7 @@ import {
 } from '../lib/shortcuts';
 import { ChevronIcon, CloseIcon } from './Icons';
 import { api, errorMessage, events, type Account, type AccountDetails, type AccountStorage, type AttachmentCounts } from '../api';
-import { accountMark, accounts, notifyInUse, notifyNewMail, reloadAccounts, setAddingAccount, setNotifyInUse, setNotifyNewMail, folderById, selectedFolderId } from '../state';
+import { accountMark, accounts, notifyDetails, notifyInUse, notifyNewMail, reloadAccounts, setAddingAccount, setNotifyDetails, setNotifyInUse, setNotifyNewMail, folderById, selectedFolderId } from '../state';
 import { MARK_COLORS } from '../lib/accountMarks';
 import { AccountTools } from './AccountTools';
 import { fmtNum, fmtSize, loadPref, savePref, smartDate } from '../lib/format';
@@ -496,6 +496,19 @@ function GraphField(props: { account: Account; onMessage: (m: { text: string; er
   );
 }
 
+/** A checkbox with a line under it saying what it means. */
+function Choice(props: { checked: boolean; onChange: (on: boolean) => void; label: string; note: string }) {
+  return (
+    <label class="st-level">
+      <input type="checkbox" checked={props.checked} onChange={(e) => props.onChange(e.currentTarget.checked)} />
+      <span>
+        {props.label}
+        <span class="st-level-note">{props.note}</span>
+      </span>
+    </label>
+  );
+}
+
 function Field(props: { label: string; class?: string; children: JSX.Element }) {
   return (
     <div class={props.class ? `st-field ${props.class}` : 'st-field'}>
@@ -920,6 +933,32 @@ function GeneralSection() {
           </div>
         </div>
         <RemoteSenders />
+        <Field label="Insecure pictures" class="st-field-top st-divided">
+          <Choice
+            checked={httpPictures()}
+            onChange={(on) => void setHttpPictures(on)}
+            label="Load pictures from insecure (http) addresses"
+            note="Only in mail whose pictures you allow, when a picture doesn’t load securely. Others on your network can see its address."
+          />
+        </Field>
+        <Field label="Notifications" class="st-field-top st-divided">
+          <Choice
+            checked={notifyDetails()}
+            onChange={setNotifyDetails}
+            label="Show who new mail is from and its subject"
+            note="Off: notifications only say there’s new mail, for screens others can see."
+          />
+        </Field>
+        <Show when={updateStatus()?.supported}>
+          <Field label="Updates" class="st-field-top st-divided">
+            <Choice
+              checked={autoUpdates()}
+              onChange={setAutoUpdates}
+              label="Look for new versions and download them"
+              note="Each look asks GitHub, where Email’s releases are published, which tells it your IP address."
+            />
+          </Field>
+        </Show>
       </SettingsGroup>
       <SettingsGroup title="Email links">
         <Field label="Default mail app">
@@ -959,16 +998,12 @@ function RemoteSenders() {
   return (
     <Field label="Remote images" class="st-field-top st-divided">
       <div class="st-remote">
-        <label class="st-level">
-          <input type="checkbox" checked={domainRules()} onChange={(e) => void setDomainRules(e.currentTarget.checked)} />
-          <span>
-            Allow “Always load…” for everyone at a company
-            <span class="st-level-note">
-              Where your mail service checks who mail is from (Gmail and Microsoft do), only mail that passes counts. Elsewhere, someone
-              pretending to be from that company could see when you open their message.
-            </span>
-          </span>
-        </label>
+        <Choice
+          checked={domainRules()}
+          onChange={(on) => void setDomainRules(on)}
+          label="Allow “Always load…” for everyone at a company"
+          note="Where your mail service checks who mail is from (Gmail and Microsoft do), only mail that passes counts. Elsewhere, someone pretending to be from that company could see when you open their message."
+        />
         <Show when={(list() ?? []).length > 0} fallback={<span class="st-muted">No one yet. “Always load…” over a message’s blocked images adds someone here.</span>}>
           <ul class="st-remote-senders">
             <li class="st-muted">Always loaded in mail from:</li>
@@ -1013,6 +1048,17 @@ function NotificationsSection() {
             onChange={(e) => setNotifyInUse(e.currentTarget.checked)}
           />
           Also while Email is the window you’re using
+        </label>
+      </Field>
+      <Field label="">
+        <label class="st-check">
+          <input
+            type="checkbox"
+            checked={notifyDetails()}
+            disabled={!notifyNewMail()}
+            onChange={(e) => setNotifyDetails(e.currentTarget.checked)}
+          />
+          Show who it’s from and the subject
         </label>
       </Field>
       <Field label="">

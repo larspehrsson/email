@@ -34,8 +34,8 @@ default* means nothing is sent until you turn it on.
 | **Senders' domains**, for their pictures (a DNS lookup for their BIMI logo, then their website's icon; either can name a picture on another server, which is fetched too) | When a message's sender has no picture yet; once per domain, kept for 30 days | You, by choosing a level | The domain's name (your DNS resolver sees it too), and a request for its logo or icon from your address | Off by default. Settings › General › Sender pictures: contacts only, domains you write to, or all |
 | **Google's photo servers**, for a Google contact's own photo | Once per photo | You, by connecting Google Contacts | A request for the photo | Only with Google Contacts connected |
 | **Servers of pictures in a message** | When a message you allowed is shown | You, per message, sender or domain | A request for the picture, which tells its sender the message was opened, and from which address | Blocked by default |
-| The same, **over plain `http://`** | When such a picture fails over https (Email fetches it itself) | You, as above | As above, but the address isn't encrypted on the network | Only for messages you allowed |
-| **GitHub** (`github.com`), for updates | 20 seconds after Email starts and every 6 hours | The schedule | A request for the newest version's description, and the download when there is one | Settings › Troubleshooting › Updates |
+| The same, **over plain `http://`** | When such a picture fails over https (Email fetches it itself) | You, as above | As above, but the address isn't encrypted on the network | Only for messages you allowed. Settings › General › Privacy › Insecure pictures |
+| **GitHub** (`github.com`), for updates | 20 seconds after Email starts and every 6 hours | The schedule | A request for the newest version's description, and the download when there is one | Settings › General › Privacy, or Troubleshooting › Updates |
 
 **Never on the network:**
 - **Links** you click open in your web browser; Email itself doesn't visit them.
@@ -104,7 +104,8 @@ nothing on the server. Your lists of senders and domains whose pictures always l
 - **Pictures you allow can be on your local network,** and the web view will request them.
 - **On Linux, saved attachments carry no "downloaded from the internet" mark:** Linux has no
   standard one.
-- **Notifications show the sender and subject** of new mail (Settings › Notifications).
+- **Notifications show the sender and subject** of new mail unless you turn that off (Settings ›
+  General › Privacy, or Notifications); then they only say there's new mail.
 - **AI apps:** one switch turns them on for every AI app, and an app names itself.
 - **The build:** dependencies aren't yet audited automatically for known vulnerabilities, and
   the Linux and Windows installers aren't signed by the operating system's vendors. (Every build

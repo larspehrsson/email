@@ -15,9 +15,11 @@ use serde::Serialize;
 use tauri::{Emitter, Manager};
 
 /// The UI's settings (Settings › Notifications), pushed at startup and on every change: new
-/// mail notifies at all; and also while the window is the one in use.
+/// mail notifies at all; also while the window is the one in use; and says who it's from and
+/// its subject (off: only that there's mail, for screens others can see).
 static ENABLED: AtomicBool = AtomicBool::new(true);
 static WHILE_IN_USE: AtomicBool = AtomicBool::new(true);
+static DETAILS: AtomicBool = AtomicBool::new(true);
 
 /// Notifications whose click is still awaited, each on a thread of its own. Unattended ones
 /// pile up (GNOME keeps them until dismissed), so past this many new ones aren't clickable.
@@ -25,9 +27,10 @@ static WAITING: AtomicUsize = AtomicUsize::new(0);
 const MAX_WAITING: usize = 32;
 
 #[tauri::command]
-pub fn set_notifications(enabled: bool, while_in_use: Option<bool>) {
+pub fn set_notifications(enabled: bool, while_in_use: Option<bool>, details: Option<bool>) {
     ENABLED.store(enabled, Ordering::Relaxed);
     WHILE_IN_USE.store(while_in_use.unwrap_or(true), Ordering::Relaxed);
+    DETAILS.store(details.unwrap_or(true), Ordering::Relaxed);
 }
 
 #[derive(Clone, Serialize)]
@@ -70,12 +73,14 @@ pub fn new_mail(app: &tauri::AppHandle, core: &Core, account_id: i64, folder_id:
         messages.into_iter().filter(|m| !m.from_addr.eq_ignore_ascii_case(&account.email)).collect();
     let Some(first) = messages.first() else { return };
 
-    let (summary, mut body, target) = if messages.len() == 1 {
-        (sender(first).to_string(), subject(first).to_string(), Some(first.id))
-    } else {
-        (format!("{} new messages", messages.len()), senders(&messages), None)
+    let details = DETAILS.load(Ordering::Relaxed);
+    let (summary, mut body, target) = match (messages.len(), details) {
+        (1, true) => (sender(first).to_string(), subject(first).to_string(), Some(first.id)),
+        (1, false) => ("New mail".to_string(), String::new(), Some(first.id)),
+        (n, true) => (format!("{n} new messages"), senders(&messages), None),
+        (n, false) => (format!("{n} new messages"), String::new(), None),
     };
-    if accounts.len() > 1 {
+    if accounts.len() > 1 && details {
         body = format!("{body}\n{}", account.email);
     }
     tracing::info!(account = account.email, count = messages.len(), "new mail notification");
@@ -99,12 +104,14 @@ pub fn snooze_due(app: &tauri::AppHandle, core: &Core, account_id: i64, folder_i
     let Some(first) = messages.first() else { return };
     let accounts = core.accounts().unwrap_or_default();
     let Some(account) = accounts.iter().find(|a| a.id == account_id) else { return };
-    let (summary, mut body, target) = if messages.len() == 1 {
-        ("Snoozed message is back".to_string(), format!("{}\n{}", subject(first), sender(first)), Some(first.id))
-    } else {
-        (format!("{} snoozed messages are back", messages.len()), senders(&messages), None)
+    let details = DETAILS.load(Ordering::Relaxed);
+    let (summary, mut body, target) = match (messages.len(), details) {
+        (1, true) => ("Snoozed message is back".to_string(), format!("{}\n{}", subject(first), sender(first)), Some(first.id)),
+        (1, false) => ("Snoozed message is back".to_string(), String::new(), Some(first.id)),
+        (n, true) => (format!("{n} snoozed messages are back"), senders(&messages), None),
+        (n, false) => (format!("{n} snoozed messages are back"), String::new(), None),
     };
-    if accounts.len() > 1 {
+    if accounts.len() > 1 && details {
         body = format!("{body}\n{}", account.email);
     }
     tracing::info!(account = account.email, count = messages.len(), "snooze notification");

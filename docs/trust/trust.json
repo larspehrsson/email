@@ -494,7 +494,7 @@
       },
       {
         "id": "connections.message-pictures-http",
-        "claim": "For an allowed message, a picture from a plain http:// address that fails over https (the web view upgrades it) is fetched by Email itself over plain HTTP, from public addresses only.",
+        "claim": "For an allowed message, a picture from a plain http:// address that fails over https (the web view upgrades it) is fetched by Email itself over plain HTTP, from public addresses only. The user can turn it off, and then the app's handler refuses every such request.",
         "level": "tested",
         "destination": "the server named in the picture's address",
         "operator": "third-party",
@@ -506,7 +506,7 @@
         ],
         "frequency": "once per failed picture, at most four at a time",
         "default": "off",
-        "control": "only for messages whose pictures you allowed",
+        "control": "only for messages whose pictures you allowed; Settings › General › Privacy › Insecure pictures turns it off",
         "encryption": "plaintext",
         "sends": [],
         "reveals": [
@@ -533,6 +533,12 @@
             "kind": "test",
             "path": "crates/mail-core/src/icons.rs",
             "symbol": "plain_http"
+          },
+          {
+            "kind": "code",
+            "path": "app/src-tauri/src/lib.rs",
+            "symbol": "mail_image_protocol",
+            "note": "refuses when Core::http_pictures is off"
           }
         ],
         "verify": "Check rescueHttpImages runs only when the message's pictures are allowed, that mail_image refuses non-public addresses and addresses with control characters, and what an email itself can do with the mailimg scheme.",
@@ -554,7 +560,7 @@
         ],
         "frequency": "20 seconds after starting, then every 6 hours",
         "default": "on",
-        "control": "Settings › Troubleshooting › Updates",
+        "control": "Settings › General › Privacy, or Settings › Troubleshooting › Updates",
         "encryption": "tls-verified",
         "sends": [
           "app-version"
@@ -1055,7 +1061,7 @@
     "permissions": [
       {
         "id": "permissions.system",
-        "claim": "Email uses the network, the system keychain, notifications (on by default, showing the sender and subject; Settings › Notifications), files you choose (open, save, export), and being the default mail app (if you ask; the Linux package registers it for mailto: links at install). It asks for your password to install .rpm updates as root (pkexec). Release builds include the web view's Developer Tools. It doesn't use the camera, microphone, location, the system's contacts, or running at login.",
+        "claim": "Email uses the network, the system keychain, notifications (on by default, showing the sender and subject unless turned off; Settings › Notifications or General › Privacy), files you choose (open, save, export), and being the default mail app (if you ask; the Linux package registers it for mailto: links at install). It asks for your password to install .rpm updates as root (pkexec). Release builds include the web view's Developer Tools. It doesn't use the camera, microphone, location, the system's contacts, or running at login.",
         "level": "declared",
         "evidence": [
           {

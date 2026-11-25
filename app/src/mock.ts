@@ -632,6 +632,8 @@ export function createMockBackend(): Backend {
   };
   /** Settings › General › Privacy: "Always load…" can cover everyone at a domain */
   let domainRules = false;
+  /** Settings › General › Privacy: pictures that only load over plain http */
+  let httpPictures = true;
   /** "Always from this sender": lowercase addresses */
   const remoteSenders = new Set<string>();
   /** resolves a pending mock browser sign-in as cancelled */
@@ -2030,6 +2032,14 @@ export function createMockBackend(): Backend {
     async set_domain_rules({ on }) {
       await sleep(3);
       domainRules = on;
+    },
+    async http_pictures() {
+      await sleep(3);
+      return httpPictures;
+    },
+    async set_http_pictures({ on }) {
+      await sleep(3);
+      httpPictures = on;
     },
     async remote_senders() {
       await sleep(3);

@@ -1,6 +1,7 @@
 import { createEffect, onCleanup } from 'solid-js';
 import { forwardFrameKeys } from '../lib/frameKeys';
 import { rescueHttpImages, zoomableImages } from '../lib/images';
+import { httpPictures } from '../lib/privacy';
 import { mailImageUrl } from '../api';
 import { watchFrameLinks } from './LinkPeek';
 import { watchFrameMenu } from './BodyMenu';
@@ -69,7 +70,7 @@ export function AutoHeightFrame(props: { doc: string; sender?: string; messageId
       watchFrameLinks(f, props.sender ?? null);
       if (props.messageId != null) watchFrameMenu(f, props.messageId);
       zoomableImages(doc, () => measure());
-      if (props.remote) rescueHttpImages(doc, mailImageUrl);
+      if (props.remote && httpPictures()) rescueHttpImages(doc, mailImageUrl);
       last = -1;
       measure();
       ro?.disconnect();

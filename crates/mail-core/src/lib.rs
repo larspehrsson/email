@@ -1870,6 +1870,16 @@ impl Core {
         self.store.set_domain_rules(on)
     }
 
+    /// Whether a picture in a message that only loads over plain http may be fetched that way
+    /// (`icons::mail_image`), its address visible on the network. On unless turned off.
+    pub fn http_pictures(&self) -> Result<bool> {
+        self.store.choice("http_pictures", true)
+    }
+
+    pub fn set_http_pictures(&self, on: bool) -> Result<()> {
+        self.store.set_choice("http_pictures", on)
+    }
+
     pub fn remote_senders(&self) -> Result<Vec<String>> {
         self.store.remote_senders()
     }
@@ -2103,6 +2113,10 @@ mod remote_rule_tests {
         assert!(detail(plain).remote_allowed && detail(gmail_pass).remote_allowed);
         assert!(!detail(own_fail).remote_allowed, "a sender's rule needs the check too");
         assert_eq!(core.allow_remote_from_domain(plain).unwrap(), "@example.net");
+        // Pictures over plain http: on until turned off, and kept.
+        assert!(core.http_pictures().unwrap());
+        core.set_http_pictures(false).unwrap();
+        assert!(!core.http_pictures().unwrap());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

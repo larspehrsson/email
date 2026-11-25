@@ -426,8 +426,16 @@ export function setNotifyInUse(on: boolean): void {
   savePref('notify.whileInUse', on);
   pushNotifySettings();
 }
+// Who it's from and the subject (off: only that there's mail, for screens others can see).
+const [notifyDetails, setNotifyDetailsSig] = createSignal<boolean>(loadPref<boolean>('notify.details', true) !== false);
+export { notifyDetails };
+export function setNotifyDetails(on: boolean): void {
+  setNotifyDetailsSig(on);
+  savePref('notify.details', on);
+  pushNotifySettings();
+}
 function pushNotifySettings(): void {
-  api.setNotifications(notifyNewMail(), notifyInUse()).catch((e) => console.warn('set_notifications failed', e));
+  api.setNotifications(notifyNewMail(), notifyInUse(), notifyDetails()).catch((e) => console.warn('set_notifications failed', e));
 }
 
 export function selectFolder(id: number): void {

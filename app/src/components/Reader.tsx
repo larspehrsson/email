@@ -8,7 +8,7 @@ export { AttachmentChips };
 import { analyzePlain, collapseHtmlQuotes, QUOTE_FRAME_CSS, type QNode } from '../lib/quotes';
 import { cacheClear, cacheGet, cacheMarkRemoteAllowed, cachePut, onMessageReady, readyAt } from '../lib/body';
 import { linkify, longDate } from '../lib/format';
-import { domainRules } from '../lib/domainRules';
+import { domainRules } from '../lib/privacy';
 import { patchSelectedSummary, readerMessageId, restorePending, searchActive, selectedFolderId, selectedMessageId, selectedSummary } from '../state';
 import { HeaderActions, type ActionTarget } from './Actions';
 import { pendingSnooze } from './Snooze';

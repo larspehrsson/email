@@ -1792,6 +1792,31 @@ describe('images from a domain', () => {
   });
 });
 
+describe('privacy settings', () => {
+  test('notification details and insecure pictures: kept, and the same in both places', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'General' }).click();
+      const choice = (text) => page.locator('.st-level', { hasText: text }).locator('input');
+      const details = choice('Show who new mail is from');
+      const http = choice('insecure (http) addresses');
+      assert.equal(await details.isChecked(), true, 'details on by default');
+      assert.equal(await http.isChecked(), true, 'insecure pictures on by default');
+      await details.uncheck();
+      await http.uncheck();
+      await page.locator('.st-nav-item', { hasText: 'Notifications' }).click();
+      const inNotifications = page.locator('.st-check', { hasText: 'Show who it\u2019s from' }).locator('input');
+      assert.equal(await inNotifications.isChecked(), false, 'one setting, shown in both places');
+      await page.locator('.st-nav-item', { hasText: 'General' }).click();
+      assert.equal(await choice('insecure (http) addresses').isChecked(), false, 'kept by the core');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('attachments', () => {
   test('each attachment is a chip with its name and size; right-click to open, save, save as, or all', async () => {
     const { page, errors, close } = await open({ threaded: false });

@@ -770,6 +770,8 @@ export interface CommandMap {
   remote_senders: { args: undefined; ret: string[] };
   domain_rules: { args: undefined; ret: boolean };
   set_domain_rules: { args: { on: boolean }; ret: void };
+  http_pictures: { args: undefined; ret: boolean };
+  set_http_pictures: { args: { on: boolean }; ret: void };
   set_remote_sender: { args: { addr: string; on: boolean }; ret: void };
   update_password: { args: { accountId: number; password: string }; ret: void };
   set_keep_attachments: { args: { accountId: number; keep: boolean }; ret: void };
@@ -788,7 +790,7 @@ export interface CommandMap {
   default_mail_status: { args: Record<string, never>; ret: DefaultMail };
   make_default_mail: { args: Record<string, never>; ret: void };
   set_account_mark: { args: { accountId: number; letter: string | null; color: string | null }; ret: void };
-  set_notifications: { args: { enabled: boolean; whileInUse: boolean }; ret: void };
+  set_notifications: { args: { enabled: boolean; whileInUse: boolean; details: boolean }; ret: void };
   test_notification: { args: undefined; ret: void };
   account_storage: { args: undefined; ret: AccountStorage[] };
   attachment_counts: { args: undefined; ret: AttachmentCounts[] };

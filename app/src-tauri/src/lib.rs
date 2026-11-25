@@ -138,6 +138,17 @@ async fn set_domain_rules(core: State<'_, Arc<Core>>, on: bool) -> Res<()> {
     core.set_domain_rules(on).map_err(err)
 }
 
+/// Whether a picture that only loads over plain http may be fetched that way.
+#[tauri::command]
+async fn http_pictures(core: State<'_, Arc<Core>>) -> Res<bool> {
+    core.http_pictures().map_err(err)
+}
+
+#[tauri::command]
+async fn set_http_pictures(core: State<'_, Arc<Core>>, on: bool) -> Res<()> {
+    core.set_http_pictures(on).map_err(err)
+}
+
 #[tauri::command]
 async fn remote_senders(core: State<'_, Arc<Core>>) -> Res<Vec<String>> {
     core.remote_senders().map_err(err)
@@ -1461,8 +1472,10 @@ async fn show_log(app: tauri::AppHandle) -> Res<()> {
 /// reader asks for it only for a message allowed to load remote pictures (its frame's CSP
 /// lets `mailimg:` through only then). `mailimg://localhost/<address, percent-encoded>`, or
 /// `http://mailimg.localhost/…` on Windows.
-fn mail_image_protocol<R: tauri::Runtime>(_ctx: tauri::UriSchemeContext<'_, R>, request: tauri::http::Request<Vec<u8>>, responder: tauri::UriSchemeResponder) {
-    let url = mail_core::icons::mail_image_url(request.uri().path());
+fn mail_image_protocol<R: tauri::Runtime>(ctx: tauri::UriSchemeContext<'_, R>, request: tauri::http::Request<Vec<u8>>, responder: tauri::UriSchemeResponder) {
+    // Turned off in Settings › General › Privacy: refused, whatever the page asks.
+    let allowed = ctx.app_handle().try_state::<Arc<Core>>().is_some_and(|core| core.http_pictures().unwrap_or(false));
+    let url = mail_core::icons::mail_image_url(request.uri().path()).filter(|_| allowed);
     tauri::async_runtime::spawn(async move {
         let answer = match url {
             Some(url) => mail_core::icons::mail_image(&url).await.map_err(|e| {
@@ -1627,6 +1640,8 @@ pub fn run() {
             remote_senders,
             domain_rules,
             set_domain_rules,
+            http_pictures,
+            set_http_pictures,
             set_remote_sender,
             get_thread,
             update_password,

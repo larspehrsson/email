@@ -278,8 +278,9 @@ CREATE TABLE IF NOT EXISTS remote_senders (
     added INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
--- The user's choices the core acts on ("domain_rules": "1" lets "Always load…" cover everyone
--- at a domain). Missing: the default.
+-- The user's yes/no choices the core acts on, "1" or "0" (missing: the default): "domain_rules",
+-- "Always load…" can cover everyone at a domain; "http_pictures", a picture that only loads
+-- over plain http may be fetched that way (`Core::http_pictures`).
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -3006,21 +3007,30 @@ impl Store {
         Ok(())
     }
 
-    /// Whether "Always load…" can cover everyone at a domain (`settings`, off by default).
-    pub fn domain_rules(&self) -> Result<bool> {
+    /// One of the user's yes/no choices in `settings` ("1" or "0"), or `default` when unset.
+    pub fn choice(&self, key: &str, default: bool) -> Result<bool> {
         Ok(self
             .rdb()
-            .query_row("SELECT value FROM settings WHERE key='domain_rules'", [], |r| r.get::<_, String>(0))
+            .query_row("SELECT value FROM settings WHERE key=?1", [key], |r| r.get::<_, String>(0))
             .optional()?
-            .is_some_and(|v| v == "1"))
+            .map_or(default, |v| v == "1"))
+    }
+
+    pub fn set_choice(&self, key: &str, on: bool) -> Result<()> {
+        self.db().execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [key, if on { "1" } else { "0" }],
+        )?;
+        Ok(())
+    }
+
+    /// Whether "Always load…" can cover everyone at a domain (off by default).
+    pub fn domain_rules(&self) -> Result<bool> {
+        self.choice("domain_rules", false)
     }
 
     pub fn set_domain_rules(&self, on: bool) -> Result<()> {
-        self.db().execute(
-            "INSERT INTO settings (key, value) VALUES ('domain_rules', ?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            [if on { "1" } else { "0" }],
-        )?;
-        Ok(())
+        self.set_choice("domain_rules", on)
     }
 
     /// The senders whose images always load, A to Z.
