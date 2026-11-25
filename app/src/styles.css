@@ -2397,10 +2397,10 @@ body.resizing iframe {
   padding: 14px 28px 12px;
 }
 .reader-head.reader-att {
-  padding: 12px 28px 0;
+  padding: 8px 28px 0;
 }
 .reader-head.reader-att .att-chips {
-  padding-left: 0;
+  padding: 0 0 6px;
 }
 .reader-head + .remote-banner {
   margin-top: 0;
