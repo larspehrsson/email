@@ -6,7 +6,7 @@ to the code that does it.*
 
 ## At a glance
 
-| | |
+| What | In short |
 |---|---|
 | **Sent to the developers** | Nothing. No analytics, no crash reports, no usage statistics, no account with us. |
 | **Who Email talks to** | Your own mail servers. Beyond that, only services you turn on (Google Contacts, Microsoft tags and snooze, writing help, sender pictures), the senders' servers for pictures you choose to load, and GitHub to look for updates. |
