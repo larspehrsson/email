@@ -1037,6 +1037,20 @@ body.resizing iframe {
   pointer-events: none;
   transition: opacity 120ms var(--ease);
 }
+/* The reader's: docked under the band, over the top of the scroller (and its scrollbar). */
+.who-dock {
+  flex: none;
+  position: relative;
+  height: 0;
+  z-index: 3;
+}
+.who-dock .who-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  margin: 0;
+}
 .who-strip.on {
   opacity: 1;
   pointer-events: auto;

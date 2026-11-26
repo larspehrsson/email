@@ -5,7 +5,8 @@ import { clock } from '../lib/format';
 
 // Who sent it and when, kept in sight once the message's own header has scrolled away: a
 // one-line strip at the top of the reader, or of a conversation card. It's sticky inside its
-// message (position: sticky), so in a conversation the next card's strip pushes it off as that
+// message (position: sticky; in the reader it's docked over the top of the scroller instead, so
+// it spans the scrollbar too), so in a conversation the next card's strip pushes it off as that
 // card comes up, and scrolling back brings it back. It takes no room (it overlays the top of the
 // message) and shows only while the header is out of sight; a click brings the header back.
 // An experiment (2026-11-25).
@@ -31,13 +32,16 @@ export function WhoStrip(props: {
   date: number;
   /** the header it stands in for: shown while that's scrolled out of sight above */
   head: () => HTMLElement | undefined;
+  /** what scrolls, when the strip isn't inside it (the reader's, so the strip spans the
+   *  scrollbar too); else the conversation it's in */
+  scroller?: () => HTMLElement | undefined;
 }) {
   const [on, setOn] = createSignal(false);
   let el: HTMLDivElement | undefined;
 
   onMount(() => {
     const head = props.head();
-    const scroller = el?.closest<HTMLElement>('.conv-scroll, .reader-scroll');
+    const scroller = props.scroller?.() ?? el?.closest<HTMLElement>('.conv-scroll, .reader-scroll');
     if (!head || !scroller) return;
     const io = new IntersectionObserver(
       ([e]) => {
