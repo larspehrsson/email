@@ -1,4 +1,5 @@
 import { Select } from './Select';
+import { WhoStrip } from './WhoStrip';
 import { AutoHeightFrame } from './AutoHeightFrame';
 import { addressMenu } from './AddressMenu';
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, Show, Switch } from 'solid-js';
@@ -380,6 +381,9 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
   });
   onCleanup(() => clearTimeout(retryTimer));
 
+  /** The sender's block, for the strip that stands in for it once scrolled away. */
+  let fromEl: HTMLDivElement | undefined;
+
   // Header data: prefer full detail, fall back to the list summary for an instant paint.
   const head = createMemo(() => {
     const d = detail();
@@ -474,8 +478,9 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
                 message together, each as tall as it is (an expanded list just makes it longer). */}
             <div class="reader-scroll" tabIndex={-1} ref={scrollEl}>
             <div class="reader-page">
+            <WhoStrip from={h().from} to={h().to} cc={h().cc} bcc={h().bcc} known={h().full} date={h().date} head={() => fromEl} />
             <div class="reader-head">
-              <div class="reader-from">
+              <div class="reader-from" ref={fromEl}>
                 <Avatar name={h().from.name} addr={h().from.addr} size={40} />
                 <div class="reader-from-text">
                   <div class="reader-from-line">
