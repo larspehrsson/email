@@ -1069,6 +1069,13 @@ body.resizing iframe {
   font-weight: 600;
   color: var(--text);
 }
+.who-addr {
+  flex: none;
+  max-width: 30%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-3);
+}
 .who-to {
   flex: 1;
   min-width: 0;
@@ -2402,6 +2409,16 @@ body.resizing iframe {
   display: inline-flex;
   align-items: center;
   gap: 3px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.band-attach:hover {
+  color: var(--text);
+  text-decoration: underline;
 }
 
 /* single-message: sender / recipients / chips just below the line, scrolling with the message */

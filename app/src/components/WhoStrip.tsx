@@ -11,6 +11,7 @@ import { PaperclipIcon } from './Icons';
 // it spans the scrollbar too), so in a conversation the next card's strip pushes it off as that
 // card comes up, and scrolling back brings it back. It takes no room (it overlays the top of the
 // message) and shows only while the header is out of sight; a click brings the header back.
+// The reader's leaves out the date and paperclip: its band shows both all the time.
 // An experiment (2026-11-25).
 
 const DATE = new Intl.DateTimeFormat(undefined, clock({ weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }));
@@ -21,13 +22,14 @@ function everyone(to: Addr[], cc: Addr[], bcc: Addr[]): string {
   return [list('To', to), list('Cc', cc), to.length || cc.length ? '' : list('Bcc', bcc)].filter(Boolean).join('\n') || 'Undisclosed recipients';
 }
 
-/** "John Doe, Ben Carter +3"; their Bcc for one of ours with no To or Cc; else not disclosed. */
-function recipients(to: Addr[], cc: Addr[], bcc: Addr[]): string {
-  const all = [...to, ...cc];
-  const list = all.length ? all : bcc;
+/** "John Doe, Ben Carter +3" (or everyone, when `all`: the strip cuts it off at its width);
+ *  their Bcc for one of ours with no To or Cc; else not disclosed. */
+function recipients(to: Addr[], cc: Addr[], bcc: Addr[], all: boolean): string {
+  const shown = [...to, ...cc];
+  const list = shown.length ? shown : bcc;
   if (!list.length) return 'undisclosed recipients';
   const names = list.map((a) => a.name || a.addr);
-  return names.length > 2 ? `${names.slice(0, 2).join(', ')} +${names.length - 2}` : names.join(', ');
+  return !all && names.length > 2 ? `${names.slice(0, 2).join(', ')} +${names.length - 2}` : names.join(', ');
 }
 
 export function WhoStrip(props: {
@@ -37,7 +39,10 @@ export function WhoStrip(props: {
   bcc?: Addr[];
   /** the recipients are known (the message is loaded) */
   known: boolean;
-  date: number;
+  /** when, with a paperclip and any `actions` at the end; left out where the band above already
+   *  shows the date and attachments (the reader's), and the room goes to the address and every
+   *  recipient instead */
+  date?: number;
   /** the header it stands in for: shown while that's scrolled out of sight above */
   head: () => HTMLElement | undefined;
   /** what scrolls, when the strip isn't inside it (the reader's, so the strip spans the
@@ -85,11 +90,17 @@ export function WhoStrip(props: {
       <span class="who-name" onContextMenu={(e) => addressMenu(e, props.from)}>
         {props.from.name || props.from.addr}
       </span>
-      <Show when={props.known}>
-        <span class="who-to" title={everyone(props.to, props.cc, props.bcc ?? [])}>
-          to {recipients(props.to, props.cc, props.bcc ?? [])}
+      <Show when={props.date === undefined && props.from.name}>
+        <span class="who-addr" onContextMenu={(e) => addressMenu(e, props.from)}>
+          &lt;{props.from.addr}&gt;
         </span>
       </Show>
+      <Show when={props.known}>
+        <span class="who-to" title={everyone(props.to, props.cc, props.bcc ?? [])}>
+          to {recipients(props.to, props.cc, props.bcc ?? [], props.date === undefined)}
+        </span>
+      </Show>
+      <Show when={props.date !== undefined}>
       <span class="who-end">
         <Show when={(props.attachments ?? 0) > 0}>
           <button
@@ -106,12 +117,13 @@ export function WhoStrip(props: {
           </button>
         </Show>
         <span class="who-when">
-          <time class="who-date" dateTime={new Date(props.date * 1000).toISOString()}>
-            {DATE.format(new Date(props.date * 1000))}
+          <time class="who-date" dateTime={new Date(props.date! * 1000).toISOString()}>
+            {DATE.format(new Date(props.date! * 1000))}
           </time>
           {props.actions}
         </span>
       </span>
+      </Show>
     </div>
   );
 }
