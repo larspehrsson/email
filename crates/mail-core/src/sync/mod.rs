@@ -564,13 +564,15 @@ where
     F: Fn(Arc<Shared>) -> BoxFuture<'static, Result<()>>,
 {
     let mut backoff = Duration::from_secs(1);
+    let mut check = shared.check.subscribe();
     loop {
         let started = std::time::Instant::now();
+        let limited;
         match f(shared.clone()).await {
             Ok(()) => return,
             Err(e) => {
                 tracing::warn!(account = shared.account.email, task = name, "sync error: {}", crate::imap::readable(&e));
-                let limited = imap::is_limit_error(&e);
+                limited = imap::is_limit_error(&e);
                 if name == "headers" && !imap::is_auth_error(&e) {
                     let phase = if limited {
                         SyncPhase::Limited
@@ -596,8 +598,20 @@ where
         if started.elapsed() > Duration::from_secs(60) {
             backoff = Duration::from_secs(1);
         }
-        tokio::time::sleep(backoff).await;
-        backoff = (backoff * 2).min(Duration::from_secs(120));
+        // Checking for new mail (the user asked) ends the wait: after an outage it has grown to
+        // two minutes, long after the network is back. Only a check asked for from now on; not
+        // at the connection limit, where retrying sooner only makes it worse.
+        check.mark_unchanged();
+        let checked = tokio::select! {
+            _ = tokio::time::sleep(backoff) => false,
+            r = check.changed(), if !limited => r.is_ok(),
+        };
+        if checked {
+            tracing::info!(account = shared.account.email, task = name, "checking now: reconnecting without waiting");
+            backoff = Duration::from_secs(1);
+        } else {
+            backoff = (backoff * 2).min(Duration::from_secs(120));
+        }
     }
 }
 
