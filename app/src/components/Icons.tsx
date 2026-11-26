@@ -272,6 +272,13 @@ export const ComposeIcon = (p: P) => (
   </Svg>
 );
 
+export const RefreshIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M13.25 8a5.25 5.25 0 1 1-1.6-3.8" />
+    <path d="M13.25 2.5v3h-3" />
+  </Svg>
+);
+
 export const ClockIcon = (p: P) => (
   <Svg {...p}>
     <circle cx="8" cy="8" r="5.8" />

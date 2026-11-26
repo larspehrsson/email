@@ -17,7 +17,7 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow, bail};
 use serde_json::{Value, json};
 
-use crate::oauth::MicrosoftSession;
+use crate::oauth::Session;
 
 const HOST: &str = "graph.microsoft.com";
 /// The app's markers on a message, space-separated (a string extended property).
@@ -181,11 +181,11 @@ pub enum Change<'a> {
 }
 
 pub struct Graph {
-    session: Arc<MicrosoftSession>,
+    session: Arc<Session>,
 }
 
 impl Graph {
-    pub fn new(session: Arc<MicrosoftSession>) -> Graph {
+    pub fn new(session: Arc<Session>) -> Graph {
         Graph { session }
     }
 

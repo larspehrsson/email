@@ -475,6 +475,41 @@ describe('a busy sync', () => {
   });
 });
 
+describe('check for new mail', () => {
+  test('the button by the sync status, F5, and its key in Settings › Keyboard', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const checks = () => page.evaluate(() => window.__checks ?? 0);
+      const btn = page.locator('.sf-check');
+      await btn.click();
+      assert.equal(await checks(), 1);
+      // it spins, and the status says so, until the check is done (even one that finds nothing)
+      assert.equal(await btn.evaluate((e) => e.classList.contains('spinning')), true);
+      await page.waitForFunction(() => document.querySelector('.sf-summary')?.getAttribute('title') === 'Updating…', null, { timeout: 2000 });
+      await page.waitForFunction(() => !document.querySelector('.sf-check.spinning'), null, { timeout: 4000 });
+      await page.waitForFunction(() => document.querySelector('.sf-summary')?.getAttribute('title') === 'All accounts up to date', null, { timeout: 2000 });
+      // F5 checks too (and doesn't reload the page: the count would start over)
+      await page.locator('.folder-layer .row').first().click();
+      await page.keyboard.press('F5');
+      await page.waitForFunction(() => window.__checks === 2, null, { timeout: 2000 });
+      await page.waitForFunction(() => !document.querySelector('.sf-check.spinning'), null, { timeout: 4000 });
+      // and a key that needs no fn on a Mac's keyboard
+      await page.keyboard.press('ControlOrMeta+Shift+N');
+      await page.waitForFunction(() => window.__checks === 3, null, { timeout: 2000 });
+      await page.waitForFunction(() => !document.querySelector('.sf-check.spinning'), null, { timeout: 4000 });
+      // listed among the shortcuts, where it can be changed
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'Keyboard' }).click();
+      const row = page.locator('.st-row', { hasText: 'Check for new mail' });
+      await row.waitFor();
+      assert.match(await row.locator('.st-keys').innerText(), /F5/);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('selected row colours', () => {
   test('a message body (its own frame) counts as the window: clicking in it stays blue, and brings the window back', async () => {
     const { page, errors, close } = await open({ threaded: false, query: '&picture' });
@@ -1054,6 +1089,71 @@ describe('accounts', () => {
       await acct.getByText('On, as Outlook categories').waitFor();
       await page.keyboard.press('Escape');
       await page.waitForFunction(() => document.querySelector('.reader .act-btn[aria-label^="Tag"]')?.getAttribute('aria-label') === 'Tag');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('a Gmail account signs in with Google instead of an app password, asking for the client first', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.settings .st-nav-item', { hasText: 'Accounts' }).click().catch(() => {});
+      await page.getByRole('button', { name: '+ Add account' }).click();
+      await page.fill('input[placeholder="you@example.com"]', 'jane@gmail.com');
+      // No Google client yet: an app password, with the way to sign in with Google instead
+      await page.locator('input[placeholder="App password"]').waitFor();
+      await page.getByRole('button', { name: 'sign in with Google' }).click();
+      const go = page.getByRole('button', { name: 'Continue with Google' });
+      assert.equal(await go.isDisabled(), true, 'needs the client first');
+      await page.locator('input[aria-label="Google client ID"]').fill('123-abc.apps.googleusercontent.com');
+      await page.locator('input[aria-label="Google client secret"]').fill('shh');
+      await page.getByRole('button', { name: 'Save client' }).click();
+      await page.locator('input[aria-label="Google client ID"]').waitFor({ state: 'detached' });
+      await go.click();
+      await page.waitForSelector('.sidebar .account-name:has-text("jane@gmail.com")', { timeout: 15000 });
+      // In Settings: signed in with Google, no password to update
+      await page.keyboard.press('ControlOrMeta+,');
+      const acct = page.locator('.st-acct', { hasText: 'jane@gmail.com' });
+      await acct.click();
+      await acct.locator('.st-signin', { hasText: 'With Google' }).waitFor();
+      assert.equal(await acct.getByRole('button', { name: 'Update password…' }).count(), 0);
+      // An app-password Gmail account switches over from its card (the client is there now)
+      const john = page.locator('.st-acct', { hasText: 'john.doe@example.com' });
+      await john.click();
+      await john.getByRole('button', { name: 'Sign in with Google instead…' }).click();
+      await john.locator('.st-signin', { hasText: 'With Google' }).waitFor({ timeout: 5000 });
+      assert.equal(await john.getByRole('button', { name: 'Update password…' }).count(), 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('with the app\'s own Google client, a Gmail account signs in with Google without asking for one', async () => {
+    const { page, errors, close } = await open({
+      threaded: false,
+      init: () => localStorage.setItem('mock.google', JSON.stringify({ clientId: null, builtIn: true, links: [] })),
+    });
+    try {
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.settings .st-nav-item', { hasText: 'Accounts' }).click().catch(() => {});
+      // An app-password Gmail account switches over at once: no client form
+      const john = page.locator('.st-acct', { hasText: 'john.doe@example.com' });
+      await john.click();
+      await john.getByRole('button', { name: 'Sign in with Google instead…' }).click();
+      await john.locator('.st-signin', { hasText: 'With Google' }).waitFor({ timeout: 5000 });
+      assert.equal(await page.locator('input[aria-label="Google client ID"]').count(), 0, 'no client asked for');
+      // Adding one: Google's page is the way, ready to go
+      await page.getByRole('button', { name: '+ Add account' }).click();
+      await page.fill('input[placeholder="you@example.com"]', 'jane@gmail.com');
+      const go = page.getByRole('button', { name: 'Continue with Google' });
+      await go.waitFor();
+      assert.equal(await page.locator('input[placeholder="App password"]').count(), 0);
+      assert.equal(await go.isDisabled(), false);
+      // No client of the user's to forget
+      assert.equal(await page.locator('.gc-client-note').count(), 0);
       assert.deepEqual(errors, []);
     } finally {
       await close();

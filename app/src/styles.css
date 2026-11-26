@@ -6228,6 +6228,33 @@ body.dragging-message * {
 .gc-client-note {
   margin: 10px 0 0;
 }
+/* An account's sign-in row (AccountSignIn.tsx): the links, and the Google client form under
+   them when it's asked for, with the row's label at the top beside them. */
+.st-signin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+}
+.st-signin .dot-sep {
+  margin: 0 6px;
+}
+.st-signin .gc-client {
+  flex-basis: 100%;
+  margin: 8px 0 4px;
+}
+.st-field:has(.st-signin .gc-client) {
+  align-items: start;
+}
+.st-field:has(.st-signin .gc-client) > .st-field-label {
+  line-height: 32px;
+}
+.st-signin:has(.gc-client) {
+  line-height: 32px;
+}
+.st-signin .gc-client {
+  line-height: normal;
+}
 .ct-where-text {
   color: var(--text-2);
 }
@@ -6845,4 +6872,29 @@ body.dragging-message iframe {
 .reader-from-addr.menu-target {
   background: var(--accent-soft);
   box-shadow: 0 0 0 1px var(--accent-soft);
+}
+
+/* "Check for new mail": a small button over the room kept for it in the sync summary, just
+   before the chevron (footer padding 6 + row padding 10 + chevron 14 + gap 8 from the right) */
+.sf-summary {
+  grid-template-columns: 14px minmax(0, 1fr) 22px 14px;
+}
+.sf-check {
+  position: absolute;
+  right: 38px;
+  bottom: 11px;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--text-3);
+  transition: background 100ms;
+}
+.sf-check:hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+.sf-check.spinning svg {
+  animation: spin 0.8s linear infinite;
 }

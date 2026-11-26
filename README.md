@@ -53,8 +53,11 @@ Accounts › **+ Add account**.
 
 - **Outlook.com, Hotmail and Microsoft 365:** you sign in on Microsoft's own page in your
   browser. Work and school accounts need IMAP allowed by their administrator.
-- **Gmail:** use an [app password](https://myaccount.google.com/apppasswords) (it needs
-  2-Step Verification turned on), not your Google password.
+- **Gmail and Google Workspace:** use an [app password](https://myaccount.google.com/apppasswords)
+  (it needs 2-Step Verification turned on), not your Google password. Or sign in on Google's
+  own page in your browser; Google doesn't list the app as verified yet, so it warns you first
+  (**Advanced › Go to …**). A build of your own needs an OAuth client of your own
+  ([setup](docs/GOOGLE.md)).
 - **Any other provider:** your address and password. The servers are found for you; if not,
   enter them under **Advanced**.
 
@@ -111,7 +114,7 @@ You see it first and choose whether to use it.
 
 **An address book** (Ctrl/⌘+Shift+B): the people you keep, with their addresses, phone
 numbers, company and notes, synced both ways with Google Contacts if you like
-([setup](docs/GOOGLE_CONTACTS.md)). With Google Contacts, the sidebar (switched between Mail
+([setup](docs/GOOGLE.md)). With Google Contacts, the sidebar (switched between Mail
 and Contacts at its top) shows each account's contacts and its groups (Starred, Family…), and
 every contact's groups are on its row. Add someone from the sender panel in one click; they
 come first when you type an address.

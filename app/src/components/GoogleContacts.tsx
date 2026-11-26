@@ -1,11 +1,12 @@
 import { createSignal, Show } from 'solid-js';
 import { api, errorMessage, type Account } from '../api';
 import { reloadCards } from '../lib/addressBook';
-import { googleLink, googleStatus, reloadGoogleStatus, syncGoogle } from '../lib/googleContacts';
+import { googleLink, googleReady, googleStatus, reloadGoogleStatus, syncGoogle } from '../lib/googleContacts';
 import { confirmDialog } from './Actions';
 
 // Settings › Accounts › Google Contacts: connect a Gmail (or Workspace) account's contacts to
-// the address book. Needs an OAuth client of the user's own the first time (docs/GOOGLE_CONTACTS.md).
+// the address book. Needs an OAuth client of the user's own the first time (docs/GOOGLE.md), the
+// same one that signs in to Gmail (`GoogleClientForm`, also in the add-account form).
 
 const ago = (t: number) => {
   const s = Math.max(0, Date.now() / 1000 - t);
@@ -15,12 +16,15 @@ const ago = (t: number) => {
   return new Date(t * 1000).toLocaleDateString();
 };
 
-function ClientForm(props: { onDone: () => void; onCancel: () => void }) {
+/** The user's own Google OAuth client, asked for the first time it's needed. Not a <form>: it
+ *  also sits inside the add-account form (Enter in a field saves it). */
+export function GoogleClientForm(props: { onDone: () => void; onCancel?: () => void }) {
   const [id, setId] = createSignal('');
   const [secret, setSecret] = createSignal('');
   const [msg, setMsg] = createSignal<string | null>(null);
   const save = async (e: Event) => {
     e.preventDefault();
+    if (!id().trim()) return;
     try {
       await api.setGoogleClient(id().trim(), secret().trim());
       await reloadGoogleStatus();
@@ -30,28 +34,30 @@ function ClientForm(props: { onDone: () => void; onCancel: () => void }) {
     }
   };
   return (
-    <form class="gc-client" onSubmit={save}>
+    <div class="gc-client" onKeyDown={(e) => e.key === 'Enter' && e.target instanceof HTMLInputElement && void save(e)}>
       <p class="st-muted">
-        Google lets an app read your contacts only through an OAuth client of your own (free, made once in Google Cloud
-        Console: a <b>Desktop app</b> client with the People API on). One client serves all your Google accounts.{' '}
-        <a href="https://console.cloud.google.com/auth/clients" target="_blank" rel="noreferrer">
-          Open Google Cloud Console
+        For now, Google lets this app sign in to your mail or contacts only through an OAuth client of your own (free,
+        made once in Google Cloud Console: a <b>Desktop app</b> client). One client serves all your Google accounts.{' '}
+        <a href="https://github.com/rickhall/email/blob/main/docs/GOOGLE.md" target="_blank" rel="noreferrer">
+          How to make one
         </a>
       </p>
       <input class="st-input" type="text" placeholder="Client ID (…apps.googleusercontent.com)" aria-label="Google client ID" spellcheck={false} value={id()} onInput={(e) => setId(e.currentTarget.value)} />
       <input class="st-input" type="password" placeholder="Client secret" aria-label="Google client secret" autocomplete="off" value={secret()} onInput={(e) => setSecret(e.currentTarget.value)} />
       <span class="gc-actions">
-        <button class="btn primary" type="submit" disabled={!id().trim()}>
-          Save
+        <button class="btn primary" type="button" onClick={(e) => void save(e)} disabled={!id().trim()}>
+          Save client
         </button>
-        <button class="btn secondary" type="button" onClick={() => props.onCancel()}>
-          Cancel
-        </button>
+        <Show when={props.onCancel}>
+          <button class="btn secondary" type="button" onClick={() => props.onCancel?.()}>
+            Cancel
+          </button>
+        </Show>
       </span>
       <Show when={msg()}>
         <span class="st-status error">{msg()}</span>
       </Show>
-    </form>
+    </div>
   );
 }
 
@@ -64,7 +70,7 @@ export function GoogleContactsField(props: { account: Account }) {
   const link = () => googleLink(props.account.id);
 
   async function connect() {
-    if (!googleStatus()?.clientId) {
+    if (!googleReady()) {
       setAskClient(true);
       return;
     }
@@ -108,7 +114,7 @@ export function GoogleContactsField(props: { account: Account }) {
           <Show
             when={!askClient()}
             fallback={
-              <ClientForm
+              <GoogleClientForm
                 onDone={() => {
                   setAskClient(false);
                   void connect();
@@ -178,10 +184,19 @@ export function GoogleContactsField(props: { account: Account }) {
   );
 }
 
-/** Google contacts' client, to forget it (Settings › Accounts, under the accounts). */
+/** The user's own Google client, to forget it (Settings › Accounts, under the accounts). */
 export function GoogleClientNote() {
+  if (!googleStatus()) void reloadGoogleStatus();
   const forget = async () => {
-    if (!(await confirmDialog('Forget the Google OAuth client? Connected accounts stop syncing until it is added again.', 'Forget'))) return;
+    if (
+      !(await confirmDialog(
+        `Forget your Google OAuth client? Accounts and contacts signed in with it keep working; new sign-ins use ${
+          googleStatus()?.builtIn ? "the app's own client" : 'a client you add again'
+        }.`,
+        'Forget',
+      ))
+    )
+      return;
     await api.setGoogleClient(null, null);
     await reloadGoogleStatus();
   };
@@ -189,7 +204,7 @@ export function GoogleClientNote() {
     <Show when={googleStatus()?.clientId}>
       {(id) => (
         <p class="st-muted gc-client-note">
-          Google Contacts sign in with your OAuth client {id().split('-')[0]}…{' '}
+          Google sign-in uses your OAuth client {id().split('-')[0]}…{googleStatus()?.builtIn ? " instead of the app's" : ''}{' '}
           <button class="link-btn" onClick={() => void forget()}>
             Forget it
           </button>

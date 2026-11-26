@@ -66,6 +66,9 @@ pub enum AuthKind {
     Password,
     /// Microsoft OAuth: the keychain keeps the refresh token.
     Microsoft,
+    /// Google OAuth: the keychain keeps the refresh token, and the client it was issued to
+    /// (`oauth::google_client_key`).
+    Google,
 }
 
 impl AuthKind {
@@ -73,11 +76,13 @@ impl AuthKind {
         match self {
             AuthKind::Password => "password",
             AuthKind::Microsoft => "microsoft",
+            AuthKind::Google => "google",
         }
     }
     pub fn parse(s: &str) -> AuthKind {
         match s {
             "microsoft" => AuthKind::Microsoft,
+            "google" => AuthKind::Google,
             _ => AuthKind::Password,
         }
     }

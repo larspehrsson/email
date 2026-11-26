@@ -152,8 +152,8 @@ struct Shared {
     store: Arc<Store>,
     account: Account,
     server: ServerConfig,
-    /// A Microsoft (OAuth) account's access tokens; None: `server` has the password.
-    microsoft: Option<Arc<crate::oauth::MicrosoftSession>>,
+    /// An account signed in with Microsoft or Google: its access tokens; None: `server` has the password.
+    oauth: Option<Arc<crate::oauth::Session>>,
     /// A Microsoft account's tags and snooze, through Graph (`crate::graph`), when allowed.
     graph: Option<Arc<crate::graph::Graph>>,
     /// Wakes the Graph task (our own changes went out).
@@ -183,6 +183,12 @@ struct Shared {
     dirty: Mutex<HashSet<i64>>,
     /// Wakes the headers task (dirty folders, count sweep requests).
     refresh: Notify,
+    /// The user asked to check for new mail now: the headers task starts a fresh pass over
+    /// every folder, and the IDLE tasks reconnect (one that died quietly is caught here).
+    check: watch::Sender<u64>,
+    /// The last check each task has answered: [headers, idle-inbox, idle-focus]. An IDLE task
+    /// watching nothing (or on a server without IDLE) has nothing to answer: u64::MAX.
+    checked: watch::Sender<[u64; 3]>,
     /// Wakes the interactive task: an action was queued or cancelled.
     outbox: Notify,
     /// Wakes the send task: a message was queued or taken back.
@@ -254,7 +260,7 @@ impl Shared {
     /// What to sign in with now: the password, or a current access token (renewed when it's
     /// about to expire).
     async fn credentials(&self) -> Result<imap::Credentials> {
-        match &self.microsoft {
+        match &self.oauth {
             Some(session) => Ok(imap::Credentials::OAuth2 { access_token: session.access_token().await? }),
             None => Ok(self.server.credentials.clone()),
         }
@@ -288,7 +294,7 @@ impl Shared {
                     // A turned-down access token may just have expired (or been revoked by a
                     // password change elsewhere): renew it and try once more before asking
                     // for a new sign-in.
-                    if let (Some(session), imap::Credentials::OAuth2 { access_token }) = (&self.microsoft, &cfg.credentials) {
+                    if let (Some(session), imap::Credentials::OAuth2 { access_token }) = (&self.oauth, &cfg.credentials) {
                         if imap::is_auth_error(&e) && !renewed {
                             tracing::info!(account = self.account.email, "access token turned down; renewing: {e:#}");
                             session.forget(access_token).await;
@@ -346,7 +352,7 @@ impl AccountSync {
         store: Arc<Store>,
         account: Account,
         server: ServerConfig,
-        microsoft: Option<Arc<crate::oauth::MicrosoftSession>>,
+        oauth: Option<Arc<crate::oauth::Session>>,
         graph: Option<Arc<crate::graph::Graph>>,
         strategy: Arc<dyn HeaderSync>,
         events: broadcast::Sender<CoreEvent>,
@@ -356,7 +362,7 @@ impl AccountSync {
         let (urgent_tx, urgent_rx) = mpsc::unbounded_channel();
         let shared = Arc::new(Shared {
             store,
-            microsoft,
+            oauth,
             graph,
             graph_refresh: Notify::new(),
             header: Mutex::new(initial_status(account.id)),
@@ -374,6 +380,8 @@ impl AccountSync {
             progress_dirty: std::sync::atomic::AtomicBool::new(true),
             dirty: Mutex::new(HashSet::new()),
             refresh: Notify::new(),
+            check: watch::Sender::new(0),
+            checked: watch::Sender::new([0, u64::MAX, u64::MAX]),
             outbox: Notify::new(),
             sender: Notify::new(),
             counts_due: std::sync::atomic::AtomicBool::new(true),
@@ -412,6 +420,30 @@ impl AccountSync {
     /// Fetch this message's body ahead of everything else.
     pub fn request_body(&self, message_id: i64) {
         let _ = self.urgent_tx.send(Job::Body(message_id));
+    }
+
+    /// Check for new mail now (the user asked): the Inbox and the folder on screen first, then
+    /// every folder, on fresh IDLE connections; a Microsoft account's tags and snooze too.
+    /// Resolves once every task has answered it (or after `CHECK_WAIT`).
+    pub fn check_now(&self) -> impl std::future::Future<Output = ()> + Send + 'static {
+        let sh = &self.shared;
+        if let Ok(folders) = sh.store.folders(sh.account.id) {
+            let mut dirty = sh.dirty.lock().unwrap();
+            dirty.extend(folders.iter().filter(|f| f.role == Some(FolderRole::Inbox)).map(|f| f.id));
+            dirty.extend(*sh.focus.borrow());
+        }
+        sh.counts_due.store(true, std::sync::atomic::Ordering::SeqCst);
+        let mut asked = 0;
+        sh.check.send_modify(|n| {
+            *n += 1;
+            asked = *n;
+        });
+        sh.refresh.notify_one();
+        sh.graph_refresh.notify_one();
+        let mut answered = sh.checked.subscribe();
+        async move {
+            let _ = tokio::time::timeout(CHECK_WAIT, answered.wait_for(|done| done.iter().all(|&n| n >= asked))).await;
+        }
     }
 
     /// A user action was queued: send it when due.
@@ -514,6 +546,17 @@ macro_rules! guarded {
 /// it's dropped and reconnected. Measured as inactivity, not total time, so a big chunk on a
 /// slow link is never cut off while it's still arriving.
 const STALL_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long a check for new mail is waited for (shown as "Updating…") at most.
+const CHECK_WAIT: Duration = Duration::from_secs(20);
+
+/// Mark check `n` answered by task `slot` (see `Shared::checked`).
+fn answered(shared: &Shared, slot: usize, n: u64) {
+    shared.checked.send_if_modified(|done| {
+        let changed = done[slot] != n;
+        done[slot] = n;
+        changed
+    });
+}
 
 /// Run a connection-owning task forever, reconnecting with exponential backoff.
 async fn supervise<F>(name: &'static str, shared: Arc<Shared>, f: F)
@@ -521,13 +564,15 @@ where
     F: Fn(Arc<Shared>) -> BoxFuture<'static, Result<()>>,
 {
     let mut backoff = Duration::from_secs(1);
+    let mut check = shared.check.subscribe();
     loop {
         let started = std::time::Instant::now();
+        let limited;
         match f(shared.clone()).await {
             Ok(()) => return,
             Err(e) => {
                 tracing::warn!(account = shared.account.email, task = name, "sync error: {}", crate::imap::readable(&e));
-                let limited = imap::is_limit_error(&e);
+                limited = imap::is_limit_error(&e);
                 if name == "headers" && !imap::is_auth_error(&e) {
                     let phase = if limited {
                         SyncPhase::Limited
@@ -553,8 +598,20 @@ where
         if started.elapsed() > Duration::from_secs(60) {
             backoff = Duration::from_secs(1);
         }
-        tokio::time::sleep(backoff).await;
-        backoff = (backoff * 2).min(Duration::from_secs(120));
+        // Checking for new mail (the user asked) ends the wait: after an outage it has grown to
+        // two minutes, long after the network is back. Only a check asked for from now on; not
+        // at the connection limit, where retrying sooner only makes it worse.
+        check.mark_unchanged();
+        let checked = tokio::select! {
+            _ = tokio::time::sleep(backoff) => false,
+            r = check.changed(), if !limited => r.is_ok(),
+        };
+        if checked {
+            tracing::info!(account = shared.account.email, task = name, "checking now: reconnecting without waiting");
+            backoff = Duration::from_secs(1);
+        } else {
+            backoff = (backoff * 2).min(Duration::from_secs(120));
+        }
     }
 }
 
@@ -564,14 +621,27 @@ async fn header_task(shared: Arc<Shared>) -> Result<()> {
     let mut focus = shared.focus.clone();
     let account = &shared.account;
     let mut first_step_done = false;
-    let mut first_pass = true;
+    // The first pass after connecting, and one the user asked for (checking for new mail).
+    let mut reported_pass = true;
+    // Checking for new mail starts over as at startup: a new connection (the old one may have
+    // died quietly), then a reported pass over every folder.
+    let mut reconnect = false;
     let mut last_full_sweep: Option<tokio::time::Instant> = None;
     let mut woke = imap::wake_watch();
+    let mut check = shared.check.subscribe();
 
     loop {
+        // A check asked for before this pass is answered by it.
+        let pass_check = *check.borrow_and_update();
+        if std::mem::take(&mut reconnect) {
+            shared.set_status(SyncPhase::Connecting, None, 0, 0, None);
+            // the old connection is dropped (closed) as this one replaces it
+            conn = shared.connect().await?;
+        }
         // Folder structure first, every pass, so new/renamed folders appear promptly. Only the
-        // first pass after connecting is reported: routine re-checks aren't news.
-        if first_pass {
+        // first pass after connecting, or a check for new mail, is reported (each folder as it's
+        // checked): routine re-checks aren't news.
+        if reported_pass {
             shared.set_status(SyncPhase::Folders, None, 0, 0, None);
         }
         let listed = guarded!(conn, "listing folders", conn.list_folders())?;
@@ -587,7 +657,7 @@ async fn header_task(shared: Arc<Shared>) -> Result<()> {
         if last_full_sweep.is_none_or(|t| t.elapsed() >= FULL_SWEEP_INTERVAL) {
             shared.counts_due.store(true, std::sync::atomic::Ordering::SeqCst);
         }
-        first_pass = false;
+        reported_pass = false;
 
         loop {
             let epoch = shared.store.local_epoch();
@@ -644,6 +714,7 @@ async fn header_task(shared: Arc<Shared>) -> Result<()> {
                 }
                 // Everything is in sync: wait for the user to switch folders or the refresh timer.
                 shared.set_status(SyncPhase::Idle, None, 0, 0, None);
+                answered(&shared, 0, pass_check);
                 tokio::select! {
                     // The connection didn't survive the sleep, and the refresh timer's clock
                     // stopped during it: start over now (a fresh pass also recounts everything).
@@ -655,6 +726,12 @@ async fn header_task(shared: Arc<Shared>) -> Result<()> {
                             started.remove(&f);
                         }
                         continue;
+                    }
+                    // Checked now: start over as at startup (see `reconnect`).
+                    _ = check.changed() => {
+                        reported_pass = true;
+                        reconnect = true;
+                        break;
                     }
                     _ = shared.refresh.notified() => continue,
                     _ = tokio::time::sleep_until(refresh) => break,
@@ -940,6 +1017,7 @@ async fn idle_task(shared: Arc<Shared>, follow_focus: bool) -> Result<()> {
     // The (folder, server count, server change counter) last caught up on: a difference that a
     // catch-up didn't settle isn't retried until the server's side changes.
     let mut caught_up: Option<(i64, u32, Option<u64>)> = None;
+    let mut check = shared.check.subscribe();
     loop {
         let inbox = shared
             .store
@@ -952,7 +1030,9 @@ async fn idle_task(shared: Arc<Shared>, follow_focus: bool) -> Result<()> {
         } else {
             inbox.as_ref().map(|i| i.id)
         };
+        let slot = if follow_focus { 2 } else { 1 };
         let Some(folder_id) = target else {
+            answered(&shared, slot, u64::MAX);
             if let Some(c) = conn.take() {
                 c.logout().await;
             }
@@ -970,6 +1050,7 @@ async fn idle_task(shared: Arc<Shared>, follow_focus: bool) -> Result<()> {
         };
         if !c.caps.idle {
             tracing::info!("server has no IDLE; relying on polling");
+            answered(&shared, slot, u64::MAX);
             c.logout().await;
             std::future::pending::<()>().await;
             unreachable!();
@@ -998,6 +1079,11 @@ async fn idle_task(shared: Arc<Shared>, follow_focus: bool) -> Result<()> {
         let imap::Connection { session, caps, activity, .. } = c;
         let mut handle = session.idle();
         imap::stall_timeout(&activity, STALL_TIMEOUT, "starting IDLE", handle.init()).await??;
+        // Watching, caught up: a check asked for until now is answered (one asked meanwhile is
+        // taken up below).
+        if !check.has_changed().unwrap_or(false) {
+            answered(&shared, slot, *check.borrow());
+        }
         let mut woke = imap::wake_watch();
         let (wait, stop) = handle.wait_with_timeout(Duration::from_secs(25 * 60));
         let pushed = tokio::select! {
@@ -1005,6 +1091,15 @@ async fn idle_task(shared: Arc<Shared>, follow_focus: bool) -> Result<()> {
             r = focus.changed(), if follow_focus => { r?; false }
             // IDLE is silent by design, so it has no stall timeout: after sleep, start over.
             _ = woke.changed() => return Err(imap::disconnected(format!("woke from sleep while watching {raw}; reconnecting"))),
+            // Checked now: IDLE may have died quietly (a network change); a new connection,
+            // which catches up on the folder before watching it again.
+            _ = check.changed() => {
+                drop(stop);
+                drop(handle);
+                caught_up = None;
+                tracing::info!(folder = raw, "checking now: watching on a new connection");
+                continue;
+            }
         };
         drop(stop);
         let session = imap::stall_timeout(&activity, STALL_TIMEOUT, "ending IDLE", handle.done()).await??;

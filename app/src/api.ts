@@ -110,6 +110,12 @@ export const api = {
     call('add_microsoft_account', { loginHint, displayName }),
   /** Sign a Microsoft account in again (its sign-in expired or was revoked). */
   microsoftSignInAgain: (accountId: number): Promise<void> => call('microsoft_sign_in_again', { accountId }),
+  /** Add a Gmail or Workspace account by signing in with Google in the browser (the Google
+   *  client in Settings). */
+  addGoogleAccount: (loginHint: string | null, displayName: string | null): Promise<Account> =>
+    call('add_google_account', { loginHint, displayName }),
+  /** Sign a Gmail account in with Google: again, or instead of its app password. */
+  googleSignIn: (accountId: number): Promise<void> => call('google_sign_in', { accountId }),
   /** Stop waiting for a browser sign-in (the pending call fails with "Sign-in cancelled."). */
   cancelSignIn: (): Promise<void> => call('cancel_sign_in', undefined),
   addAccount: (a: AddAccountArgs): Promise<Account> =>
@@ -191,6 +197,8 @@ export const api = {
     includeTrash: boolean,
   ): Promise<ThreadView> => call('get_thread', { threadId, folderId, scope, includeTrash }),
   getSyncStatus: (): Promise<SyncStatus[]> => call('get_sync_status', undefined),
+  /** Check every account for new mail now (the refresh button, F5). */
+  checkNow: (): Promise<void> => call('check_now', undefined),
   /** Is message `id` still in `folderId` (null = still exists at all)? */
   /** Row index of a message / conversation in the folder's list (null = not in it). */
   indexOf: (folderId: number, id: number, threaded: boolean, sort: ListSort = 'received', filter?: ListFilter): Promise<number | null> =>

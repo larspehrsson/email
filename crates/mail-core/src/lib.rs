@@ -214,16 +214,33 @@ pub const SEND_DELAY_MS: i64 = 10_000;
 
 /// Keychain names: the user's Google OAuth client, and each account's Google sign-in.
 const GOOGLE_CLIENT_KEY: &str = "#google:client";
+
+/// A client kept with a sign-in, as it is now: the app's own is this build's (its secret may
+/// have been replaced since), any other as kept.
+fn current_google_client(kept: oauth::GoogleClient) -> oauth::GoogleClient {
+    match oauth::built_in_google_client() {
+        Some(b) if b.id == kept.id => b,
+        _ => kept,
+    }
+}
 fn google_key(account_id: i64) -> String {
     format!("#google-contacts:{account_id}")
+}
+/// The client an account's Google contacts were connected with (its refresh token is that
+/// client's); missing for those connected before it was kept: Settings' client, then.
+fn google_contacts_client_key(account_id: i64) -> String {
+    format!("#google-contacts-client:{account_id}")
 }
 
 /// Google Contacts as Settings shows it.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GoogleStatus {
-    /// The OAuth client's ID (None: not set yet).
+    /// The user's own OAuth client's ID (None: not set).
     pub client_id: Option<String>,
+    /// Whether this build has the app's own client (`oauth::built_in_google_client`): Google
+    /// sign-in works without one of the user's.
+    pub built_in: bool,
     pub links: Vec<gcontacts::GoogleLink>,
 }
 
@@ -309,10 +326,10 @@ impl Core {
         self.events.subscribe()
     }
 
-    /// Where and how an account signs in: its password, or (Microsoft) a session that supplies
-    /// current access tokens.
+    /// Where and how an account signs in: its password, or (Microsoft, Google) a session that
+    /// supplies current access tokens.
     /// With Graph allowed (`Account::graph`), also a Graph client for its tags and snooze.
-    fn server_config(&self, account: &Account) -> Result<(ServerConfig, Option<Arc<oauth::MicrosoftSession>>, Option<Arc<graph::Graph>>)> {
+    fn server_config(&self, account: &Account) -> Result<(ServerConfig, Option<Arc<oauth::Session>>, Option<Arc<graph::Graph>>)> {
         let (credentials, session, graph) = match account.auth {
             AuthKind::Password => (Credentials::Password(self.secrets.get(&account.email)?), None, None),
             AuthKind::Microsoft => {
@@ -321,9 +338,15 @@ impl Core {
                 let store: Arc<dyn oauth::TokenStore> = self.secrets.clone();
                 let graph = account
                     .graph
-                    .then(|| Arc::new(graph::Graph::new(Arc::new(oauth::MicrosoftSession::graph(&account.email, store.clone())))));
+                    .then(|| Arc::new(graph::Graph::new(Arc::new(oauth::Session::graph(&account.email, store.clone())))));
                 // Placeholder until the session supplies a token for each connection.
-                (Credentials::OAuth2 { access_token: String::new() }, Some(Arc::new(oauth::MicrosoftSession::new(&account.email, store))), graph)
+                (Credentials::OAuth2 { access_token: String::new() }, Some(Arc::new(oauth::Session::new(&account.email, store))), graph)
+            }
+            AuthKind::Google => {
+                self.secrets.get(&account.email)?;
+                let client = self.account_google_client(&account.email)?;
+                let store: Arc<dyn oauth::TokenStore> = self.secrets.clone();
+                (Credentials::OAuth2 { access_token: String::new() }, Some(Arc::new(oauth::Session::google(&account.email, client, store))), None)
             }
         };
         Ok((ServerConfig { host: account.imap_host.clone(), port: account.imap_port, user: account.email.clone(), credentials }, session, graph))
@@ -531,7 +554,7 @@ impl Core {
             .map_err(|e| anyhow!("Signed in, but Microsoft Graph isn't available for this account: {e:#}"))?;
         self.secrets.set(&oauth::graph_key(&account.email), graph_token.refresh_token.as_deref().unwrap_or(&refresh))?;
         let store: Arc<dyn oauth::TokenStore> = self.secrets.clone();
-        let check = graph::Graph::new(Arc::new(oauth::MicrosoftSession::graph(&account.email, store)));
+        let check = graph::Graph::new(Arc::new(oauth::Session::graph(&account.email, store)));
         if let Err(e) = check.check().await {
             bail!("Signed in, but Microsoft Graph isn't available for this account: {e:#}");
         }
@@ -561,6 +584,102 @@ impl Core {
     /// Stop waiting for a browser sign-in.
     pub fn cancel_sign_in(&self) {
         self.sign_in_cancel.notify_waiters();
+    }
+
+    /// Add a Gmail or Google Workspace account by signing in in the browser, with the Google
+    /// client in Settings (the user's own), else the app's. Like `add_microsoft_account`. An account
+    /// already here with an app password switches to the sign-in.
+    pub async fn add_google_account(&self, login_hint: Option<String>, display_name: Option<String>, open: impl FnOnce(String)) -> Result<Account> {
+        let client = self.google_client().ok_or_else(|| anyhow!("Add your Google client ID and secret first."))?;
+        let (email, refresh) = self.google_mail_sign_in(&client, login_hint.as_deref(), open).await?;
+        let display_name = display_name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| email.clone());
+        let account = self.store.insert_account(&email, &display_name, Provider::Gmail, "imap.gmail.com", 993)?;
+        self.keep_google_sign_in(account.id, &email, &client, &refresh)?;
+        let account = self.account(account.id)?;
+        let _ = self.events.send(CoreEvent::FoldersChanged { account_id: account.id });
+        Ok(account)
+    }
+
+    /// Sign a Gmail account in with Google (as the same address), and restart its sync: one
+    /// signed in with Google whose sign-in expired or was revoked, or one on an app password
+    /// switching to the sign-in (the sign-in takes the password's place in the keychain).
+    pub async fn google_sign_in(&self, account_id: i64, open: impl FnOnce(String)) -> Result<()> {
+        let account = self.account(account_id)?;
+        if account.provider != Provider::Gmail {
+            bail!("Only Gmail and Google Workspace accounts sign in with Google.");
+        }
+        // An account signed in already keeps its own client; else (or if that's gone) Settings',
+        // or the app's.
+        let client = match account.auth {
+            AuthKind::Google => self.account_google_client(&account.email).ok().or_else(|| self.google_client()),
+            _ => self.google_client(),
+        }
+        .ok_or_else(|| anyhow!("Add your Google client ID and secret first."))?;
+        let (email, refresh) = self.google_mail_sign_in(&client, Some(&account.email), open).await?;
+        if !email.eq_ignore_ascii_case(&account.email) {
+            bail!("You signed in as {email}, not {}. Sign in with that account instead.", account.email);
+        }
+        self.keep_google_sign_in(account_id, &account.email, &client, &refresh)?;
+        tracing::info!(account = account.email, "signed in with Google");
+        Ok(())
+    }
+
+    /// Save a Google sign-in for an account (its refresh token where a password would be, and
+    /// the client it belongs to), make it the account's way in, and start its sync over.
+    fn keep_google_sign_in(&self, account_id: i64, email: &str, client: &oauth::GoogleClient, refresh: &str) -> Result<()> {
+        self.secrets.set(&oauth::google_client_key(email), &serde_json::to_string(client)?)?;
+        self.secrets.set(email, refresh)?;
+        self.store.set_account_auth(account_id, AuthKind::Google)?;
+        self.restart_account(account_id)
+    }
+
+    /// The client an account signed in to Google with (`oauth::google_client_key`).
+    fn account_google_client(&self, email: &str) -> Result<oauth::GoogleClient> {
+        let json = self.secrets.get(&oauth::google_client_key(email))?;
+        Ok(current_google_client(serde_json::from_str(&json)?))
+    }
+
+    /// The browser sign-in for Google mail: (address, refresh token), checked by signing in to
+    /// Gmail's IMAP server with it.
+    async fn google_mail_sign_in(&self, client: &oauth::GoogleClient, login_hint: Option<&str>, open: impl FnOnce(String)) -> Result<(String, String)> {
+        let redirect = oauth::Redirect::listen().await?;
+        let uri = oauth::google_redirect(&redirect.uri);
+        let pkce = oauth::Pkce::new();
+        let hint = login_hint.map(str::trim).filter(|h| !h.is_empty());
+        open(oauth::google_authorize_url(client, oauth::GOOGLE_MAIL_SCOPES, &uri, redirect.state(), &pkce.challenge, hint));
+        let code = tokio::select! {
+            code = redirect.code() => code?,
+            _ = self.sign_in_cancel.notified() => bail!("Sign-in cancelled."),
+        };
+        let tokens = oauth::google_exchange(client, &code, &pkce.verifier, &uri).await?;
+        if !oauth::grants_google_mail(&tokens) {
+            bail!(
+                "Google didn't give access to your mail: on Google's page, tick \"Read, compose, send, and \
+                 permanently delete all your email from Gmail\", and try again."
+            );
+        }
+        let email = tokens
+            .id_token
+            .as_deref()
+            .and_then(oauth::email_from_id_token)
+            .ok_or_else(|| anyhow!("Google didn't say which address you signed in with."))?;
+        let refresh = tokens.refresh_token.clone().ok_or_else(|| anyhow!("Google didn't allow staying signed in (no refresh token)."))?;
+        let cfg = ServerConfig {
+            host: "imap.gmail.com".into(),
+            port: 993,
+            user: email.clone(),
+            credentials: Credentials::OAuth2 { access_token: tokens.access_token },
+        };
+        match imap::connect(&cfg).await {
+            Ok(conn) => conn.logout().await,
+            Err(e) if imap::is_auth_error(&e) => bail!(
+                "You're signed in, but Gmail's mail server refused this account ({e:#}). On Google's \
+                 page, allow access to your mail; for a Workspace account, your administrator may \
+                 need to allow IMAP or this app."
+            ),
+            Err(e) => return Err(e),
+        }
+        Ok((email, refresh))
     }
 
     /// The browser sign-in: (address, refresh token), checked by signing in to IMAP with it.
@@ -682,11 +801,13 @@ impl Core {
         if let Some(a) = self.store.accounts()?.into_iter().find(|a| a.id == account_id) {
             self.secrets.delete(&a.email);
             self.secrets.delete(&oauth::graph_key(&a.email));
+            self.secrets.delete(&oauth::google_client_key(&a.email));
         }
         self.needs_password.lock().unwrap().remove(&account_id);
         // Its Google contacts here go with it (nothing changes in Google).
         self.store.remove_google_link(account_id)?;
         self.secrets.delete(&google_key(account_id));
+        self.secrets.delete(&google_contacts_client_key(account_id));
         self.store.delete_account(account_id)?;
         tracing::info!(account_id, "account removed");
         let store = self.store.clone();
@@ -714,6 +835,13 @@ impl Core {
             s.focus(folder_id);
         }
         Ok(())
+    }
+
+    /// Check every account for new mail now (the user asked: a refresh button, F5). Returns
+    /// once every account has (or after a while: see `sync::CHECK_WAIT`).
+    pub async fn check_now(&self) {
+        let checks: Vec<_> = self.running.lock().unwrap().values().map(|s| s.check_now()).collect();
+        futures::future::join_all(checks).await;
     }
 
     pub fn list_messages(&self, folder_id: i64, offset: u32, limit: u32) -> Result<MessagePage> {
@@ -1411,7 +1539,12 @@ impl Core {
 
     // ---- Google Contacts ---------------------------------------------------------------------
 
+    /// The client a new Google sign-in uses: the user's own (Settings), else the app's.
     fn google_client(&self) -> Option<oauth::GoogleClient> {
+        self.own_google_client().or_else(oauth::built_in_google_client)
+    }
+
+    fn own_google_client(&self) -> Option<oauth::GoogleClient> {
         self.secrets.get(GOOGLE_CLIENT_KEY).ok().and_then(|j| serde_json::from_str(&j).ok())
     }
 
@@ -1434,7 +1567,11 @@ impl Core {
 
     /// Whether the client is set, and the accounts linked to their Google contacts.
     pub fn google_status(&self) -> Result<GoogleStatus> {
-        Ok(GoogleStatus { client_id: self.google_client().map(|c| c.id), links: self.store.google_links()? })
+        Ok(GoogleStatus {
+            client_id: self.own_google_client().map(|c| c.id),
+            built_in: oauth::built_in_google_client().is_some(),
+            links: self.store.google_links()?,
+        })
     }
 
     /// Connect an account to its Google contacts: a browser sign-in (`open` shows the page),
@@ -1445,7 +1582,7 @@ impl Core {
         let redirect = oauth::Redirect::listen().await?;
         let uri = oauth::google_redirect(&redirect.uri);
         let pkce = oauth::Pkce::new();
-        open(oauth::google_authorize_url(&client, &uri, redirect.state(), &pkce.challenge, Some(&account.email)));
+        open(oauth::google_authorize_url(&client, oauth::GOOGLE_CONTACTS_SCOPES, &uri, redirect.state(), &pkce.challenge, Some(&account.email)));
         let code = tokio::select! {
             code = redirect.code() => code?,
             _ = self.sign_in_cancel.notified() => bail!("Sign-in cancelled."),
@@ -1454,6 +1591,7 @@ impl Core {
         let refresh = tokens.refresh_token.clone().ok_or_else(|| anyhow!("Google didn't allow staying signed in (no refresh token)."))?;
         let email = tokens.id_token.as_deref().and_then(oauth::email_from_id_token).unwrap_or_else(|| account.email.clone());
         self.secrets.set(&google_key(account_id), &refresh)?;
+        self.secrets.set(&google_contacts_client_key(account_id), &serde_json::to_string(&client)?)?;
         self.store.set_google_link(account_id, &email)?;
         Ok(email)
     }
@@ -1462,6 +1600,7 @@ impl Core {
     pub fn google_disconnect(&self, account_id: i64) -> Result<()> {
         self.store.remove_google_link(account_id)?;
         self.secrets.delete(&google_key(account_id));
+        self.secrets.delete(&google_contacts_client_key(account_id));
         Ok(())
     }
 
@@ -1516,12 +1655,26 @@ impl Core {
         Ok(None)
     }
 
+    /// The client an account's Google contacts were connected with. One connected before that
+    /// was kept used Settings' client: kept now, so forgetting that client later doesn't stop it.
+    fn google_contacts_client(&self, account_id: i64) -> Option<oauth::GoogleClient> {
+        let key = google_contacts_client_key(account_id);
+        if let Some(c) = self.secrets.get(&key).ok().and_then(|j| serde_json::from_str(&j).ok()) {
+            return Some(current_google_client(c));
+        }
+        let c = self.google_client()?;
+        if let Ok(j) = serde_json::to_string(&c) {
+            let _ = self.secrets.set(&key, &j);
+        }
+        Some(c)
+    }
+
     /// Sync one account's Google contacts (one sync per account at a time); what it did.
     pub async fn google_sync(&self, account_id: i64) -> Result<gcontacts::SyncReport> {
         let lock = self.google_locks.lock().unwrap().entry(account_id).or_default().clone();
         let _held = lock.lock().await;
         let result = async {
-            let client = self.google_client().ok_or_else(|| anyhow!("Add your Google client ID and secret first."))?;
+            let client = self.google_contacts_client(account_id).ok_or_else(|| anyhow!("Add your Google client ID and secret first."))?;
             let refresh = self.secrets.get(&google_key(account_id)).map_err(|_| anyhow!(gcontacts::PeopleError::SignIn("no saved sign-in".into())))?;
             let tokens = oauth::google_refresh(&client, &refresh).await?;
             let api = gcontacts::GoogleApi { access_token: tokens.access_token };
@@ -1920,7 +2073,10 @@ impl Core {
                 folder_id: None,
                 done: 0,
                 total: 0,
-                message: Some("No saved password for this account.".into()),
+                message: Some(match self.store.accounts().ok().and_then(|l| l.into_iter().find(|a| a.id == account_id)).map(|a| a.auth) {
+                    Some(AuthKind::Password) | None => "No saved password for this account.".into(),
+                    Some(_) => "No saved sign-in for this account.".into(),
+                }),
             });
         }
         out

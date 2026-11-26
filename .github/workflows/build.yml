@@ -7,7 +7,10 @@ name: build
 on:
   push:
     branches: [main]
+    # The website (pages.yml) alone doesn't make a new build.
+    paths-ignore: [site/**, .github/workflows/pages.yml]
   pull_request:
+    paths-ignore: [site/**, .github/workflows/pages.yml]
   workflow_dispatch:
 
 # One run at a time per branch: a newer push waits, so the "latest" release never mixes two
@@ -195,6 +198,11 @@ jobs:
 
       - name: Build
         working-directory: app
+        # The app's own Google OAuth client, built in (`oauth::built_in_google_client`); without
+        # it (a fork's pull request) Google sign-in asks for the user's own client.
+        env:
+          MAIL_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          MAIL_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: |
           npm ci
           npm run tauri build -- ${{ matrix.args }}
@@ -263,7 +271,9 @@ jobs:
           base=$(node -p "require('./app/src-tauri/tauri.conf.json').version")
           v="${base%.*}.$(git rev-list --count HEAD)"
           git push --force origin "$GITHUB_SHA:refs/tags/latest"
-          gh release edit latest --prerelease --title "Latest build ($v)" \
+          # The date in the title: GitHub shows when the release was first published, which
+          # editing it doesn't change.
+          gh release edit latest --prerelease --title "Latest build ($v, $(LC_ALL=C date -u '+%b %-d, %Y'))" \
             --notes "Version $v, built from ${GITHUB_SHA:0:7}. Unsigned on Linux and Windows; on macOS signed and notarized when built with the Apple secrets, otherwise signed ad-hoc."
           echo "APP_VERSION=$v" >> "$GITHUB_ENV"
 

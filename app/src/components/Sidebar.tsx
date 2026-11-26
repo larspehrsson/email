@@ -4,11 +4,11 @@ import { folderMenu } from './ContextMenu';
 import { hint } from '../lib/shortcuts';
 import { createStore } from 'solid-js/store';
 import { api, errorMessage, type Account, type Folder, type FolderRole, type SyncStatus } from '../api';
-import { folderById, foldersByAccount, moveAccount, selectedFolderId, selectFolder, syncByAccount, accounts, mainView, setMainView } from '../state';
+import { checkNow, checking, folderById, foldersByAccount, moveAccount, selectedFolderId, selectFolder, syncByAccount, accounts, mainView, setMainView } from '../state';
 import { AccountDot } from './FolderSwitcher';
 import { cancelExport, exportLabel, exportNow } from '../lib/exports';
 import { fmtNum, loadPref, savePref } from '../lib/format';
-import { AlertIcon, CheckIcon, ChevronIcon, FolderIcon, LockIcon, MailIcon, PeopleIcon, RoleIcon, SidebarIcon } from './Icons';
+import { AlertIcon, CheckIcon, ChevronIcon, FolderIcon, LockIcon, MailIcon, PeopleIcon, RefreshIcon, RoleIcon, SidebarIcon } from './Icons';
 import { ContactSources } from './ContactSources';
 import { PasswordDialog } from './PasswordPrompt';
 import { restartToUpdate, updateStatus } from '../lib/updates';
@@ -141,7 +141,7 @@ function syncLabel(s: SyncStatus): string {
     case 'connecting':
       return s.message || 'Connecting…';
     case 'folders': {
-      // the folder being checked or counted, when the core says (first pass after connecting)
+      // the folder being checked or counted, when the core says (the first pass after connecting, or a check for new mail)
       const f = s.folderId != null ? folderById(s.folderId) : undefined;
       return f ? `Updating ${f.displayName}…` : 'Updating folders…';
     }
@@ -152,7 +152,7 @@ function syncLabel(s: SyncStatus): string {
     case 'error':
       return 'Sync error';
     case 'auth':
-      return accounts()?.find((a) => a.id === s.accountId)?.auth === 'microsoft' ? 'Sign-in needed' : 'Password needed';
+      return (accounts()?.find((a) => a.id === s.accountId)?.auth ?? 'password') !== 'password' ? 'Sign-in needed' : 'Password needed';
     case 'limited':
       return 'Connection limit · retrying';
     case 'offline':
@@ -313,6 +313,8 @@ export function SyncFooter(props: { compact?: boolean }) {
     if (ex) {
       return { phase: 'headers', text: exportLabel(ex), active: true, pct: ex.total > 0 ? ex.done / ex.total : null };
     }
+    // A check for new mail (the button, F5): until every account has answered it.
+    if (activeList.length === 0 && checking()) return { phase: 'headers', text: 'Updating…', active: true, pct: null };
     if (activeList.length === 0) return { phase: 'idle', text: 'All accounts up to date', active: false, pct: null };
     const counted = activeList.filter((x) => (x.status!.phase === 'headers' || x.status!.phase === 'bodies') && x.status!.total > 0);
     const done = counted.reduce((n, x) => n + x.status!.done, 0);
@@ -411,12 +413,26 @@ export function SyncFooter(props: { compact?: boolean }) {
         <StatusGlyph phase={summary().phase} />
         <Show when={!props.compact}>
           <span class="sf-text sf-summary-text">{summary().text}</span>
+          {/* room for the check button, which sits over it (a button can't hold a button) */}
+          <span class="sf-check-room" aria-hidden="true" />
           <span class="sf-chevron" aria-hidden="true">
             <ChevronIcon size={12} />
           </span>
         </Show>
         <ProgressTrack active={summary().active} pct={summary().pct} />
       </button>
+      <Show when={!props.compact}>
+        <button
+          class="sf-check"
+          classList={{ spinning: checking() }}
+          title={hint('check-mail') ? `Check for new mail (${hint('check-mail')})` : 'Check for new mail'}
+          aria-label="Check for new mail"
+          disabled={checking()}
+          onClick={checkNow}
+        >
+          <RefreshIcon size={13} />
+        </button>
+      </Show>
       <Show when={fixFor()}>{(a) => <PasswordDialog account={a()} onClose={() => setFixFor(null)} />}</Show>
     </footer>
   );
