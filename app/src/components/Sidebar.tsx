@@ -313,6 +313,8 @@ export function SyncFooter(props: { compact?: boolean }) {
     if (ex) {
       return { phase: 'headers', text: exportLabel(ex), active: true, pct: ex.total > 0 ? ex.done / ex.total : null };
     }
+    // A check for new mail (the button, F5): until every account has answered it.
+    if (activeList.length === 0 && checking()) return { phase: 'headers', text: 'Updating…', active: true, pct: null };
     if (activeList.length === 0) return { phase: 'idle', text: 'All accounts up to date', active: false, pct: null };
     const counted = activeList.filter((x) => (x.status!.phase === 'headers' || x.status!.phase === 'bodies') && x.status!.total > 0);
     const done = counted.reduce((n, x) => n + x.status!.done, 0);

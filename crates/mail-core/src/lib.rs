@@ -716,11 +716,11 @@ impl Core {
         Ok(())
     }
 
-    /// Check every account for new mail now (the user asked: a refresh button, F5).
-    pub fn check_now(&self) {
-        for s in self.running.lock().unwrap().values() {
-            s.check_now();
-        }
+    /// Check every account for new mail now (the user asked: a refresh button, F5). Returns
+    /// once every account has (or after a while: see `sync::CHECK_WAIT`).
+    pub async fn check_now(&self) {
+        let checks: Vec<_> = self.running.lock().unwrap().values().map(|s| s.check_now()).collect();
+        futures::future::join_all(checks).await;
     }
 
     pub fn list_messages(&self, folder_id: i64, offset: u32, limit: u32) -> Result<MessagePage> {

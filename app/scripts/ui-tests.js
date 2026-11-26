@@ -483,9 +483,11 @@ describe('check for new mail', () => {
       const btn = page.locator('.sf-check');
       await btn.click();
       assert.equal(await checks(), 1);
-      // it spins a moment, so a check that finds nothing still shows it happened
+      // it spins, and the status says so, until the check is done (even one that finds nothing)
       assert.equal(await btn.evaluate((e) => e.classList.contains('spinning')), true);
+      await page.waitForFunction(() => document.querySelector('.sf-summary')?.getAttribute('title') === 'Updating…', null, { timeout: 2000 });
       await page.waitForFunction(() => !document.querySelector('.sf-check.spinning'), null, { timeout: 4000 });
+      await page.waitForFunction(() => document.querySelector('.sf-summary')?.getAttribute('title') === 'All accounts up to date', null, { timeout: 2000 });
       // F5 checks too (and doesn't reload the page: the count would start over)
       await page.locator('.folder-layer .row').first().click();
       await page.keyboard.press('F5');

@@ -186,6 +186,9 @@ struct Shared {
     /// The user asked to check for new mail now: the headers task starts a fresh pass over
     /// every folder, and the IDLE tasks reconnect (one that died quietly is caught here).
     check: watch::Sender<u64>,
+    /// The last check each task has answered: [headers, idle-inbox, idle-focus]. An IDLE task
+    /// watching nothing (or on a server without IDLE) has nothing to answer: u64::MAX.
+    checked: watch::Sender<[u64; 3]>,
     /// Wakes the interactive task: an action was queued or cancelled.
     outbox: Notify,
     /// Wakes the send task: a message was queued or taken back.
@@ -378,6 +381,7 @@ impl AccountSync {
             dirty: Mutex::new(HashSet::new()),
             refresh: Notify::new(),
             check: watch::Sender::new(0),
+            checked: watch::Sender::new([0, u64::MAX, u64::MAX]),
             outbox: Notify::new(),
             sender: Notify::new(),
             counts_due: std::sync::atomic::AtomicBool::new(true),
@@ -420,7 +424,8 @@ impl AccountSync {
 
     /// Check for new mail now (the user asked): the Inbox and the folder on screen first, then
     /// every folder, on fresh IDLE connections; a Microsoft account's tags and snooze too.
-    pub fn check_now(&self) {
+    /// Resolves once every task has answered it (or after `CHECK_WAIT`).
+    pub fn check_now(&self) -> impl std::future::Future<Output = ()> + Send + 'static {
         let sh = &self.shared;
         if let Ok(folders) = sh.store.folders(sh.account.id) {
             let mut dirty = sh.dirty.lock().unwrap();
@@ -428,9 +433,17 @@ impl AccountSync {
             dirty.extend(*sh.focus.borrow());
         }
         sh.counts_due.store(true, std::sync::atomic::Ordering::SeqCst);
-        sh.check.send_modify(|n| *n += 1);
+        let mut asked = 0;
+        sh.check.send_modify(|n| {
+            *n += 1;
+            asked = *n;
+        });
         sh.refresh.notify_one();
         sh.graph_refresh.notify_one();
+        let mut answered = sh.checked.subscribe();
+        async move {
+            let _ = tokio::time::timeout(CHECK_WAIT, answered.wait_for(|done| done.iter().all(|&n| n >= asked))).await;
+        }
     }
 
     /// A user action was queued: send it when due.
@@ -533,6 +546,17 @@ macro_rules! guarded {
 /// it's dropped and reconnected. Measured as inactivity, not total time, so a big chunk on a
 /// slow link is never cut off while it's still arriving.
 const STALL_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long a check for new mail is waited for (shown as "Updating…") at most.
+const CHECK_WAIT: Duration = Duration::from_secs(20);
+
+/// Mark check `n` answered by task `slot` (see `Shared::checked`).
+fn answered(shared: &Shared, slot: usize, n: u64) {
+    shared.checked.send_if_modified(|done| {
+        let changed = done[slot] != n;
+        done[slot] = n;
+        changed
+    });
+}
 
 /// Run a connection-owning task forever, reconnecting with exponential backoff.
 async fn supervise<F>(name: &'static str, shared: Arc<Shared>, f: F)
@@ -590,7 +614,7 @@ async fn header_task(shared: Arc<Shared>) -> Result<()> {
 
     loop {
         // A check asked for before this pass is answered by it.
-        check.mark_unchanged();
+        let pass_check = *check.borrow_and_update();
         // Folder structure first, every pass, so new/renamed folders appear promptly. Only the
         // first pass after connecting is reported: routine re-checks aren't news.
         if first_pass {
@@ -666,6 +690,7 @@ async fn header_task(shared: Arc<Shared>) -> Result<()> {
                 }
                 // Everything is in sync: wait for the user to switch folders or the refresh timer.
                 shared.set_status(SyncPhase::Idle, None, 0, 0, None);
+                answered(&shared, 0, pass_check);
                 tokio::select! {
                     // The connection didn't survive the sleep, and the refresh timer's clock
                     // stopped during it: start over now (a fresh pass also recounts everything).
@@ -977,7 +1002,9 @@ async fn idle_task(shared: Arc<Shared>, follow_focus: bool) -> Result<()> {
         } else {
             inbox.as_ref().map(|i| i.id)
         };
+        let slot = if follow_focus { 2 } else { 1 };
         let Some(folder_id) = target else {
+            answered(&shared, slot, u64::MAX);
             if let Some(c) = conn.take() {
                 c.logout().await;
             }
@@ -995,6 +1022,7 @@ async fn idle_task(shared: Arc<Shared>, follow_focus: bool) -> Result<()> {
         };
         if !c.caps.idle {
             tracing::info!("server has no IDLE; relying on polling");
+            answered(&shared, slot, u64::MAX);
             c.logout().await;
             std::future::pending::<()>().await;
             unreachable!();
@@ -1023,6 +1051,11 @@ async fn idle_task(shared: Arc<Shared>, follow_focus: bool) -> Result<()> {
         let imap::Connection { session, caps, activity, .. } = c;
         let mut handle = session.idle();
         imap::stall_timeout(&activity, STALL_TIMEOUT, "starting IDLE", handle.init()).await??;
+        // Watching, caught up: a check asked for until now is answered (one asked meanwhile is
+        // taken up below).
+        if !check.has_changed().unwrap_or(false) {
+            answered(&shared, slot, *check.borrow());
+        }
         let mut woke = imap::wake_watch();
         let (wait, stop) = handle.wait_with_timeout(Duration::from_secs(25 * 60));
         let pushed = tokio::select! {

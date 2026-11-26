@@ -598,12 +598,12 @@ export async function initApp(): Promise<void> {
 const [checking, setChecking] = createSignal(false);
 /** A check asked for (the refresh button, F5) is under way: the button spins. */
 export { checking };
-/** Check every account for new mail now. The sync status shows what it finds; the button spins
- *  at least briefly, so a check that finds nothing still visibly happened. */
+/** Check every account for new mail now: "Updating…" (and the button spins) until every account
+ *  has, and at least briefly, so a check that finds nothing still visibly happened. */
 export function checkNow(): void {
   if (checking()) return;
   setChecking(true);
-  const shown = new Promise((r) => setTimeout(r, 1200));
+  const shown = new Promise((r) => setTimeout(r, 800));
   void Promise.all([api.checkNow().catch((e) => console.warn('check_now failed', e)), shown]).then(() => setChecking(false));
 }
 

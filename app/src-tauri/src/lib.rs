@@ -916,8 +916,9 @@ fn app_version() -> String {
 }
 
 #[tauri::command]
-fn check_now(core: State<'_, Arc<Core>>) {
-    core.check_now();
+async fn check_now(core: State<'_, Arc<Core>>) -> Res<()> {
+    core.check_now().await;
+    Ok(())
 }
 
 #[tauri::command]

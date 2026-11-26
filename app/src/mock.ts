@@ -2756,7 +2756,8 @@ export function createMockBackend(): Backend {
       // counted, for the UI tests
       const w = window as unknown as { __checks?: number };
       w.__checks = (w.__checks ?? 0) + 1;
-      await latency();
+      // the servers take a moment to answer
+      await new Promise((r) => setTimeout(r, 1500));
     },
   };
 
