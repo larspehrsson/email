@@ -273,7 +273,7 @@ jobs:
           git push --force origin "$GITHUB_SHA:refs/tags/latest"
           # The date in the title: GitHub shows when the release was first published, which
           # editing it doesn't change.
-          gh release edit latest --prerelease --title "Latest build ($v, $(date -u '+%-d %b %Y'))" \
+          gh release edit latest --prerelease --title "Latest build ($v, $(LC_ALL=C date -u '+%b %-d, %Y'))" \
             --notes "Version $v, built from ${GITHUB_SHA:0:7}. Unsigned on Linux and Windows; on macOS signed and notarized when built with the Apple secrets, otherwise signed ad-hoc."
           echo "APP_VERSION=$v" >> "$GITHUB_ENV"
 
