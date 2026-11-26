@@ -55,7 +55,9 @@ Accounts › **+ Add account**.
   browser. Work and school accounts need IMAP allowed by their administrator.
 - **Gmail and Google Workspace:** use an [app password](https://myaccount.google.com/apppasswords)
   (it needs 2-Step Verification turned on), not your Google password. Or sign in on Google's
-  own page, with an OAuth client of your own for now ([setup](docs/GOOGLE.md)).
+  own page in your browser; Google doesn't list the app as verified yet, so it warns you first
+  (**Advanced › Go to …**). A build of your own needs an OAuth client of your own
+  ([setup](docs/GOOGLE.md)).
 - **Any other provider:** your address and password. The servers are found for you; if not,
   enter them under **Advanced**.
 

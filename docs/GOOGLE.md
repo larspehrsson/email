@@ -1,12 +1,20 @@
 # Google: signing in, and Contacts
 
 A Gmail or Google Workspace account can sign in on Google's page instead of with an app
-password, and its contacts can sync two ways with the address book. For now both need an OAuth
-client of your own: Google allows Gmail sign-in only through a client it has reviewed, and
-Email doesn't have one yet. Making your own is free and takes about fifteen minutes. One client
-serves all your Google accounts, for mail and contacts.
+password, and its contacts can sync two ways with the address book. Both go through an OAuth
+client. The releases have the app's own built in, so there's nothing to set up: add the
+account, or press **Connect…** for its contacts, and sign in.
 
-Without a client, Gmail keeps working with an [app password](https://myaccount.google.com/apppasswords)
+Google hasn't verified the app's client yet (that review is still to come), so for now:
+- Google says it hasn't verified the app before you sign in: **Advanced › Go to …** goes on.
+- At most 100 people can sign in with it, ever, until it's verified. Once that's reached,
+  Google refuses new sign-ins; an app password still works.
+
+A build of your own (from source) has no client built in: it needs one of your own, made as
+below. Making one is free and takes about fifteen minutes. One client serves all your Google
+accounts, for mail and contacts.
+
+Without Google sign-in, Gmail keeps working with an [app password](https://myaccount.google.com/apppasswords)
 (it needs 2-Step Verification). Signing in with Google helps when app passwords aren't
 available: a Workspace administrator turned them off, or the account uses Advanced Protection.
 
@@ -32,10 +40,10 @@ available: a Workspace administrator turned them off, or the account uses Advanc
 6. **Clients › Create client**: type **Desktop app**. Copy the **client ID** and the
    **client secret**.
 
-In Email, the first time a Google sign-in needs it, Email asks for the client ID and secret and
-keeps them in the system keychain:
+In a build without the app's client, the first time a Google sign-in needs one, Email asks for
+your client ID and secret and keeps them in the system keychain. The ways to sign in:
 - **Adding an account:** type a Gmail or Workspace address, then **sign in with Google** under
-  the app password field (once the client is there, Google sign-in is the default).
+  the app password field (with a client, Google sign-in is the default).
 - **An account already on an app password:** Settings › Accounts › the account › Password ›
   **Sign in with Google instead…**. Its mail stays as it is; the app password is no longer used
   (you can revoke it in your Google account).
@@ -45,8 +53,8 @@ On Google's page, Google first says it hasn't verified the app (**Advanced › G
 lists what the app asks for. Tick **Read, compose, send, and permanently delete all your email
 from Gmail**: Google may leave it unticked, and without it Email can't reach your mail.
 
-Each account remembers the client it signed in with, so **Forget it** (under the accounts) stops
-contacts syncing but leaves signed-in accounts working. If Google ends a sign-in (you revoked
+Each account, and each account's contacts, remembers the client it signed in with, so
+**Forget it** (under the accounts) leaves them working; only new sign-ins need a client again. If Google ends a sign-in (you revoked
 it, or changed your password), the sidebar says **Sign-in needed**; **Fix…** signs in again.
 
 **A Google Workspace account** (a company's) works with the same client unless its

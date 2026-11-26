@@ -1,7 +1,7 @@
 import { createSignal, Show } from 'solid-js';
 import { api, errorMessage, type Account } from '../api';
 import { reloadAccounts } from '../state';
-import { googleStatus, reloadGoogleStatus } from '../lib/googleContacts';
+import { googleReady, googleStatus, reloadGoogleStatus } from '../lib/googleContacts';
 import { GoogleClientForm } from './GoogleContacts';
 
 // Settings › Accounts › Server: how an account signs in, for one that signs in in the browser
@@ -46,7 +46,7 @@ export function BrowserSignIn(props: { account: Account; onMessage: (m: { text: 
 }
 
 /** A Gmail account on an app password: sign in with Google instead (asks for the user's own
- *  Google client first, when there isn't one yet). */
+ *  Google client first, in a build without the app's when there isn't one yet). */
 export function SwitchToGoogle(props: { account: Account; onMessage: (m: { text: string; error?: boolean } | null) => void }) {
   const [busy, setBusy] = createSignal(false);
   const [askClient, setAskClient] = createSignal(false);
@@ -66,7 +66,7 @@ export function SwitchToGoogle(props: { account: Account; onMessage: (m: { text:
   };
   const start = async () => {
     const s = googleStatus() ?? (await reloadGoogleStatus());
-    if (s?.clientId) void signIn();
+    if (googleReady(s)) void signIn();
     else setAskClient(true);
   };
   return (

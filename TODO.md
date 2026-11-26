@@ -9,9 +9,18 @@
 ## Accounts
 - [ ] Settings › Accounts: SMTP server per account (today: derived from the IMAP server).
 
+## Search
+- [ ] Act on all results: pick search results like folder rows (⌘/Ctrl-click, ⇧-click,
+      ⌘/Ctrl+A for every match, loaded or not), then Archive, Delete or Move to… them. Results
+      are all in one account; an account-wide search spans folders, so one action per folder,
+      as the sender panel does. Needs every matching id from the core (like `list_item_ids`).
+
+## Google sign-in
+- [ ] Stage 3: Google's verification (needs the app's name first: the consent screen and the
+      website say "Vibe-Coded Email Client" for now). Until then the app's client is
+      unverified: a warning on Google's page, and 100 users at most.
+
 ## Later
-- [ ] OAuth sign-in (needed for Outlook; nicer for Gmail).
-- [ ] Search message text (bodies), not just headers and tags.
 - [ ] macOS signing.
 - [ ] N past the last unread: next folder with unread mail.
 - [ ] A combined Inbox across accounts.

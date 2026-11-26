@@ -1131,6 +1131,35 @@ describe('accounts', () => {
     }
   });
 
+  test('with the app\'s own Google client, a Gmail account signs in with Google without asking for one', async () => {
+    const { page, errors, close } = await open({
+      threaded: false,
+      init: () => localStorage.setItem('mock.google', JSON.stringify({ clientId: null, builtIn: true, links: [] })),
+    });
+    try {
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.settings .st-nav-item', { hasText: 'Accounts' }).click().catch(() => {});
+      // An app-password Gmail account switches over at once: no client form
+      const john = page.locator('.st-acct', { hasText: 'john.doe@example.com' });
+      await john.click();
+      await john.getByRole('button', { name: 'Sign in with Google instead…' }).click();
+      await john.locator('.st-signin', { hasText: 'With Google' }).waitFor({ timeout: 5000 });
+      assert.equal(await page.locator('input[aria-label="Google client ID"]').count(), 0, 'no client asked for');
+      // Adding one: Google's page is the way, ready to go
+      await page.getByRole('button', { name: '+ Add account' }).click();
+      await page.fill('input[placeholder="you@example.com"]', 'jane@gmail.com');
+      const go = page.getByRole('button', { name: 'Continue with Google' });
+      await go.waitFor();
+      assert.equal(await page.locator('input[placeholder="App password"]').count(), 0);
+      assert.equal(await go.isDisabled(), false);
+      // No client of the user's to forget
+      assert.equal(await page.locator('.gc-client-note').count(), 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('the order and markers set by the user come back from the core', async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {

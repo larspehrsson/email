@@ -337,6 +337,15 @@ pub struct GoogleClient {
     pub secret: String,
 }
 
+/// The app's own client, built into release builds (CI sets `MAIL_GOOGLE_CLIENT_ID` and
+/// `MAIL_GOOGLE_CLIENT_SECRET` from its secrets); None in a build without them. Google says a
+/// desktop app's secret can't be kept secret: it only goes with the ID, PKCE protects the sign-in.
+pub fn built_in_google_client() -> Option<GoogleClient> {
+    let id = option_env!("MAIL_GOOGLE_CLIENT_ID").unwrap_or("").trim();
+    let secret = option_env!("MAIL_GOOGLE_CLIENT_SECRET").unwrap_or("").trim();
+    (!id.is_empty() && !secret.is_empty()).then(|| GoogleClient { id: id.to_string(), secret: secret.to_string() })
+}
+
 /// Google wants the loopback address itself (localhost "may cause issues").
 pub fn google_redirect(uri: &str) -> String {
     uri.replace("://localhost:", "://127.0.0.1:")

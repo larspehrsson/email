@@ -198,6 +198,11 @@ jobs:
 
       - name: Build
         working-directory: app
+        # The app's own Google OAuth client, built in (`oauth::built_in_google_client`); without
+        # it (a fork's pull request) Google sign-in asks for the user's own client.
+        env:
+          MAIL_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          MAIL_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: |
           npm ci
           npm run tauri build -- ${{ matrix.args }}

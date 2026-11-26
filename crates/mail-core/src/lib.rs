@@ -214,16 +214,33 @@ pub const SEND_DELAY_MS: i64 = 10_000;
 
 /// Keychain names: the user's Google OAuth client, and each account's Google sign-in.
 const GOOGLE_CLIENT_KEY: &str = "#google:client";
+
+/// A client kept with a sign-in, as it is now: the app's own is this build's (its secret may
+/// have been replaced since), any other as kept.
+fn current_google_client(kept: oauth::GoogleClient) -> oauth::GoogleClient {
+    match oauth::built_in_google_client() {
+        Some(b) if b.id == kept.id => b,
+        _ => kept,
+    }
+}
 fn google_key(account_id: i64) -> String {
     format!("#google-contacts:{account_id}")
+}
+/// The client an account's Google contacts were connected with (its refresh token is that
+/// client's); missing for those connected before it was kept: Settings' client, then.
+fn google_contacts_client_key(account_id: i64) -> String {
+    format!("#google-contacts-client:{account_id}")
 }
 
 /// Google Contacts as Settings shows it.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GoogleStatus {
-    /// The OAuth client's ID (None: not set yet).
+    /// The user's own OAuth client's ID (None: not set).
     pub client_id: Option<String>,
+    /// Whether this build has the app's own client (`oauth::built_in_google_client`): Google
+    /// sign-in works without one of the user's.
+    pub built_in: bool,
     pub links: Vec<gcontacts::GoogleLink>,
 }
 
@@ -570,7 +587,7 @@ impl Core {
     }
 
     /// Add a Gmail or Google Workspace account by signing in in the browser, with the Google
-    /// client in Settings (the user's own, for now). Like `add_microsoft_account`. An account
+    /// client in Settings (the user's own), else the app's. Like `add_microsoft_account`. An account
     /// already here with an app password switches to the sign-in.
     pub async fn add_google_account(&self, login_hint: Option<String>, display_name: Option<String>, open: impl FnOnce(String)) -> Result<Account> {
         let client = self.google_client().ok_or_else(|| anyhow!("Add your Google client ID and secret first."))?;
@@ -591,7 +608,8 @@ impl Core {
         if account.provider != Provider::Gmail {
             bail!("Only Gmail and Google Workspace accounts sign in with Google.");
         }
-        // An account signed in already keeps its own client; else (or if that's gone) Settings'.
+        // An account signed in already keeps its own client; else (or if that's gone) Settings',
+        // or the app's.
         let client = match account.auth {
             AuthKind::Google => self.account_google_client(&account.email).ok().or_else(|| self.google_client()),
             _ => self.google_client(),
@@ -618,7 +636,7 @@ impl Core {
     /// The client an account signed in to Google with (`oauth::google_client_key`).
     fn account_google_client(&self, email: &str) -> Result<oauth::GoogleClient> {
         let json = self.secrets.get(&oauth::google_client_key(email))?;
-        Ok(serde_json::from_str(&json)?)
+        Ok(current_google_client(serde_json::from_str(&json)?))
     }
 
     /// The browser sign-in for Google mail: (address, refresh token), checked by signing in to
@@ -789,6 +807,7 @@ impl Core {
         // Its Google contacts here go with it (nothing changes in Google).
         self.store.remove_google_link(account_id)?;
         self.secrets.delete(&google_key(account_id));
+        self.secrets.delete(&google_contacts_client_key(account_id));
         self.store.delete_account(account_id)?;
         tracing::info!(account_id, "account removed");
         let store = self.store.clone();
@@ -1520,7 +1539,12 @@ impl Core {
 
     // ---- Google Contacts ---------------------------------------------------------------------
 
+    /// The client a new Google sign-in uses: the user's own (Settings), else the app's.
     fn google_client(&self) -> Option<oauth::GoogleClient> {
+        self.own_google_client().or_else(oauth::built_in_google_client)
+    }
+
+    fn own_google_client(&self) -> Option<oauth::GoogleClient> {
         self.secrets.get(GOOGLE_CLIENT_KEY).ok().and_then(|j| serde_json::from_str(&j).ok())
     }
 
@@ -1543,7 +1567,11 @@ impl Core {
 
     /// Whether the client is set, and the accounts linked to their Google contacts.
     pub fn google_status(&self) -> Result<GoogleStatus> {
-        Ok(GoogleStatus { client_id: self.google_client().map(|c| c.id), links: self.store.google_links()? })
+        Ok(GoogleStatus {
+            client_id: self.own_google_client().map(|c| c.id),
+            built_in: oauth::built_in_google_client().is_some(),
+            links: self.store.google_links()?,
+        })
     }
 
     /// Connect an account to its Google contacts: a browser sign-in (`open` shows the page),
@@ -1563,6 +1591,7 @@ impl Core {
         let refresh = tokens.refresh_token.clone().ok_or_else(|| anyhow!("Google didn't allow staying signed in (no refresh token)."))?;
         let email = tokens.id_token.as_deref().and_then(oauth::email_from_id_token).unwrap_or_else(|| account.email.clone());
         self.secrets.set(&google_key(account_id), &refresh)?;
+        self.secrets.set(&google_contacts_client_key(account_id), &serde_json::to_string(&client)?)?;
         self.store.set_google_link(account_id, &email)?;
         Ok(email)
     }
@@ -1571,6 +1600,7 @@ impl Core {
     pub fn google_disconnect(&self, account_id: i64) -> Result<()> {
         self.store.remove_google_link(account_id)?;
         self.secrets.delete(&google_key(account_id));
+        self.secrets.delete(&google_contacts_client_key(account_id));
         Ok(())
     }
 
@@ -1625,12 +1655,26 @@ impl Core {
         Ok(None)
     }
 
+    /// The client an account's Google contacts were connected with. One connected before that
+    /// was kept used Settings' client: kept now, so forgetting that client later doesn't stop it.
+    fn google_contacts_client(&self, account_id: i64) -> Option<oauth::GoogleClient> {
+        let key = google_contacts_client_key(account_id);
+        if let Some(c) = self.secrets.get(&key).ok().and_then(|j| serde_json::from_str(&j).ok()) {
+            return Some(current_google_client(c));
+        }
+        let c = self.google_client()?;
+        if let Ok(j) = serde_json::to_string(&c) {
+            let _ = self.secrets.set(&key, &j);
+        }
+        Some(c)
+    }
+
     /// Sync one account's Google contacts (one sync per account at a time); what it did.
     pub async fn google_sync(&self, account_id: i64) -> Result<gcontacts::SyncReport> {
         let lock = self.google_locks.lock().unwrap().entry(account_id).or_default().clone();
         let _held = lock.lock().await;
         let result = async {
-            let client = self.google_client().ok_or_else(|| anyhow!("Add your Google client ID and secret first."))?;
+            let client = self.google_contacts_client(account_id).ok_or_else(|| anyhow!("Add your Google client ID and secret first."))?;
             let refresh = self.secrets.get(&google_key(account_id)).map_err(|_| anyhow!(gcontacts::PeopleError::SignIn("no saved sign-in".into())))?;
             let tokens = oauth::google_refresh(&client, &refresh).await?;
             let api = gcontacts::GoogleApi { access_token: tokens.access_token };
