@@ -29,8 +29,12 @@ process.stdin.on('data', (d) => (input += d)).on('end', () => {
   ].filter(([, l]) => l);
 
   const sha = commit.slice(0, 7);
+  // When it was built: GitHub shows the release's first publication date, which editing it (as
+  // every build does) doesn't change. UTC, the same wherever it's read.
+  const now = new Date();
+  const built = `${now.getUTCDate()} ${now.toLocaleString('en', { month: 'short', timeZone: 'UTC' })} ${now.getUTCFullYear()} ${now.toISOString().slice(11, 16)} UTC`;
   const out = [
-    `**Version ${version}**, built from ${sha}${branch ? ` (\`${branch}\`)` : ''}.`,
+    `**Version ${version}**, built ${built} from ${sha}${branch ? ` (\`${branch}\`)` : ''}.`,
     '',
     '| System | Download | Note |',
     '|---|---|---|',
