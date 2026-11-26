@@ -2,6 +2,7 @@ import { createEffect, createResource, createSignal, For, Match, onCleanup, onMo
 import { Portal } from 'solid-js/web';
 import { AiAppsSection } from './AiApps';
 import { GoogleClientNote, GoogleContactsField } from './GoogleContacts';
+import { BrowserSignIn, SwitchToGoogle } from './AccountSignIn';
 import { pictureLevel, setPictureLevel, type PictureLevel } from '../lib/senderIcons';
 import { domainRules, httpPictures, setDomainRules, setHttpPictures } from '../lib/privacy';
 import { setTheme, theme, THEMES } from '../lib/theme';
@@ -686,13 +687,24 @@ function AccountCard(props: { d: AccountDetails; open: boolean; onToggle: () => 
           {props.d.smtpHost}:{props.d.smtpPort}
         </Show>
       </Field>
+      <Show when={account()?.auth !== 'password' ? account() : undefined}>
+        {(a) => (
+          <Field label="Sign-in">
+            <BrowserSignIn account={a()} onMessage={setMsg} />
+          </Field>
+        )}
+      </Show>
+      <Show when={(account()?.auth ?? 'password') === 'password'}>
       <Field label="Password">
         <Show
           when={editing()}
           fallback={
-            <button class="link-btn" onClick={() => (setEditing(true), setMsg(null))}>
-              Update password…
-            </button>
+            <span class="st-signin">
+              <button class="link-btn" onClick={() => (setEditing(true), setMsg(null))}>
+                Update password…
+              </button>
+              <Show when={props.d.provider === 'gmail' ? account() : undefined}>{(a) => <SwitchToGoogle account={a()} onMessage={setMsg} />}</Show>
+            </span>
           }
         >
           <form class="st-pw" onSubmit={save}>
@@ -714,6 +726,7 @@ function AccountCard(props: { d: AccountDetails; open: boolean; onToggle: () => 
           </form>
         </Show>
       </Field>
+      </Show>
         </Group>
         <Group title="On this computer">
       <Field label="Storage">

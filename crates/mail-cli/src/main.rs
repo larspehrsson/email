@@ -218,7 +218,7 @@ async fn main() -> Result<()> {
                     Ok(())
                 }
             }
-            let session = std::sync::Arc::new(mail_core::oauth::MicrosoftSession::graph(&email, std::sync::Arc::new(Fixed(secret.clone()))));
+            let session = std::sync::Arc::new(mail_core::oauth::Session::graph(&email, std::sync::Arc::new(Fixed(secret.clone()))));
             match mail_core::graph::Graph::new(session).snapshot().await {
                 Ok(snap) => println!(
                     "snapshot: {} categories, {} messages with categories, {} with the app's markers",

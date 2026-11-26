@@ -10,7 +10,7 @@ import { AlertIcon, CloseIcon, LockIcon } from './Icons';
 export function PasswordDialog(props: { account: Account; onClose: () => void }) {
   return (
     <Show
-      when={props.account.auth === 'microsoft'}
+      when={props.account.auth !== 'password'}
       fallback={<PasswordForm account={props.account} onClose={props.onClose} />}
     >
       <SignInAgain account={props.account} onClose={props.onClose} />
@@ -19,8 +19,8 @@ export function PasswordDialog(props: { account: Account; onClose: () => void })
 }
 
 /**
- * A Microsoft account whose sign-in expired or was revoked: sign in again in the browser (the
- * address is filled in there). Cancel stops waiting for the browser.
+ * A Microsoft or Google account whose sign-in expired or was revoked: sign in again in the
+ * browser (the address is filled in there). Cancel stops waiting for the browser.
  */
 function SignInAgain(props: { account: Account; onClose: () => void }) {
   const [busy, setBusy] = createSignal(false);
@@ -30,7 +30,7 @@ function SignInAgain(props: { account: Account; onClose: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      await api.microsoftSignInAgain(props.account.id);
+      await (props.account.auth === 'google' ? api.googleSignIn(props.account.id) : api.microsoftSignInAgain(props.account.id));
       props.onClose();
     } catch (err) {
       setError(errorMessage(err));
@@ -39,6 +39,7 @@ function SignInAgain(props: { account: Account; onClose: () => void }) {
     }
   }
   const close = () => (busy() ? void api.cancelSignIn() : props.onClose());
+  const who = () => (props.account.auth === 'google' ? 'Google' : 'Microsoft');
 
   return (
     <div
@@ -57,7 +58,7 @@ function SignInAgain(props: { account: Account; onClose: () => void }) {
           </button>
         </div>
         <p class="pw-dialog-text">
-          Microsoft needs you to sign in again for <strong>{props.account.email}</strong>. Sync is paused until you do.
+          {who()} needs you to sign in again for <strong>{props.account.email}</strong>. Sync is paused until you do.
         </p>
         <Show when={error()}>
           <div class="form-error" role="alert">
@@ -76,7 +77,7 @@ function SignInAgain(props: { account: Account; onClose: () => void }) {
             disabled={busy()}
             ref={(el) => queueMicrotask(() => el.focus())}
           >
-            <Show when={busy()} fallback="Sign in with Microsoft">
+            <Show when={busy()} fallback={`Sign in with ${who()}`}>
               <span class="spinner small on-accent" /> Finish in your browser…
             </Show>
           </button>

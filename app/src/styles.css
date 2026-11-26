@@ -6097,6 +6097,33 @@ body.dragging-message * {
 .gc-client-note {
   margin: 10px 0 0;
 }
+/* An account's sign-in row (AccountSignIn.tsx): the links, and the Google client form under
+   them when it's asked for, with the row's label at the top beside them. */
+.st-signin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+}
+.st-signin .dot-sep {
+  margin: 0 6px;
+}
+.st-signin .gc-client {
+  flex-basis: 100%;
+  margin: 8px 0 4px;
+}
+.st-field:has(.st-signin .gc-client) {
+  align-items: start;
+}
+.st-field:has(.st-signin .gc-client) > .st-field-label {
+  line-height: 32px;
+}
+.st-signin:has(.gc-client) {
+  line-height: 32px;
+}
+.st-signin .gc-client {
+  line-height: normal;
+}
 .ct-where-text {
   color: var(--text-2);
 }

@@ -1,7 +1,9 @@
-import { createSignal, onCleanup, Show } from 'solid-js';
+import { createSignal, onCleanup, onMount, Show } from 'solid-js';
 import { api, errorMessage, type Account, type Provider } from '../api';
 import { AlertIcon, ChevronIcon, CloseIcon, MailIcon } from './Icons';
 import { DRAG } from '../lib/platform';
+import { googleStatus, reloadGoogleStatus } from '../lib/googleContacts';
+import { GoogleClientForm } from './GoogleContacts';
 
 function isGmail(email: string) {
   const d = email.split('@')[1]?.trim().toLowerCase() ?? '';
@@ -39,7 +41,7 @@ export function AddAccountForm(props: { onAdded: (a: Account) => void; onCancel?
           // if that field gives way to the Microsoft note, the cursor goes on to the next field.
           const inPassword = passwordEl != null && document.activeElement === passwordEl;
           setProvider(p);
-          if (inPassword && microsoft()) displayNameEl.focus();
+          if (inPassword && browser()) displayNameEl.focus();
         },
         () => {},
       );
@@ -49,6 +51,16 @@ export function AddAccountForm(props: { onAdded: (a: Account) => void; onCancel?
   let displayNameEl!: HTMLInputElement;
   /** Microsoft accounts sign in on Microsoft's page (unless a server is set by hand). */
   const microsoft = () => provider() === 'outlook' && !host().trim();
+  /** Gmail and Google Workspace (by its MX records) can sign in on Google's page instead of with
+   *  an app password: with the user's own Google client for now, so that's the way only once
+   *  there is one, unless they ask for it. */
+  const gmail = () => (provider() === 'gmail' || isGmail(email())) && !host().trim();
+  const [viaGoogle, setViaGoogle] = createSignal<boolean | null>(null);
+  const google = () => gmail() && (viaGoogle() ?? !!googleStatus()?.clientId);
+  const hasClient = () => !!googleStatus()?.clientId;
+  /** signing in in the browser */
+  const browser = () => microsoft() || google();
+  onMount(() => void reloadGoogleStatus());
 
   const portNum = () => {
     const p = port().trim();
@@ -57,7 +69,10 @@ export function AddAccountForm(props: { onAdded: (a: Account) => void; onCancel?
     return Number.isInteger(n) && n > 0 && n < 65536 ? n : NaN;
   };
   const canSubmit = () =>
-    !busy() && email().includes('@') && (microsoft() || password().length > 0) && !Number.isNaN(portNum());
+    !busy() &&
+    email().includes('@') &&
+    (microsoft() || (google() ? hasClient() : password().length > 0)) &&
+    !Number.isNaN(portNum());
 
   async function submit(e: Event) {
     e.preventDefault();
@@ -67,6 +82,10 @@ export function AddAccountForm(props: { onAdded: (a: Account) => void; onCancel?
     try {
       if (microsoft()) {
         props.onAdded(await api.addMicrosoftAccount(email().trim(), displayName().trim() || null));
+        return;
+      }
+      if (google()) {
+        props.onAdded(await api.addGoogleAccount(email().trim(), displayName().trim() || null));
         return;
       }
       const acc = await api.addAccount({
@@ -98,13 +117,26 @@ export function AddAccountForm(props: { onAdded: (a: Account) => void; onCancel?
           required
         />
       </label>
-      {/* Microsoft: the same slot says where the sign-in happens (nothing moves) */}
+      {/* Microsoft, Google: the same slot says where the sign-in happens */}
       <Show
-        when={!microsoft()}
+        when={!browser()}
         fallback={
           <div class="field">
             <span class="field-label">Sign-in</span>
-            <div class="field-note">You’ll sign in on Microsoft’s page, in your browser.</div>
+            <Show
+              when={google()}
+              fallback={<div class="field-note">You’ll sign in on Microsoft’s page, in your browser.</div>}
+            >
+              <div class="field-note">You’ll sign in on Google’s page, in your browser.</div>
+              <span class="field-help">
+                <button type="button" class="link-btn" onClick={() => setViaGoogle(false)}>
+                  Use an app password instead
+                </button>
+              </span>
+              <Show when={!hasClient()}>
+                <GoogleClientForm onDone={() => undefined} />
+              </Show>
+            </Show>
           </div>
         }
       >
@@ -114,17 +146,21 @@ export function AddAccountForm(props: { onAdded: (a: Account) => void; onCancel?
             ref={passwordEl}
             type="password"
             autocomplete="current-password"
-            placeholder={isGmail(email()) ? 'App password' : 'Password'}
+            placeholder={gmail() ? 'App password' : 'Password'}
             value={password()}
             onInput={(e) => setPassword(e.currentTarget.value)}
             required
           />
-          <Show when={isGmail(email())}>
+          <Show when={gmail()}>
             <span class="field-help">
               Gmail needs an app password. Create one at{' '}
               <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer">
                 myaccount.google.com/apppasswords
               </a>
+              , or{' '}
+              <button type="button" class="link-btn" onClick={() => setViaGoogle(true)}>
+                sign in with Google
+              </button>
               .
             </span>
           </Show>
@@ -186,19 +222,19 @@ export function AddAccountForm(props: { onAdded: (a: Account) => void; onCancel?
 
       <div class="form-actions">
         {/* while the browser sign-in is open, Cancel stops waiting for it */}
-        <Show when={props.onCancel || (busy() && microsoft())}>
+        <Show when={props.onCancel || (busy() && browser())}>
           <button
             type="button"
             class="btn secondary"
-            onClick={() => (busy() && microsoft() ? void api.cancelSignIn() : props.onCancel?.())}
-            disabled={busy() && !microsoft()}
+            onClick={() => (busy() && browser() ? void api.cancelSignIn() : props.onCancel?.())}
+            disabled={busy() && !browser()}
           >
             Cancel
           </button>
         </Show>
         <button type="submit" class="btn primary" disabled={!canSubmit()}>
-          <Show when={busy()} fallback={microsoft() ? 'Continue with Microsoft' : 'Add Account'}>
-            <span class="spinner small on-accent" /> {microsoft() ? 'Finish in your browser…' : 'Connecting…'}
+          <Show when={busy()} fallback={microsoft() ? 'Continue with Microsoft' : google() ? 'Continue with Google' : 'Add Account'}>
+            <span class="spinner small on-accent" /> {browser() ? 'Finish in your browser…' : 'Connecting…'}
           </Show>
         </button>
       </div>

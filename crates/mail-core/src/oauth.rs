@@ -46,7 +46,7 @@ pub struct SignInNeeded(pub String);
 
 impl std::fmt::Display for SignInNeeded {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Microsoft needs you to sign in again: {}", self.0)
+        write!(f, "You need to sign in again: {}", self.0)
     }
 }
 
@@ -59,6 +59,8 @@ pub struct Tokens {
     pub refresh_token: Option<String>,
     pub expires_in: u64,
     pub id_token: Option<String>,
+    /// What was granted, space-separated: Google lets the user untick a permission on its page.
+    pub scope: Option<String>,
 }
 
 // ------------------------------------------------------------- PKCE
@@ -253,6 +255,7 @@ async fn token_request(form: &[(&str, &str)]) -> Result<Tokens> {
         refresh_token: v["refresh_token"].as_str().map(str::to_string),
         expires_in: v["expires_in"].as_u64().unwrap_or(3600),
         id_token: v["id_token"].as_str().map(str::to_string),
+        scope: v["scope"].as_str().map(str::to_string),
     })
 }
 
@@ -318,12 +321,14 @@ fn parse_response(raw: &[u8]) -> Result<(u16, String)> {
     Ok((status, String::from_utf8_lossy(&body).into_owned()))
 }
 
-// ------------------------------------------------------------- Google (Contacts)
+// ------------------------------------------------------------- Google (mail, Contacts)
 
 const GOOGLE_AUTHORIZE: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_HOST: &str = "oauth2.googleapis.com";
 /// Contacts, read and write; and who signed in (the ID token's address).
 pub const GOOGLE_CONTACTS_SCOPES: &str = "https://www.googleapis.com/auth/contacts openid email";
+/// Mail (IMAP and SMTP take only this scope, Google's "restricted" one); and who signed in.
+pub const GOOGLE_MAIL_SCOPES: &str = "https://mail.google.com/ openid email";
 
 /// The user's own OAuth client (a Desktop app client made in Google Cloud Console).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -337,12 +342,19 @@ pub fn google_redirect(uri: &str) -> String {
     uri.replace("://localhost:", "://127.0.0.1:")
 }
 
-pub fn google_authorize_url(client: &GoogleClient, redirect: &str, state: &str, challenge: &str, login_hint: Option<&str>) -> String {
+pub fn google_authorize_url(
+    client: &GoogleClient,
+    scopes: &str,
+    redirect: &str,
+    state: &str,
+    challenge: &str,
+    login_hint: Option<&str>,
+) -> String {
     let mut q = form_urlencoded::Serializer::new(String::new());
     q.append_pair("client_id", &client.id)
         .append_pair("redirect_uri", redirect)
         .append_pair("response_type", "code")
-        .append_pair("scope", GOOGLE_CONTACTS_SCOPES)
+        .append_pair("scope", scopes)
         .append_pair("state", state)
         .append_pair("code_challenge", challenge)
         .append_pair("code_challenge_method", "S256")
@@ -353,6 +365,11 @@ pub fn google_authorize_url(client: &GoogleClient, redirect: &str, state: &str, 
         q.append_pair("login_hint", hint);
     }
     format!("{GOOGLE_AUTHORIZE}?{}", q.finish())
+}
+
+/// Whether Google's answer grants mail: the user can leave it unticked on Google's page.
+pub fn grants_google_mail(tokens: &Tokens) -> bool {
+    tokens.scope.as_deref().is_none_or(|s| s.split_whitespace().any(|x| x == "https://mail.google.com/"))
 }
 
 pub async fn google_exchange(client: &GoogleClient, code: &str, verifier: &str, redirect: &str) -> Result<Tokens> {
@@ -396,6 +413,7 @@ async fn google_token(form: &[(&str, &str)]) -> Result<Tokens> {
         refresh_token: v["refresh_token"].as_str().map(str::to_string),
         expires_in: v["expires_in"].as_u64().unwrap_or(3600),
         id_token: v["id_token"].as_str().map(str::to_string),
+        scope: v["scope"].as_str().map(str::to_string),
     })
 }
 
@@ -428,37 +446,57 @@ pub fn graph_key(email: &str) -> String {
     format!("{email}#graph")
 }
 
-/// Current access tokens for one Microsoft account, renewed when they're about to expire.
-pub struct MicrosoftSession {
+/// Where an account signed in with Google keeps the client it signed in with: its refresh token
+/// works only with that one, whatever client Settings has later.
+pub fn google_client_key(email: &str) -> String {
+    format!("{email}#google-client")
+}
+
+/// Who renews a session's tokens.
+pub enum Issuer {
+    /// Microsoft, for these scopes: mail (IMAP, SMTP) or Graph.
+    Microsoft(&'static str),
+    /// Google, with the client the account signed in with.
+    Google(GoogleClient),
+}
+
+/// Current access tokens for one signed-in account (Microsoft or Google), renewed when they're
+/// about to expire.
+pub struct Session {
     email: String,
     /// The refresh token's entry in the store (`email`, or `graph_key(email)` for Graph).
     key: String,
-    /// What its tokens are for: mail (IMAP, SMTP) or Graph.
-    scopes: &'static str,
+    issuer: Issuer,
     store: Arc<dyn TokenStore>,
     /// The access token and when it expires, by the wall clock: the monotonic clock stops
     /// while the computer sleeps, so after a night asleep a token would look fresh when it
     /// expired hours ago.
     current: tokio::sync::Mutex<Option<(String, SystemTime)>>,
-    /// The last renewal was refused: don't hammer Microsoft until a new sign-in (mail), or
+    /// The last renewal was refused: don't hammer the server until a new sign-in (mail), or
     /// (Graph, whose refusal can be a one-off: a token two renewals raced for) until the time
     /// given, when it tries again.
     refused: Mutex<Option<(String, Option<SystemTime>)>>,
 }
 
-impl MicrosoftSession {
-    pub fn new(email: &str, store: Arc<dyn TokenStore>) -> MicrosoftSession {
-        Self::for_scopes(email, email.to_string(), store, MICROSOFT_SCOPES)
+impl Session {
+    /// A Microsoft account's mail.
+    pub fn new(email: &str, store: Arc<dyn TokenStore>) -> Session {
+        Self::with(email, email.to_string(), store, Issuer::Microsoft(MICROSOFT_SCOPES))
+    }
+
+    /// A Google account's mail, renewed with the client it signed in with.
+    pub fn google(email: &str, client: GoogleClient, store: Arc<dyn TokenStore>) -> Session {
+        Self::with(email, email.to_string(), store, Issuer::Google(client))
     }
 
     /// Tokens for Microsoft Graph (`GRAPH_SCOPES`), from the account's own Graph refresh token
     /// (`graph_key`; an account set up before there was one starts from the mail one, once).
-    pub fn graph(email: &str, store: Arc<dyn TokenStore>) -> MicrosoftSession {
-        Self::for_scopes(email, graph_key(email), store, GRAPH_SCOPES)
+    pub fn graph(email: &str, store: Arc<dyn TokenStore>) -> Session {
+        Self::with(email, graph_key(email), store, Issuer::Microsoft(GRAPH_SCOPES))
     }
 
-    fn for_scopes(email: &str, key: String, store: Arc<dyn TokenStore>, scopes: &'static str) -> MicrosoftSession {
-        MicrosoftSession { email: email.to_string(), key, scopes, store, current: tokio::sync::Mutex::new(None), refused: Mutex::new(None) }
+    fn with(email: &str, key: String, store: Arc<dyn TokenStore>, issuer: Issuer) -> Session {
+        Session { email: email.to_string(), key, issuer, store, current: tokio::sync::Mutex::new(None), refused: Mutex::new(None) }
     }
 
     /// A token good for at least a few more minutes.
@@ -483,7 +521,15 @@ impl MicrosoftSession {
             Err(_) if self.key != self.email => (self.store.refresh_token(&self.email)?, true),
             Err(e) => return Err(e),
         };
-        let tokens = match microsoft_refresh_for(&refresh, self.scopes).await {
+        let answer = match &self.issuer {
+            Issuer::Microsoft(scopes) => microsoft_refresh_for(&refresh, scopes).await,
+            // Google's refusal (invalid_grant: revoked, expired) is the same thing here.
+            Issuer::Google(client) => google_refresh(client, &refresh).await.map_err(|e| match e.downcast_ref::<crate::gcontacts::PeopleError>() {
+                Some(crate::gcontacts::PeopleError::SignIn(why)) => anyhow!(SignInNeeded(format!("Google: {why}"))),
+                _ => e,
+            }),
+        };
+        let tokens = match answer {
             Ok(t) => t,
             Err(e) => {
                 if let Some(s) = e.downcast_ref::<SignInNeeded>() {
@@ -551,6 +597,36 @@ mod tests {
         for part in ["client_id=63148c30", "redirect_uri=http%3A%2F%2Flocalhost%3A4321", "code_challenge=ch", "code_challenge_method=S256", "state=st", "login_hint=john%40example.com", "offline_access"] {
             assert!(url.contains(part), "{part} in {url}");
         }
+    }
+
+    #[test]
+    fn google_mail_sign_in_asks_for_mail() {
+        let client = GoogleClient { id: "123-abc.apps.googleusercontent.com".into(), secret: "shh".into() };
+        let redirect = google_redirect("http://localhost:4321");
+        assert_eq!(redirect, "http://127.0.0.1:4321");
+        let url = google_authorize_url(&client, GOOGLE_MAIL_SCOPES, &redirect, "st", "ch", Some("john.doe@example.com"));
+        assert!(url.starts_with(GOOGLE_AUTHORIZE));
+        for part in [
+            "client_id=123-abc.apps.googleusercontent.com",
+            "scope=https%3A%2F%2Fmail.google.com%2F+openid+email",
+            "redirect_uri=http%3A%2F%2F127.0.0.1%3A4321",
+            "code_challenge=ch",
+            "access_type=offline",
+            "login_hint=john.doe%40example.com",
+        ] {
+            assert!(url.contains(part), "{part} in {url}");
+        }
+        // The client secret stays out of the browser.
+        assert!(!url.contains("shh"));
+    }
+
+    #[test]
+    fn mail_left_unticked_is_noticed() {
+        let t = |scope: Option<&str>| Tokens { access_token: String::new(), refresh_token: None, expires_in: 0, id_token: None, scope: scope.map(str::to_string) };
+        assert!(grants_google_mail(&t(Some("openid https://mail.google.com/ https://www.googleapis.com/auth/userinfo.email"))));
+        assert!(!grants_google_mail(&t(Some("openid https://www.googleapis.com/auth/userinfo.email"))));
+        // no scope in the answer: Gmail's server has the last word
+        assert!(grants_google_mail(&t(None)));
     }
 
     #[test]

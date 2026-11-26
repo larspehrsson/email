@@ -1095,6 +1095,42 @@ describe('accounts', () => {
     }
   });
 
+  test('a Gmail account signs in with Google instead of an app password, asking for the client first', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.settings .st-nav-item', { hasText: 'Accounts' }).click().catch(() => {});
+      await page.getByRole('button', { name: '+ Add account' }).click();
+      await page.fill('input[placeholder="you@example.com"]', 'jane@gmail.com');
+      // No Google client yet: an app password, with the way to sign in with Google instead
+      await page.locator('input[placeholder="App password"]').waitFor();
+      await page.getByRole('button', { name: 'sign in with Google' }).click();
+      const go = page.getByRole('button', { name: 'Continue with Google' });
+      assert.equal(await go.isDisabled(), true, 'needs the client first');
+      await page.locator('input[aria-label="Google client ID"]').fill('123-abc.apps.googleusercontent.com');
+      await page.locator('input[aria-label="Google client secret"]').fill('shh');
+      await page.getByRole('button', { name: 'Save client' }).click();
+      await page.locator('input[aria-label="Google client ID"]').waitFor({ state: 'detached' });
+      await go.click();
+      await page.waitForSelector('.sidebar .account-name:has-text("jane@gmail.com")', { timeout: 15000 });
+      // In Settings: signed in with Google, no password to update
+      await page.keyboard.press('ControlOrMeta+,');
+      const acct = page.locator('.st-acct', { hasText: 'jane@gmail.com' });
+      await acct.click();
+      await acct.locator('.st-signin', { hasText: 'With Google' }).waitFor();
+      assert.equal(await acct.getByRole('button', { name: 'Update password…' }).count(), 0);
+      // An app-password Gmail account switches over from its card (the client is there now)
+      const john = page.locator('.st-acct', { hasText: 'john.doe@example.com' });
+      await john.click();
+      await john.getByRole('button', { name: 'Sign in with Google instead…' }).click();
+      await john.locator('.st-signin', { hasText: 'With Google' }).waitFor({ timeout: 5000 });
+      assert.equal(await john.getByRole('button', { name: 'Update password…' }).count(), 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('the order and markers set by the user come back from the core', async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {

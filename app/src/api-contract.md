@@ -8,7 +8,7 @@ All JSON is camelCase. Timestamps are unix seconds. IDs are numbers.
 type Provider = 'gmail' | 'outlook' | 'imap';
 interface Account {
   id: number; email: string; displayName: string; provider: Provider;
-  auth: 'password' | 'microsoft';
+  auth: 'password' | 'microsoft' | 'google';
   keywords: boolean | null;  // server keeps keywords of our own (tags, snooze); null until its first sync. Outlook: false
   markLetter: string | null; // its marker's letter as the user set it; null: automatic
   graph: boolean;            // Microsoft: tags and snooze through Microsoft Graph (enable_graph)
