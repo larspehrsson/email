@@ -97,6 +97,7 @@ export function WhoStrip(props: {
             title={props.attachments === 1 ? 'Show the attachment' : `Show the ${props.attachments} attachments`}
             onClick={(e) => {
               e.stopPropagation();
+              e.currentTarget.blur();
               props.chips?.()?.scrollIntoView({ block: 'center', behavior: 'smooth' });
             }}
           >
