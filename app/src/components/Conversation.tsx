@@ -110,6 +110,9 @@ function ExpandedCard(props: { m: MessageSummary; me: Me; folderTag?: string; ac
         known={!!detail()}
         date={props.m.date}
         head={() => headEl}
+        attachments={detail()?.attachments.length ?? 0}
+        chips={() => headEl?.parentElement?.querySelector('.cm-att .att-chips')}
+        actions={<CardActions target={props.actions} />}
       />
       <header
         ref={headEl}

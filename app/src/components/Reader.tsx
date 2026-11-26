@@ -478,7 +478,7 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
                 message together, each as tall as it is (an expanded list just makes it longer). */}
             {/* Just under the band and outside the scroller, so it spans the pane, scrollbar too. */}
             <div class="who-dock">
-              <WhoStrip from={h().from} to={h().to} cc={h().cc} bcc={h().bcc} known={h().full} date={h().date} head={() => fromEl} scroller={() => scrollEl} />
+              <WhoStrip from={h().from} to={h().to} cc={h().cc} bcc={h().bcc} known={h().full} date={h().date} head={() => fromEl} scroller={() => scrollEl} attachments={h().attachments.length} chips={() => scrollEl?.querySelector('.reader-head .att-chips')} />
             </div>
             <div class="reader-scroll" tabIndex={-1} ref={scrollEl}>
             <div class="reader-page">
