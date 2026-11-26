@@ -159,8 +159,8 @@ const PRESET_KEYS: Record<PresetId, Record<string, Key[]>> = {
     // Gmail has neither: Thunderbird's keys
     source: ['Mod+U'],
     'mark-all-read': ['C'],
-    // a browser's refresh key
-    'check-mail': ['F5'],
+    // a browser's refresh key, and one without fn on a Mac's keyboard (Apple Mail's)
+    'check-mail': ['F5', 'Mod+Shift+N'],
   },
   thunderbird: {
     next: ['f'],
@@ -187,8 +187,9 @@ const PRESET_KEYS: Record<PresetId, Record<string, Key[]>> = {
     'expand-all': ['*'],
     source: ['Mod+U'],
     'mark-all-read': ['C'],
-    // Thunderbird's "Get new messages" (also Mod+T, here group by conversation)
-    'check-mail': ['F5'],
+    // Thunderbird's "Get new messages" (also Mod+T, here group by conversation), and one without
+    // fn on a Mac's keyboard (Apple Mail's)
+    'check-mail': ['F5', 'Mod+Shift+N'],
   },
 };
 

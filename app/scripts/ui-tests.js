@@ -493,6 +493,10 @@ describe('check for new mail', () => {
       await page.keyboard.press('F5');
       await page.waitForFunction(() => window.__checks === 2, null, { timeout: 2000 });
       await page.waitForFunction(() => !document.querySelector('.sf-check.spinning'), null, { timeout: 4000 });
+      // and a key that needs no fn on a Mac's keyboard
+      await page.keyboard.press('ControlOrMeta+Shift+N');
+      await page.waitForFunction(() => window.__checks === 3, null, { timeout: 2000 });
+      await page.waitForFunction(() => !document.querySelector('.sf-check.spinning'), null, { timeout: 4000 });
       // listed among the shortcuts, where it can be changed
       await page.keyboard.press('ControlOrMeta+,');
       await page.locator('.st-nav-item', { hasText: 'Keyboard' }).click();
