@@ -1774,6 +1774,37 @@ describe('recipients', () => {
   });
 });
 
+describe('conversation actions', () => {
+  test('the band says what it acts on; Reply starts from the latest message that isn\u2019t in Trash', async () => {
+    const { page, errors, close } = await open({ threaded: true });
+    try {
+      // A conversation with a message in Trash.
+      await page.locator('.row', { hasText: 'Hannah' }).first().click();
+      const trashRow = page.locator('.reveal-row[data-reveal="trash"]');
+      await trashRow.waitFor();
+      await trashRow.locator('button', { hasText: 'Show' }).click();
+      await page.locator('.reveal-row[data-reveal="trash"] button', { hasText: 'Hide' }).waitFor();
+      await page.waitForTimeout(400);
+      // The last card that isn't in Trash: whom Reply answers.
+      const senders = await page.locator('.conv-scroll .card-slot').evaluateAll((slots) =>
+        slots.map((s) => ({
+          trash: (s.querySelector('.cm-folder')?.textContent ?? '').trim() === 'Trash',
+          from: (s.querySelector('.reader-from-name, .cm-from')?.textContent ?? '').trim(),
+        })),
+      );
+      assert.ok(senders.some((x) => x.trash), 'a message from Trash is shown');
+      const latest = senders.filter((x) => !x.trash).at(-1);
+      const band = page.locator('.reader-band .act-bar');
+      assert.equal(await band.locator('.act-btn').first().getAttribute('aria-label'), `Reply to the latest message (from ${latest.from})`);
+      assert.ok(await band.locator('[aria-label="Archive the conversation"]').count());
+      assert.ok(await band.locator('[aria-label="Delete the conversation"]').count());
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('images', () => {
   test('always from this sender: its other mail loads images too; Settings lists it', async () => {
     const { page, errors, close } = await open({ threaded: false });

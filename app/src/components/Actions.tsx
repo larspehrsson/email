@@ -259,6 +259,12 @@ export interface ActionTarget {
   starIds?: number[];
   /** several: Forward sends them along as attachments */
   forwardAll?: () => void;
+  /** what Archive, Delete, Move and Spam take out of the folder, when not all of `ids`: a
+   *  conversation's messages in the folder being viewed, not those only revealed there */
+  removeIds?: number[];
+  /** the band over a conversation: its buttons say what they act on (the conversation, or for
+   *  Reply and Forward its latest message, from `replyFrom`) */
+  conversation?: { replyFrom: string | null };
 }
 
 function useActions(t: () => ActionTarget | null) {
@@ -281,24 +287,26 @@ function useActions(t: () => ActionTarget | null) {
     const x = t();
     if (!x || x.ids.length === 0) return;
     const base = { ids: x.ids, folderId: x.folderId, advance: x.advance, items: x.items };
+    /** for what takes the messages out of the folder */
+    const out = { ...base, ids: x.removeIds ?? x.ids };
     switch (c) {
       case 'archive':
-        return runAction({ kind: 'archive' }, base);
+        return runAction({ kind: 'archive' }, out);
       case 'delete':
-        if (!inTrash() && x.items && x.ids.length > 1) {
+        if (!inTrash() && x.items && out.ids.length > 1) {
           // Several picked together: say how many first.
-          const n = x.ids.length;
+          const n = out.ids.length;
           if (!(await confirmDialog(`Delete ${n.toLocaleString()} messages?`, `Delete ${n.toLocaleString()} messages`))) return;
         }
         if (inTrash()) {
-          const n = x.ids.length;
+          const n = out.ids.length;
           const ok = await confirmDialog(`Delete ${n === 1 ? '1 message' : `${n} messages`} forever? This can't be undone.`, 'Delete forever');
-          if (ok) return runAction({ kind: 'deleteForever' }, base);
+          if (ok) return runAction({ kind: 'deleteForever' }, out);
           return;
         }
-        return runAction({ kind: 'trash' }, base);
+        return runAction({ kind: 'trash' }, out);
       case 'spam':
-        return runAction({ kind: inSpam() ? 'notSpam' : 'spam' }, base);
+        return runAction({ kind: inSpam() ? 'notSpam' : 'spam' }, out);
       case 'unread':
         return runAction({ kind: x.anyUnread ? 'read' : 'unread' }, { ...base, advance: false });
       case 'star':
@@ -401,7 +409,7 @@ function useActions(t: () => ActionTarget | null) {
     if (!a || !x || !f) return null;
     return (
       <MovePicker
-        messageIds={x.ids}
+        messageIds={x.removeIds ?? x.ids}
         accountId={f.accountId}
         excludeFolderId={x.folderId}
         anchor={a}
@@ -411,7 +419,7 @@ function useActions(t: () => ActionTarget | null) {
         }}
         onPick={(dest) => {
           setPicker(null);
-          void runAction({ kind: 'move', targetFolderId: dest.id }, { ids: x.ids, folderId: x.folderId, advance: x.advance, items: x.items });
+          void runAction({ kind: 'move', targetFolderId: dest.id }, { ids: x.removeIds ?? x.ids, folderId: x.folderId, advance: x.advance, items: x.items });
         }}
       />
     );
@@ -462,47 +470,55 @@ export function HeaderActions(props: { target: ActionTarget | null }) {
   setHeaderHandler(handler);
   onCleanup(() => clearHeaderHandler(handler));
   const x = () => props.target;
+  /** Over a conversation: what a button acts on, said in its tooltip. */
+  const conv = () => x()?.conversation;
+  const latest = (plain: string, verb: string) => {
+    const c = conv();
+    if (!c) return plain;
+    return c.replyFrom ? `${verb} the latest message (from ${c.replyFrom})` : `${plain}: no message to answer here`;
+  };
+  const whole = (plain: string, conversation: string) => (conv() ? conversation : plain);
   return (
     <div class="act-bar" role="toolbar" aria-label="Message actions" classList={{ off: !x() }}>
       <Show when={!x()?.forwardAll}>
-        <Btn label="Reply" key={hint('reply')} onClick={() => void a.command('reply')}>
+        <Btn label={latest('Reply', 'Reply to')} key={hint('reply')} onClick={() => void a.command('reply')}>
           <ReplyIcon />
         </Btn>
-        <Btn label="Reply all" key={hint('reply-all')} onClick={() => void a.command('replyAll')}>
+        <Btn label={latest('Reply all', 'Reply all to')} key={hint('reply-all')} onClick={() => void a.command('replyAll')}>
           <ReplyAllIcon />
         </Btn>
       </Show>
-      <Btn label={x()?.forwardAll ? 'Forward as attachments' : 'Forward'} key={hint('forward')} onClick={() => void a.command('forward')}>
+      <Btn label={x()?.forwardAll ? 'Forward as attachments' : latest('Forward', 'Forward')} key={hint('forward')} onClick={() => void a.command('forward')}>
         <ForwardIcon />
       </Btn>
       <span class="act-sep" />
-      <Btn label="Archive" key={hint('archive')} onClick={() => void a.command('archive')}>
+      <Btn label={whole('Archive', 'Archive the conversation')} key={hint('archive')} onClick={() => void a.command('archive')}>
         <ArchiveIcon />
       </Btn>
       <Show
         when={a.inTrash()}
         fallback={
-          <Btn label="Delete" key={hint('delete')} onClick={() => void a.command('delete')}>
+          <Btn label={whole('Delete', 'Delete the conversation')} key={hint('delete')} onClick={() => void a.command('delete')}>
             <TrashIcon />
           </Btn>
         }
       >
-        <Btn label="Delete forever" key={hint('delete')} danger onClick={() => void a.command('delete')}>
+        <Btn label={whole('Delete forever', 'Delete the conversation forever')} key={hint('delete')} danger onClick={() => void a.command('delete')}>
           <DeleteForeverIcon />
         </Btn>
       </Show>
-      <Btn label="Move to…" key={hint('move')} ref={(e) => (moveBtn = e)} onClick={(el) => void a.command('move', el)}>
+      <Btn label={whole('Move to…', 'Move the conversation to…')} key={hint('move')} ref={(e) => (moveBtn = e)} onClick={(el) => void a.command('move', el)}>
         <MoveIcon />
       </Btn>
       <Show
         when={a.inSpam()}
         fallback={
-          <Btn label="Spam" key={hint('spam')} onClick={() => void a.command('spam')}>
+          <Btn label={whole('Spam', 'Mark the conversation as spam')} key={hint('spam')} onClick={() => void a.command('spam')}>
             <JunkIcon />
           </Btn>
         }
       >
-        <Btn label="Not spam" key={hint('spam')} onClick={() => void a.command('spam')}>
+        <Btn label={whole('Not spam', 'The conversation isn’t spam')} key={hint('spam')} onClick={() => void a.command('spam')}>
           <InboxIcon />
         </Btn>
       </Show>

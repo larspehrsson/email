@@ -456,20 +456,29 @@ function ConversationView(props: { thread: ThreadSummary; ref?: (el: HTMLElement
     void unlistenP.then((un) => un());
   });
 
-  // Header actions act on every message being viewed (incl. revealed ones); star = newest.
+  // Header actions: read/unread, tags and snooze act on every message being viewed (revealed
+  // ones too); archive, delete, move and spam only on those in the folder being viewed (a look
+  // at mail revealed from Trash or elsewhere doesn't take it along). Reply, Reply all and
+  // Forward start from the newest message that's mail (not a draft, not in Trash or Spam);
+  // Star is the newest's.
   const headerTarget = (): ActionTarget | null => {
     if (!state.loaded || state.list.length === 0) return null;
     const newest = state.list[state.list.length - 1]!;
+    const role = (m: MessageSummary) => folderById(m.folderId)?.role;
+    const replyTo = [...state.list].reverse().find((m) => !isDraftMessage(m) && role(m) !== 'trash' && role(m) !== 'junk') ?? null;
+    const here = state.list.filter((m) => m.folderId === t.folderId).map((m) => m.id);
     return {
       ids: state.list.map((m) => m.id),
+      removeIds: here.length ? here : undefined,
       folderId: t.folderId,
       anyUnread: state.list.some((m) => m.unread),
       starId: newest.id,
-      replyId: newest.id,
+      replyId: replyTo?.id ?? null,
       starred: newest.flagged,
       advance: true,
       tagSets: state.list.map((m) => m.tags ?? []),
       snoozedUntil: pendingSnooze(state.list),
+      conversation: { replyFrom: replyTo ? replyTo.fromName || replyTo.fromAddr : null },
     };
   };
   /** One card's own actions; it advances only when that message is the last one here. */
