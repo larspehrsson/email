@@ -285,3 +285,18 @@ jobs:
           node .github/latest-json.js "$dir" "$APP_VERSION" "${GITHUB_SHA:0:7}" "https://github.com/$REPO/releases/download/latest" > "$RUNNER_TEMP/latest.json"
           cat "$RUNNER_TEMP/latest.json"
           gh release upload latest "$RUNNER_TEMP/latest.json" --clobber
+
+      # The notes: a download table grouped by system, from the files now on the release
+      # (GitHub lists the assets flat and alphabetically; the notes show above them).
+      - name: Release notes
+        # Cosmetic, after the release is published: a failure keeps the plain notes, and
+        # doesn't fail the build.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          MAC_SIGNED: ${{ secrets.APPLE_CERTIFICATE != '' }}
+        run: |
+          gh release view latest --json assets | node .github/release-notes.js "$APP_VERSION" "$GITHUB_SHA" "$REPO" "$MAC_SIGNED" "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+          gh release edit latest --notes-file "$RUNNER_TEMP/notes.md"

@@ -1729,11 +1729,19 @@ describe('sender pane', () => {
       await page.locator('.sp-row.current').waitFor();
       await page.locator('.sp-row.current').click();
       await page.keyboard.press('ControlOrMeta+a');
-      await page.waitForFunction(() => document.querySelectorAll('.sp-row.on').length > 0);
-      const picked = await page.locator('.sp-row.on').count();
+      // Every row picked (counting at the first one raced the rest: Delete then asked first,
+      // unanswered, and no toast came).
+      await page.waitForFunction(() => {
+        const on = document.querySelectorAll('.sp-row.on').length;
+        return on > 0 && on === document.querySelectorAll('.sp-row').length;
+      });
       await page.keyboard.press('Delete');
-      if (picked > 1) await page.locator('.confirm-backdrop .btn.danger').click();
-      await page.locator('.toast', { hasText: 'Deleted' }).waitFor();
+      // Several ask "Delete N messages?" first; one doesn't.
+      const confirm = page.locator('.confirm-backdrop .btn.danger');
+      const deleted = page.locator('.toast', { hasText: 'Deleted' });
+      await Promise.race([confirm.waitFor(), deleted.waitFor()]);
+      if (await confirm.count()) await confirm.click();
+      await deleted.waitFor();
       await page.waitForTimeout(400);
       assert.ok((await page.locator('.folder-layer .row').count()) > 0, 'other conversations remain');
       assert.equal(await page.locator('.reader-empty').count(), 0, 'still reading, not blank');
