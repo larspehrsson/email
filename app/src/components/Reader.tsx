@@ -476,9 +476,12 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
             </header>
             {/* Under the band, one page that scrolls: sender, recipients, attachments and the
                 message together, each as tall as it is (an expanded list just makes it longer). */}
+            {/* Just under the band and outside the scroller, so it spans the pane, scrollbar too. */}
+            <div class="who-dock">
+              <WhoStrip from={h().from} to={h().to} cc={h().cc} bcc={h().bcc} known={h().full} date={h().date} head={() => fromEl} scroller={() => scrollEl} />
+            </div>
             <div class="reader-scroll" tabIndex={-1} ref={scrollEl}>
             <div class="reader-page">
-            <WhoStrip from={h().from} to={h().to} cc={h().cc} bcc={h().bcc} known={h().full} date={h().date} head={() => fromEl} />
             <div class="reader-head">
               <div class="reader-from" ref={fromEl}>
                 <Avatar name={h().from.name} addr={h().from.addr} size={40} />
