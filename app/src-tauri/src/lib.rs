@@ -314,6 +314,26 @@ async fn microsoft_sign_in_again(app: tauri::AppHandle, core: State<'_, Arc<Core
     core.microsoft_sign_in_again(account_id, |url| open_sign_in(&app, &url)).await.map_err(err)
 }
 
+/// Add a Gmail or Google Workspace account: sign in in the system browser, with the Google
+/// client in Settings.
+#[tauri::command]
+async fn add_google_account(
+    app: tauri::AppHandle,
+    core: State<'_, Arc<Core>>,
+    login_hint: Option<String>,
+    display_name: Option<String>,
+) -> Res<Account> {
+    let core = core.inner().clone();
+    core.add_google_account(login_hint, display_name, |url| open_sign_in(&app, &url)).await.map_err(err)
+}
+
+/// Sign a Gmail account in with Google: again (expired or revoked), or instead of its app password.
+#[tauri::command]
+async fn google_sign_in(app: tauri::AppHandle, core: State<'_, Arc<Core>>, account_id: i64) -> Res<()> {
+    let core = core.inner().clone();
+    core.google_sign_in(account_id, |url| open_sign_in(&app, &url)).await.map_err(err)
+}
+
 /// Tags and snooze for a Microsoft account through Microsoft Graph: a browser sign-in asking
 /// for it (`Core::enable_graph`).
 #[tauri::command]
@@ -1701,6 +1721,8 @@ pub fn run() {
             detect_provider,
             add_microsoft_account,
             microsoft_sign_in_again,
+            add_google_account,
+            google_sign_in,
             cancel_sign_in,
             account_storage,
             attachment_counts,

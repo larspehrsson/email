@@ -152,8 +152,8 @@ struct Shared {
     store: Arc<Store>,
     account: Account,
     server: ServerConfig,
-    /// A Microsoft (OAuth) account's access tokens; None: `server` has the password.
-    microsoft: Option<Arc<crate::oauth::MicrosoftSession>>,
+    /// An account signed in with Microsoft or Google: its access tokens; None: `server` has the password.
+    oauth: Option<Arc<crate::oauth::Session>>,
     /// A Microsoft account's tags and snooze, through Graph (`crate::graph`), when allowed.
     graph: Option<Arc<crate::graph::Graph>>,
     /// Wakes the Graph task (our own changes went out).
@@ -260,7 +260,7 @@ impl Shared {
     /// What to sign in with now: the password, or a current access token (renewed when it's
     /// about to expire).
     async fn credentials(&self) -> Result<imap::Credentials> {
-        match &self.microsoft {
+        match &self.oauth {
             Some(session) => Ok(imap::Credentials::OAuth2 { access_token: session.access_token().await? }),
             None => Ok(self.server.credentials.clone()),
         }
@@ -294,7 +294,7 @@ impl Shared {
                     // A turned-down access token may just have expired (or been revoked by a
                     // password change elsewhere): renew it and try once more before asking
                     // for a new sign-in.
-                    if let (Some(session), imap::Credentials::OAuth2 { access_token }) = (&self.microsoft, &cfg.credentials) {
+                    if let (Some(session), imap::Credentials::OAuth2 { access_token }) = (&self.oauth, &cfg.credentials) {
                         if imap::is_auth_error(&e) && !renewed {
                             tracing::info!(account = self.account.email, "access token turned down; renewing: {e:#}");
                             session.forget(access_token).await;
@@ -352,7 +352,7 @@ impl AccountSync {
         store: Arc<Store>,
         account: Account,
         server: ServerConfig,
-        microsoft: Option<Arc<crate::oauth::MicrosoftSession>>,
+        oauth: Option<Arc<crate::oauth::Session>>,
         graph: Option<Arc<crate::graph::Graph>>,
         strategy: Arc<dyn HeaderSync>,
         events: broadcast::Sender<CoreEvent>,
@@ -362,7 +362,7 @@ impl AccountSync {
         let (urgent_tx, urgent_rx) = mpsc::unbounded_channel();
         let shared = Arc::new(Shared {
             store,
-            microsoft,
+            oauth,
             graph,
             graph_refresh: Notify::new(),
             header: Mutex::new(initial_status(account.id)),

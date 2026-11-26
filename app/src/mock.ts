@@ -1674,6 +1674,39 @@ export function createMockBackend(): Backend {
       await sleep(2000);
       setStatus(accountId, 'idle', null, 0, 0, null);
     },
+    async add_google_account({ loginHint, displayName }) {
+      if (!googleLoad().clientId) throw 'Add your Google client ID and secret first.';
+      const ok = await new Promise<boolean>((resolve) => {
+        signInCancel = () => resolve(false);
+        setTimeout(() => resolve(true), 1500);
+      });
+      signInCancel = null;
+      if (!ok) throw 'Sign-in cancelled.';
+      const email = (loginHint ?? '').trim() || 'john.doe@gmail.com';
+      const known = accounts.find((x) => x.email === email);
+      if (known) {
+        known.auth = 'google';
+        return { ...known };
+      }
+      const acc = createAccount(email, displayName?.trim() || email, 'gmail', SMALL_FOLDERS);
+      acc.auth = 'google';
+      void simulateSync(acc, 2_400, 'imap.gmail.com');
+      emit('folders-changed', { accountId: acc.id });
+      return { ...acc };
+    },
+    async google_sign_in({ accountId }) {
+      const acc = accounts.find((x) => x.id === accountId);
+      if (!acc || acc.provider !== 'gmail') throw 'Only Gmail and Google Workspace accounts sign in with Google.';
+      if (!googleLoad().clientId) throw 'Add your Google client ID and secret first.';
+      const ok = await new Promise<boolean>((resolve) => {
+        signInCancel = () => resolve(false);
+        setTimeout(() => resolve(true), 1500);
+      });
+      signInCancel = null;
+      if (!ok) throw 'Sign-in cancelled.';
+      acc.auth = 'google';
+      setStatus(accountId, 'idle', null, 0, 0, null);
+    },
     async cancel_sign_in() {
       signInCancel?.();
     },

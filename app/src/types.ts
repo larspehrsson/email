@@ -8,7 +8,7 @@ export interface Account {
   displayName: string;
   provider: Provider;
   /** how it signs in: a password (kept in the keychain) or Microsoft's sign-in page */
-  auth: 'password' | 'microsoft';
+  auth: 'password' | 'microsoft' | 'google';
   /** its server keeps keywords we make up (tags, snooze); null until the first sync tells */
   keywords: boolean | null;
   /** Microsoft: tags and snooze go through Microsoft Graph (the user allowed it) */
@@ -659,6 +659,8 @@ export interface CommandMap {
   detect_provider: { args: { email: string }; ret: Provider | null };
   add_microsoft_account: { args: { loginHint: string | null; displayName: string | null }; ret: Account };
   microsoft_sign_in_again: { args: { accountId: number }; ret: void };
+  add_google_account: { args: { loginHint: string | null; displayName: string | null }; ret: Account };
+  google_sign_in: { args: { accountId: number }; ret: void };
   cancel_sign_in: { args: undefined; ret: void };
   list_folders: { args: { accountId: number }; ret: Folder[] };
   open_folder: { args: { folderId: number }; ret: void };
