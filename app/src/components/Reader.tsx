@@ -1,4 +1,5 @@
 import { Select } from './Select';
+import { WhoStrip } from './WhoStrip';
 import { AutoHeightFrame } from './AutoHeightFrame';
 import { addressMenu } from './AddressMenu';
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, Show, Switch } from 'solid-js';
@@ -380,6 +381,9 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
   });
   onCleanup(() => clearTimeout(retryTimer));
 
+  /** The sender's block, for the strip that stands in for it once scrolled away. */
+  let fromEl: HTMLDivElement | undefined;
+
   // Header data: prefer full detail, fall back to the list summary for an instant paint.
   const head = createMemo(() => {
     const d = detail();
@@ -453,10 +457,24 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
                 </Show>
                 <Show when={h().attachments.length > 0}>
                   <span class="dot-sep">·</span>
-                  <span class="band-attach">
+                  {/* Brings the chips into sight, when they're scrolled away. */}
+                  <button
+                    class="band-attach"
+                    title={h().attachments.length === 1 ? 'Show the attachment' : 'Show the attachments'}
+                    onClick={(e) => {
+                      e.currentTarget.blur();
+                      const chips = scrollEl?.querySelector('.reader-head .att-chips');
+                      if (!chips || !scrollEl) return;
+                      const r = chips.getBoundingClientRect();
+                      const v = scrollEl.getBoundingClientRect();
+                      // in sight already (and not under the strip): stay put
+                      if (r.top >= v.top + 34 && r.bottom <= v.bottom) return;
+                      chips.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                    }}
+                  >
                     <PaperclipIcon size={12} />
                     {h().attachments.length} {h().attachments.length === 1 ? 'attachment' : 'attachments'}
-                  </span>
+                  </button>
                 </Show>
                 <Show when={actionTarget()}>
                   {(x) => (
@@ -472,10 +490,14 @@ export function Reader(props: { ref?: (el: HTMLElement) => void }) {
             </header>
             {/* Under the band, one page that scrolls: sender, recipients, attachments and the
                 message together, each as tall as it is (an expanded list just makes it longer). */}
+            {/* Just under the band and outside the scroller, so it spans the pane, scrollbar too. */}
+            <div class="who-dock">
+              <WhoStrip from={h().from} to={h().to} cc={h().cc} bcc={h().bcc} known={h().full} head={() => fromEl} scroller={() => scrollEl} />
+            </div>
             <div class="reader-scroll" tabIndex={-1} ref={scrollEl}>
             <div class="reader-page">
             <div class="reader-head">
-              <div class="reader-from">
+              <div class="reader-from" ref={fromEl}>
                 <Avatar name={h().from.name} addr={h().from.addr} size={40} />
                 <div class="reader-from-text">
                   <div class="reader-from-line">

@@ -1014,6 +1014,125 @@ body.resizing iframe {
   text-decoration: underline;
 }
 
+/* Who sent it and when, kept in sight once the header has scrolled away (WhoStrip.tsx): sticky
+   at the top of the reader or of a conversation card, overlaying the message (it takes no room:
+   the negative margin), shown only while the header is out of sight. */
+.who-strip {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: 34px;
+  margin-bottom: -34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 28px;
+  background: linear-gradient(var(--bg-band), var(--bg-band)), var(--bg);
+  border-bottom: 1px solid var(--sep);
+  font-size: 12.5px;
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms var(--ease);
+}
+/* The reader's: docked under the band, over the top of the scroller (and its scrollbar). */
+.who-dock {
+  flex: none;
+  position: relative;
+  height: 0;
+  z-index: 3;
+}
+.who-dock .who-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  margin: 0;
+}
+.who-strip.on {
+  opacity: 1;
+  pointer-events: auto;
+}
+.card-msg .who-strip {
+  /* flush under the band: the conversation's scroller has 12px of padding at the top */
+  top: -12px;
+  padding: 0 16px 0 18px;
+  background: linear-gradient(var(--bg-band), var(--bg-band)), var(--bg-elev);
+}
+.who-name {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+  color: var(--text);
+}
+.who-addr {
+  flex: none;
+  max-width: 30%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-3);
+}
+.who-to {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-3);
+}
+.who-end {
+  flex: none;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.who-date {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+/* a conversation card's own buttons, over the date on hover (as in its header) */
+.who-when {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.who-when .card-acts {
+  right: -4px;
+  padding-left: 0;
+  background: none;
+}
+/* keyboard focus only (:focus-visible): a click leaves focus on a button, and the strip would
+   keep showing its buttons after it's scrolled away and back */
+.who-strip.has-acts:hover .who-date,
+.who-strip.has-acts:has(:focus-visible) .who-date,
+.who-strip.has-acts:has([aria-expanded='true']) .who-date {
+  visibility: hidden;
+}
+.who-strip:hover .card-acts,
+.who-strip:has(:focus-visible) .card-acts,
+.who-strip .card-acts:has([aria-expanded='true']) {
+  opacity: 1;
+  pointer-events: auto;
+}
+.who-clip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  color: var(--text-3);
+  font-size: 12px;
+  cursor: pointer;
+}
+.who-clip:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
 /* Under the band: one page that scrolls (Reader.tsx), the sender, recipients, attachments and
    the message together; the message's frame grows to its content (AutoHeightFrame). */
 .reader-scroll {
@@ -1474,7 +1593,9 @@ body.resizing iframe {
   border: 1px solid var(--sep);
   border-radius: 12px;
   background: var(--bg-elev);
-  overflow: hidden;
+  /* clip, not hidden: hidden would make the card its own scroller, and its sender strip
+     (WhoStrip) couldn't stick */
+  overflow: clip;
   animation: fade-in 140ms var(--ease);
 }
 :where(:root[data-scheme='dark']) .card-msg {
@@ -2288,6 +2409,16 @@ body.resizing iframe {
   display: inline-flex;
   align-items: center;
   gap: 3px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.band-attach:hover {
+  color: var(--text);
+  text-decoration: underline;
 }
 
 /* single-message: sender / recipients / chips just below the line, scrolling with the message */
