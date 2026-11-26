@@ -1098,13 +1098,15 @@ body.resizing iframe {
   padding-left: 0;
   background: none;
 }
+/* keyboard focus only (:focus-visible): a click leaves focus on a button, and the strip would
+   keep showing its buttons after it's scrolled away and back */
 .who-strip.has-acts:hover .who-date,
-.who-strip.has-acts:focus-within .who-date,
+.who-strip.has-acts:has(:focus-visible) .who-date,
 .who-strip.has-acts:has([aria-expanded='true']) .who-date {
   visibility: hidden;
 }
 .who-strip:hover .card-acts,
-.who-strip:focus-within .card-acts,
+.who-strip:has(:focus-visible) .card-acts,
 .who-strip .card-acts:has([aria-expanded='true']) {
   opacity: 1;
   pointer-events: auto;
