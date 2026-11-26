@@ -12,7 +12,6 @@ import { PaperclipIcon } from './Icons';
 // card comes up, and scrolling back brings it back. It takes no room (it overlays the top of the
 // message) and shows only while the header is out of sight; a click brings the header back.
 // The reader's leaves out the date and paperclip: its band shows both all the time.
-// An experiment (2026-11-25).
 
 const DATE = new Intl.DateTimeFormat(undefined, clock({ weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }));
 
