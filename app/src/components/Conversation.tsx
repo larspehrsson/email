@@ -15,6 +15,7 @@ import {
   takeConversationFocus,
 } from '../state';
 import { ForwardIcon, ImageIcon, PaperclipIcon, ReplyIcon } from './Icons';
+import { WhoStrip } from './WhoStrip';
 import { AlwaysLoad, Recipients, AttachmentChips, Avatar, BodySkeleton, buildSrcdoc, PlainBody, ReaderEmpty } from './Reader';
 import { DRAG } from '../lib/platform';
 import { CardActions, HeaderActions, type ActionTarget } from './Actions';
@@ -87,6 +88,8 @@ function ExpandedCard(props: { m: MessageSummary; me: Me; folderTag?: string; ac
   const id = props.m.id;
   const body = createMessageBody(id);
   const detail = () => body.shown()?.d ?? null;
+  /** The header, for the strip that stands in for it once scrolled away. */
+  let headEl: HTMLElement | undefined;
 
   // Mark read once the body is actually on screen.
   let marked = false;
@@ -99,7 +102,17 @@ function ExpandedCard(props: { m: MessageSummary; me: Me; folderTag?: string; ac
 
   return (
     <article class="card-msg expanded" classList={{ unread: props.m.unread }}>
+      <WhoStrip
+        from={{ name: props.m.fromName || null, addr: props.m.fromAddr }}
+        to={detail()?.to ?? []}
+        cc={detail()?.cc ?? []}
+        bcc={detail()?.bcc}
+        known={!!detail()}
+        date={props.m.date}
+        head={() => headEl}
+      />
       <header
+        ref={headEl}
         class="cm-head cm-toggle conv-nav"
         role="button"
         tabIndex={0}

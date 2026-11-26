@@ -1014,6 +1014,61 @@ body.resizing iframe {
   text-decoration: underline;
 }
 
+/* Who sent it and when, kept in sight once the header has scrolled away (WhoStrip.tsx): sticky
+   at the top of the reader or of a conversation card, overlaying the message (it takes no room:
+   the negative margin), shown only while the header is out of sight. */
+.who-strip {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: 34px;
+  margin-bottom: -34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 28px;
+  background: linear-gradient(var(--bg-band), var(--bg-band)), var(--bg);
+  border-bottom: 1px solid var(--sep);
+  font-size: 12.5px;
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms var(--ease);
+}
+.who-strip.on {
+  opacity: 1;
+  pointer-events: auto;
+}
+.card-msg .who-strip {
+  /* flush under the band: the conversation's scroller has 12px of padding at the top */
+  top: -12px;
+  padding: 0 16px 0 18px;
+  background: linear-gradient(var(--bg-band), var(--bg-band)), var(--bg-elev);
+}
+.who-name {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+  color: var(--text);
+}
+.who-to {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-3);
+}
+.who-date {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Under the band: one page that scrolls (Reader.tsx), the sender, recipients, attachments and
    the message together; the message's frame grows to its content (AutoHeightFrame). */
 .reader-scroll {
@@ -1474,7 +1529,9 @@ body.resizing iframe {
   border: 1px solid var(--sep);
   border-radius: 12px;
   background: var(--bg-elev);
-  overflow: hidden;
+  /* clip, not hidden: hidden would make the card its own scroller, and its sender strip
+     (WhoStrip) couldn't stick */
+  overflow: clip;
   animation: fade-in 140ms var(--ease);
 }
 :where(:root[data-scheme='dark']) .card-msg {
