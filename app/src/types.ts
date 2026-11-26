@@ -282,8 +282,10 @@ export interface ContactDetails {
   link: string | null;
 }
 export interface GoogleStatus {
-  /** the user's OAuth client (null: not set yet) */
+  /** the user's own OAuth client (null: not set) */
   clientId: string | null;
+  /** this build has the app's own client: Google sign-in works without the user's */
+  builtIn: boolean;
   links: GoogleLink[];
 }
 

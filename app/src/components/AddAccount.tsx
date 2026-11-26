@@ -2,7 +2,7 @@ import { createSignal, onCleanup, onMount, Show } from 'solid-js';
 import { api, errorMessage, type Account, type Provider } from '../api';
 import { AlertIcon, ChevronIcon, CloseIcon, MailIcon } from './Icons';
 import { DRAG } from '../lib/platform';
-import { googleStatus, reloadGoogleStatus } from '../lib/googleContacts';
+import { googleReady, reloadGoogleStatus } from '../lib/googleContacts';
 import { GoogleClientForm } from './GoogleContacts';
 
 function isGmail(email: string) {
@@ -52,12 +52,12 @@ export function AddAccountForm(props: { onAdded: (a: Account) => void; onCancel?
   /** Microsoft accounts sign in on Microsoft's page (unless a server is set by hand). */
   const microsoft = () => provider() === 'outlook' && !host().trim();
   /** Gmail and Google Workspace (by its MX records) can sign in on Google's page instead of with
-   *  an app password: with the user's own Google client for now, so that's the way only once
-   *  there is one, unless they ask for it. */
+   *  an app password: with the app's own Google client (release builds), else the user's, so
+   *  in a build without the app's that's the way only once the user has one, unless they ask. */
   const gmail = () => (provider() === 'gmail' || isGmail(email())) && !host().trim();
   const [viaGoogle, setViaGoogle] = createSignal<boolean | null>(null);
-  const google = () => gmail() && (viaGoogle() ?? !!googleStatus()?.clientId);
-  const hasClient = () => !!googleStatus()?.clientId;
+  const hasClient = () => googleReady();
+  const google = () => gmail() && (viaGoogle() ?? hasClient());
   /** signing in in the browser */
   const browser = () => microsoft() || google();
   onMount(() => void reloadGoogleStatus());

@@ -14,6 +14,9 @@ export async function reloadGoogleStatus(): Promise<GoogleStatus | null> {
   return s;
 }
 
+/** Whether Google sign-in (mail or contacts) can start: the user's own client, or the app's. */
+export const googleReady = (s: GoogleStatus | null = googleStatus()) => !!(s?.clientId || s?.builtIn);
+
 export const googleLink = (accountId: number) => googleStatus()?.links.find((l) => l.accountId === accountId) ?? null;
 
 let running: Promise<void> | null = null;

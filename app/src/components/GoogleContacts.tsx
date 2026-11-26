@@ -1,7 +1,7 @@
 import { createSignal, Show } from 'solid-js';
 import { api, errorMessage, type Account } from '../api';
 import { reloadCards } from '../lib/addressBook';
-import { googleLink, googleStatus, reloadGoogleStatus, syncGoogle } from '../lib/googleContacts';
+import { googleLink, googleReady, googleStatus, reloadGoogleStatus, syncGoogle } from '../lib/googleContacts';
 import { confirmDialog } from './Actions';
 
 // Settings › Accounts › Google Contacts: connect a Gmail (or Workspace) account's contacts to
@@ -70,7 +70,7 @@ export function GoogleContactsField(props: { account: Account }) {
   const link = () => googleLink(props.account.id);
 
   async function connect() {
-    if (!googleStatus()?.clientId) {
+    if (!googleReady()) {
       setAskClient(true);
       return;
     }
@@ -184,12 +184,15 @@ export function GoogleContactsField(props: { account: Account }) {
   );
 }
 
-/** Google contacts' client, to forget it (Settings › Accounts, under the accounts). */
+/** The user's own Google client, to forget it (Settings › Accounts, under the accounts). */
 export function GoogleClientNote() {
+  if (!googleStatus()) void reloadGoogleStatus();
   const forget = async () => {
     if (
       !(await confirmDialog(
-        'Forget the Google OAuth client? Connected Google contacts stop syncing until it is added again. Accounts signed in with Google keep working.',
+        `Forget your Google OAuth client? Accounts and contacts signed in with it keep working; new sign-ins use ${
+          googleStatus()?.builtIn ? "the app's own client" : 'a client you add again'
+        }.`,
         'Forget',
       ))
     )
@@ -201,7 +204,7 @@ export function GoogleClientNote() {
     <Show when={googleStatus()?.clientId}>
       {(id) => (
         <p class="st-muted gc-client-note">
-          Google sign-in uses your OAuth client {id().split('-')[0]}…{' '}
+          Google sign-in uses your OAuth client {id().split('-')[0]}…{googleStatus()?.builtIn ? " instead of the app's" : ''}{' '}
           <button class="link-btn" onClick={() => void forget()}>
             Forget it
           </button>
