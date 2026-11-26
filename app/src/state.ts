@@ -593,6 +593,20 @@ export async function initApp(): Promise<void> {
   }
 }
 
+// ------------------------------------------------------------- checking for new mail now
+
+const [checking, setChecking] = createSignal(false);
+/** A check asked for (the refresh button, F5) is under way: the button spins. */
+export { checking };
+/** Check every account for new mail now. The sync status shows what it finds; the button spins
+ *  at least briefly, so a check that finds nothing still visibly happened. */
+export function checkNow(): void {
+  if (checking()) return;
+  setChecking(true);
+  const shown = new Promise((r) => setTimeout(r, 1200));
+  void Promise.all([api.checkNow().catch((e) => console.warn('check_now failed', e)), shown]).then(() => setChecking(false));
+}
+
 // ------------------------------------------------------------- per-folder remembered selection
 
 /** folder id -> last selected thread (t) / message (f) id, with a recency stamp. Persisted. */

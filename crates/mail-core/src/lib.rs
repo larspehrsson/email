@@ -716,6 +716,13 @@ impl Core {
         Ok(())
     }
 
+    /// Check every account for new mail now (the user asked: a refresh button, F5).
+    pub fn check_now(&self) {
+        for s in self.running.lock().unwrap().values() {
+            s.check_now();
+        }
+    }
+
     pub fn list_messages(&self, folder_id: i64, offset: u32, limit: u32) -> Result<MessagePage> {
         self.store.list_messages(folder_id, offset, limit)
     }

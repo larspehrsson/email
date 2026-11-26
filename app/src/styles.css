@@ -6715,3 +6715,28 @@ body.dragging-message iframe {
   background: var(--accent-soft);
   box-shadow: 0 0 0 1px var(--accent-soft);
 }
+
+/* "Check for new mail": a small button over the room kept for it in the sync summary, just
+   before the chevron (footer padding 6 + row padding 10 + chevron 14 + gap 8 from the right) */
+.sf-summary {
+  grid-template-columns: 14px minmax(0, 1fr) 22px 14px;
+}
+.sf-check {
+  position: absolute;
+  right: 38px;
+  bottom: 11px;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--text-3);
+  transition: background 100ms;
+}
+.sf-check:hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+.sf-check.spinning svg {
+  animation: spin 0.8s linear infinite;
+}

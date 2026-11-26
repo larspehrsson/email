@@ -475,6 +475,35 @@ describe('a busy sync', () => {
   });
 });
 
+describe('check for new mail', () => {
+  test('the button by the sync status, F5, and its key in Settings › Keyboard', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const checks = () => page.evaluate(() => window.__checks ?? 0);
+      const btn = page.locator('.sf-check');
+      await btn.click();
+      assert.equal(await checks(), 1);
+      // it spins a moment, so a check that finds nothing still shows it happened
+      assert.equal(await btn.evaluate((e) => e.classList.contains('spinning')), true);
+      await page.waitForFunction(() => !document.querySelector('.sf-check.spinning'), null, { timeout: 4000 });
+      // F5 checks too (and doesn't reload the page: the count would start over)
+      await page.locator('.folder-layer .row').first().click();
+      await page.keyboard.press('F5');
+      await page.waitForFunction(() => window.__checks === 2, null, { timeout: 2000 });
+      await page.waitForFunction(() => !document.querySelector('.sf-check.spinning'), null, { timeout: 4000 });
+      // listed among the shortcuts, where it can be changed
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'Keyboard' }).click();
+      const row = page.locator('.st-row', { hasText: 'Check for new mail' });
+      await row.waitFor();
+      assert.match(await row.locator('.st-keys').innerText(), /F5/);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('selected row colours', () => {
   test('a message body (its own frame) counts as the window: clicking in it stays blue, and brings the window back', async () => {
     const { page, errors, close } = await open({ threaded: false, query: '&picture' });

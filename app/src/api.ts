@@ -191,6 +191,8 @@ export const api = {
     includeTrash: boolean,
   ): Promise<ThreadView> => call('get_thread', { threadId, folderId, scope, includeTrash }),
   getSyncStatus: (): Promise<SyncStatus[]> => call('get_sync_status', undefined),
+  /** Check every account for new mail now (the refresh button, F5). */
+  checkNow: (): Promise<void> => call('check_now', undefined),
   /** Is message `id` still in `folderId` (null = still exists at all)? */
   /** Row index of a message / conversation in the folder's list (null = not in it). */
   indexOf: (folderId: number, id: number, threaded: boolean, sort: ListSort = 'received', filter?: ListFilter): Promise<number | null> =>

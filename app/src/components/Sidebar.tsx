@@ -4,11 +4,11 @@ import { folderMenu } from './ContextMenu';
 import { hint } from '../lib/shortcuts';
 import { createStore } from 'solid-js/store';
 import { api, errorMessage, type Account, type Folder, type FolderRole, type SyncStatus } from '../api';
-import { folderById, foldersByAccount, moveAccount, selectedFolderId, selectFolder, syncByAccount, accounts, mainView, setMainView } from '../state';
+import { checkNow, checking, folderById, foldersByAccount, moveAccount, selectedFolderId, selectFolder, syncByAccount, accounts, mainView, setMainView } from '../state';
 import { AccountDot } from './FolderSwitcher';
 import { cancelExport, exportLabel, exportNow } from '../lib/exports';
 import { fmtNum, loadPref, savePref } from '../lib/format';
-import { AlertIcon, CheckIcon, ChevronIcon, FolderIcon, LockIcon, MailIcon, PeopleIcon, RoleIcon, SidebarIcon } from './Icons';
+import { AlertIcon, CheckIcon, ChevronIcon, FolderIcon, LockIcon, MailIcon, PeopleIcon, RefreshIcon, RoleIcon, SidebarIcon } from './Icons';
 import { ContactSources } from './ContactSources';
 import { PasswordDialog } from './PasswordPrompt';
 import { restartToUpdate, updateStatus } from '../lib/updates';
@@ -411,12 +411,26 @@ export function SyncFooter(props: { compact?: boolean }) {
         <StatusGlyph phase={summary().phase} />
         <Show when={!props.compact}>
           <span class="sf-text sf-summary-text">{summary().text}</span>
+          {/* room for the check button, which sits over it (a button can't hold a button) */}
+          <span class="sf-check-room" aria-hidden="true" />
           <span class="sf-chevron" aria-hidden="true">
             <ChevronIcon size={12} />
           </span>
         </Show>
         <ProgressTrack active={summary().active} pct={summary().pct} />
       </button>
+      <Show when={!props.compact}>
+        <button
+          class="sf-check"
+          classList={{ spinning: checking() }}
+          title={hint('check-mail') ? `Check for new mail (${hint('check-mail')})` : 'Check for new mail'}
+          aria-label="Check for new mail"
+          disabled={checking()}
+          onClick={checkNow}
+        >
+          <RefreshIcon size={13} />
+        </button>
+      </Show>
       <Show when={fixFor()}>{(a) => <PasswordDialog account={a()} onClose={() => setFixFor(null)} />}</Show>
     </footer>
   );

@@ -704,6 +704,7 @@ export interface CommandMap {
     ret: ThreadView;
   };
   get_sync_status: { args: undefined; ret: SyncStatus[] };
+  check_now: { args: undefined; ret: void };
   set_read: { args: { id: number; read: boolean }; ret: void };
   open_attachment: { args: { messageId: number; index: number }; ret: void };
   save_attachment: { args: { messageId: number; index: number }; ret: string };

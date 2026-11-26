@@ -31,6 +31,7 @@ import {
   setListSort,
   conversationScope,
   setConversationScope,
+  checkNow,
 } from './state';
 import { focusSearch, SearchBar } from './components/SearchBar';
 import { Rail } from './components/Rail';
@@ -95,6 +96,12 @@ export function App() {
       if (ready && e.altKey && (platform === 'macos' ? e.metaKey : e.ctrlKey) && e.code === 'KeyU') {
         e.preventDefault();
         openSource(readerMessageId() ?? selectedMessageId() ?? selectedThread()?.latestMessageId);
+        return;
+      }
+      // Checking for mail works from a text field too, when its key isn't one that types (F5).
+      if (ready && commandFor(e) === 'check-mail' && (!isTextInput(e.target) || e.key.length > 1)) {
+        e.preventDefault();
+        checkNow();
         return;
       }
       if (!isTextInput(e.target)) {

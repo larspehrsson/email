@@ -916,6 +916,11 @@ fn app_version() -> String {
 }
 
 #[tauri::command]
+fn check_now(core: State<'_, Arc<Core>>) {
+    core.check_now();
+}
+
+#[tauri::command]
 async fn get_sync_status(core: State<'_, Arc<Core>>) -> Res<Vec<SyncStatus>> {
     Ok(core.sync_status())
 }
@@ -1656,6 +1661,7 @@ pub fn run() {
             set_signature_defaults,
             get_message,
             get_sync_status,
+            check_now,
             set_read,
             set_allow_remote,
             list_threads,

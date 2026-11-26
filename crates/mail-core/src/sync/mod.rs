@@ -183,6 +183,9 @@ struct Shared {
     dirty: Mutex<HashSet<i64>>,
     /// Wakes the headers task (dirty folders, count sweep requests).
     refresh: Notify,
+    /// The user asked to check for new mail now: the headers task starts a fresh pass over
+    /// every folder, and the IDLE tasks reconnect (one that died quietly is caught here).
+    check: watch::Sender<u64>,
     /// Wakes the interactive task: an action was queued or cancelled.
     outbox: Notify,
     /// Wakes the send task: a message was queued or taken back.
@@ -374,6 +377,7 @@ impl AccountSync {
             progress_dirty: std::sync::atomic::AtomicBool::new(true),
             dirty: Mutex::new(HashSet::new()),
             refresh: Notify::new(),
+            check: watch::Sender::new(0),
             outbox: Notify::new(),
             sender: Notify::new(),
             counts_due: std::sync::atomic::AtomicBool::new(true),
@@ -412,6 +416,21 @@ impl AccountSync {
     /// Fetch this message's body ahead of everything else.
     pub fn request_body(&self, message_id: i64) {
         let _ = self.urgent_tx.send(Job::Body(message_id));
+    }
+
+    /// Check for new mail now (the user asked): the Inbox and the folder on screen first, then
+    /// every folder, on fresh IDLE connections; a Microsoft account's tags and snooze too.
+    pub fn check_now(&self) {
+        let sh = &self.shared;
+        if let Ok(folders) = sh.store.folders(sh.account.id) {
+            let mut dirty = sh.dirty.lock().unwrap();
+            dirty.extend(folders.iter().filter(|f| f.role == Some(FolderRole::Inbox)).map(|f| f.id));
+            dirty.extend(*sh.focus.borrow());
+        }
+        sh.counts_due.store(true, std::sync::atomic::Ordering::SeqCst);
+        sh.check.send_modify(|n| *n += 1);
+        sh.refresh.notify_one();
+        sh.graph_refresh.notify_one();
     }
 
     /// A user action was queued: send it when due.
@@ -567,8 +586,11 @@ async fn header_task(shared: Arc<Shared>) -> Result<()> {
     let mut first_pass = true;
     let mut last_full_sweep: Option<tokio::time::Instant> = None;
     let mut woke = imap::wake_watch();
+    let mut check = shared.check.subscribe();
 
     loop {
+        // A check asked for before this pass is answered by it.
+        check.mark_unchanged();
         // Folder structure first, every pass, so new/renamed folders appear promptly. Only the
         // first pass after connecting is reported: routine re-checks aren't news.
         if first_pass {
@@ -656,6 +678,8 @@ async fn header_task(shared: Arc<Shared>) -> Result<()> {
                         }
                         continue;
                     }
+                    // Checked now: a fresh pass, as when the refresh timer is up.
+                    _ = check.changed() => break,
                     _ = shared.refresh.notified() => continue,
                     _ = tokio::time::sleep_until(refresh) => break,
                 }
@@ -940,6 +964,7 @@ async fn idle_task(shared: Arc<Shared>, follow_focus: bool) -> Result<()> {
     // The (folder, server count, server change counter) last caught up on: a difference that a
     // catch-up didn't settle isn't retried until the server's side changes.
     let mut caught_up: Option<(i64, u32, Option<u64>)> = None;
+    let mut check = shared.check.subscribe();
     loop {
         let inbox = shared
             .store
@@ -1005,6 +1030,15 @@ async fn idle_task(shared: Arc<Shared>, follow_focus: bool) -> Result<()> {
             r = focus.changed(), if follow_focus => { r?; false }
             // IDLE is silent by design, so it has no stall timeout: after sleep, start over.
             _ = woke.changed() => return Err(imap::disconnected(format!("woke from sleep while watching {raw}; reconnecting"))),
+            // Checked now: IDLE may have died quietly (a network change); a new connection,
+            // which catches up on the folder before watching it again.
+            _ = check.changed() => {
+                drop(stop);
+                drop(handle);
+                caught_up = None;
+                tracing::info!(folder = raw, "checking now: watching on a new connection");
+                continue;
+            }
         };
         drop(stop);
         let session = imap::stall_timeout(&activity, STALL_TIMEOUT, "ending IDLE", handle.done()).await??;
