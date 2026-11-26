@@ -1,7 +1,9 @@
-import { createSignal, onCleanup, onMount, Show } from 'solid-js';
+import { createSignal, onCleanup, onMount, Show, type JSX } from 'solid-js';
 import type { Addr } from '../api';
 import { Avatar } from './Avatar';
 import { clock } from '../lib/format';
+import { addressMenu } from './AddressMenu';
+import { PaperclipIcon } from './Icons';
 
 // Who sent it and when, kept in sight once the message's own header has scrolled away: a
 // one-line strip at the top of the reader, or of a conversation card. It's sticky inside its
@@ -12,6 +14,12 @@ import { clock } from '../lib/format';
 // An experiment (2026-11-25).
 
 const DATE = new Intl.DateTimeFormat(undefined, clock({ weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }));
+
+/** Everyone, for the tooltip: "To: John Doe <john@…>, …  Cc: …". */
+function everyone(to: Addr[], cc: Addr[], bcc: Addr[]): string {
+  const list = (label: string, l: Addr[]) => (l.length ? `${label}: ${l.map((a) => (a.name ? `${a.name} <${a.addr}>` : a.addr)).join(', ')}` : '');
+  return [list('To', to), list('Cc', cc), to.length || cc.length ? '' : list('Bcc', bcc)].filter(Boolean).join('\n') || 'Undisclosed recipients';
+}
 
 /** "John Doe, Ben Carter +3"; their Bcc for one of ours with no To or Cc; else not disclosed. */
 function recipients(to: Addr[], cc: Addr[], bcc: Addr[]): string {
@@ -35,6 +43,11 @@ export function WhoStrip(props: {
   /** what scrolls, when the strip isn't inside it (the reader's, so the strip spans the
    *  scrollbar too); else the conversation it's in */
   scroller?: () => HTMLElement | undefined;
+  /** how many attachments: a paperclip that brings the chips back (`chips`) */
+  attachments?: number;
+  chips?: () => Element | null | undefined;
+  /** buttons shown over the date on hover (a conversation card's own: the band's are far) */
+  actions?: JSX.Element;
 }) {
   const [on, setOn] = createSignal(false);
   let el: HTMLDivElement | undefined;
@@ -60,7 +73,7 @@ export function WhoStrip(props: {
     <div
       ref={el}
       class="who-strip"
-      classList={{ on: on() }}
+      classList={{ on: on(), 'has-acts': !!props.actions }}
       aria-hidden={!on()}
       title="Show the whole header"
       onClick={(e) => {
@@ -69,13 +82,35 @@ export function WhoStrip(props: {
       }}
     >
       <Avatar name={props.from.name} addr={props.from.addr} size={20} />
-      <span class="who-name">{props.from.name || props.from.addr}</span>
+      <span class="who-name" onContextMenu={(e) => addressMenu(e, props.from)}>
+        {props.from.name || props.from.addr}
+      </span>
       <Show when={props.known}>
-        <span class="who-to">to {recipients(props.to, props.cc, props.bcc ?? [])}</span>
+        <span class="who-to" title={everyone(props.to, props.cc, props.bcc ?? [])}>
+          to {recipients(props.to, props.cc, props.bcc ?? [])}
+        </span>
       </Show>
-      <time class="who-date" dateTime={new Date(props.date * 1000).toISOString()}>
-        {DATE.format(new Date(props.date * 1000))}
-      </time>
+      <span class="who-end">
+        <Show when={(props.attachments ?? 0) > 0}>
+          <button
+            class="who-clip"
+            title={props.attachments === 1 ? 'Show the attachment' : `Show the ${props.attachments} attachments`}
+            onClick={(e) => {
+              e.stopPropagation();
+              props.chips?.()?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            }}
+          >
+            <PaperclipIcon size={13} />
+            {props.attachments}
+          </button>
+        </Show>
+        <span class="who-when">
+          <time class="who-date" dateTime={new Date(props.date * 1000).toISOString()}>
+            {DATE.format(new Date(props.date * 1000))}
+          </time>
+          {props.actions}
+        </span>
+      </span>
     </div>
   );
 }
