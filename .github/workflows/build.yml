@@ -7,7 +7,10 @@ name: build
 on:
   push:
     branches: [main]
+    # The website (pages.yml) alone doesn't make a new build.
+    paths-ignore: [site/**, .github/workflows/pages.yml]
   pull_request:
+    paths-ignore: [site/**, .github/workflows/pages.yml]
   workflow_dispatch:
 
 # One run at a time per branch: a newer push waits, so the "latest" release never mixes two
