@@ -141,7 +141,7 @@ function syncLabel(s: SyncStatus): string {
     case 'connecting':
       return s.message || 'Connecting…';
     case 'folders': {
-      // the folder being checked or counted, when the core says (first pass after connecting)
+      // the folder being checked or counted, when the core says (the first pass after connecting, or a check for new mail)
       const f = s.folderId != null ? folderById(s.folderId) : undefined;
       return f ? `Updating ${f.displayName}…` : 'Updating folders…';
     }

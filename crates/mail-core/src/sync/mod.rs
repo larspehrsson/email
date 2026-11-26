@@ -621,7 +621,11 @@ async fn header_task(shared: Arc<Shared>) -> Result<()> {
     let mut focus = shared.focus.clone();
     let account = &shared.account;
     let mut first_step_done = false;
-    let mut first_pass = true;
+    // The first pass after connecting, and one the user asked for (checking for new mail).
+    let mut reported_pass = true;
+    // Checking for new mail starts over as at startup: a new connection (the old one may have
+    // died quietly), then a reported pass over every folder.
+    let mut reconnect = false;
     let mut last_full_sweep: Option<tokio::time::Instant> = None;
     let mut woke = imap::wake_watch();
     let mut check = shared.check.subscribe();
@@ -629,9 +633,15 @@ async fn header_task(shared: Arc<Shared>) -> Result<()> {
     loop {
         // A check asked for before this pass is answered by it.
         let pass_check = *check.borrow_and_update();
+        if std::mem::take(&mut reconnect) {
+            shared.set_status(SyncPhase::Connecting, None, 0, 0, None);
+            // the old connection is dropped (closed) as this one replaces it
+            conn = shared.connect().await?;
+        }
         // Folder structure first, every pass, so new/renamed folders appear promptly. Only the
-        // first pass after connecting is reported: routine re-checks aren't news.
-        if first_pass {
+        // first pass after connecting, or a check for new mail, is reported (each folder as it's
+        // checked): routine re-checks aren't news.
+        if reported_pass {
             shared.set_status(SyncPhase::Folders, None, 0, 0, None);
         }
         let listed = guarded!(conn, "listing folders", conn.list_folders())?;
@@ -647,7 +657,7 @@ async fn header_task(shared: Arc<Shared>) -> Result<()> {
         if last_full_sweep.is_none_or(|t| t.elapsed() >= FULL_SWEEP_INTERVAL) {
             shared.counts_due.store(true, std::sync::atomic::Ordering::SeqCst);
         }
-        first_pass = false;
+        reported_pass = false;
 
         loop {
             let epoch = shared.store.local_epoch();
@@ -717,8 +727,12 @@ async fn header_task(shared: Arc<Shared>) -> Result<()> {
                         }
                         continue;
                     }
-                    // Checked now: a fresh pass, as when the refresh timer is up.
-                    _ = check.changed() => break,
+                    // Checked now: start over as at startup (see `reconnect`).
+                    _ = check.changed() => {
+                        reported_pass = true;
+                        reconnect = true;
+                        break;
+                    }
                     _ = shared.refresh.notified() => continue,
                     _ = tokio::time::sleep_until(refresh) => break,
                 }
