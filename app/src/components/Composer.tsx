@@ -36,6 +36,7 @@ import { showToast } from './Toast';
 import { defaultSignature, loadSignatures, signatureById, sigs } from '../lib/signatures';
 import { identities, identityById, loadIdentities } from '../lib/identities';
 import { AiPanel } from './AiPanel';
+import { Modal } from './Modal';
 
 /** The quoted original under the text: read-only, at the composer's margins. */
 const QUOTE_FRAME_CSS = 'html{overflow-y:hidden}body{padding:0 0 12px}';
@@ -681,23 +682,21 @@ export function Composer() {
         <div class="cmp-actions" data-tauri-drag-region={DRAG}>
           <span class="cmp-hint">{MOD === '⌘' ? '⌘↵' : 'Ctrl+Enter'} to send · Esc to close</span>
           <Show when={asking()}>
-            <div class="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && answer('cancel')}>
-              <div class="card modal confirm cmp-close" role="dialog" aria-modal="true" aria-label="Close message">
-                <p>Keep this message as a draft?</p>
-                <div class="cmp-close-btns">
-                  <button class="btn secondary" onClick={() => answer('discard')}>
-                    Discard
-                  </button>
-                  <span class="cmp-close-gap" />
-                  <button class="btn secondary" onClick={() => answer('cancel')}>
-                    Cancel
-                  </button>
-                  <button class="btn primary" ref={(el) => queueMicrotask(() => el.focus())} onClick={() => answer('save')}>
-                    Save draft
-                  </button>
-                </div>
+            <Modal label="Close message" class="confirm cmp-close" onClose={() => answer('cancel')}>
+              <p>Keep this message as a draft?</p>
+              <div class="cmp-close-btns">
+                <button class="btn secondary" onClick={() => answer('discard')}>
+                  Discard
+                </button>
+                <span class="cmp-close-gap" />
+                <button class="btn secondary" onClick={() => answer('cancel')}>
+                  Cancel
+                </button>
+                <button class="btn primary" ref={(el) => queueMicrotask(() => el.focus())} onClick={() => answer('save')}>
+                  Save draft
+                </button>
               </div>
-            </div>
+            </Modal>
           </Show>
           <button class="icon-btn" title="Discard" aria-label="Discard" onClick={() => void discard()}>
             <TrashIcon />

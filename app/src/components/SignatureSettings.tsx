@@ -300,12 +300,6 @@ export function SignaturesSection() {
             >
               HTML
             </button>
-            <span class="fmt-fill" />
-            <Show when={current() != null}>
-              <button class="link-btn sig-delete" onClick={() => void remove()}>
-                Delete
-              </button>
-            </Show>
           </div>
           <div
             class="sig-editor cmp-editor"
@@ -329,8 +323,17 @@ export function SignaturesSection() {
             {/* The core's sanitized copy, never the raw text. */}
             <div class="sig-preview" innerHTML={savedHtml()} />
           </Show>
+          {/* At the foot, as Remove account is on an account's page: it's about the whole
+              signature, not its text, so not among the formatting buttons. */}
+          <Show when={current() != null}>
+            <div class="sig-foot">
+              <button class="link-btn sig-delete" onClick={() => void remove()}>
+                Delete signature…
+              </button>
+            </div>
+          </Show>
           <Show when={current() == null}>
-            <p class="st-muted sig-none">No signatures yet. Add one, then choose where it’s used in Settings › Accounts › Send as.</p>
+            <p class="st-muted sig-none">No signatures yet. Add one, then choose where it’s used on each account’s page, under Accounts.</p>
           </Show>
         </div>
       </div>

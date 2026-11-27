@@ -4,6 +4,7 @@ import { AlertIcon, ChevronIcon, CloseIcon, MailIcon } from './Icons';
 import { DRAG } from '../lib/platform';
 import { googleReady, reloadGoogleStatus } from '../lib/googleContacts';
 import { GoogleClientForm } from './GoogleContacts';
+import { Modal } from './Modal';
 
 function isGmail(email: string) {
   const d = email.split('@')[1]?.trim().toLowerCase() ?? '';
@@ -261,20 +262,14 @@ export function Onboarding(props: { onAdded: (a: Account) => void }) {
 
 export function AddAccountModal(props: { onAdded: (a: Account) => void; onClose: () => void }) {
   return (
-    <div
-      class="modal-backdrop"
-      onMouseDown={(e) => e.target === e.currentTarget && props.onClose()}
-      onKeyDown={(e) => e.key === 'Escape' && props.onClose()}
-    >
-      <div class="card modal" role="dialog" aria-modal="true" aria-label="Add account">
-        <div class="modal-head">
-          <h2>Add Account</h2>
-          <button class="icon-btn" onClick={props.onClose} aria-label="Close">
-            <CloseIcon />
-          </button>
-        </div>
-        <AddAccountForm onAdded={props.onAdded} onCancel={props.onClose} autofocus />
+    <Modal label="Add account" onClose={props.onClose}>
+      <div class="modal-head">
+        <h2>Add Account</h2>
+        <button class="icon-btn" onClick={props.onClose} aria-label="Close">
+          <CloseIcon />
+        </button>
       </div>
-    </div>
+      <AddAccountForm onAdded={props.onAdded} onCancel={props.onClose} autofocus />
+    </Modal>
   );
 }

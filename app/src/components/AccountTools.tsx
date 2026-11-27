@@ -1,5 +1,4 @@
-import { createResource, createSignal, onCleanup, onMount, Show, type JSX } from 'solid-js';
-import { Portal } from 'solid-js/web';
+import { createResource, createSignal, Show, type JSX } from 'solid-js';
 import { api, errorMessage } from '../api';
 import { cancelExport, exportNow, startExport } from '../lib/exports';
 import { fmtNum, fmtSize } from '../lib/format';
@@ -7,40 +6,23 @@ import { pickFolder } from '../lib/windows';
 import { onAccountRemoved } from '../state';
 import { CloseIcon } from './Icons';
 import { showToast } from './Toast';
+import { Modal } from './Modal';
 
 // Settings › Accounts: exporting an account's mail, and removing an account from this computer.
 
 type Acct = { id: number; email: string };
 
 function Dialog(props: { title: string; onClose: () => void; children: JSX.Element }) {
-  let back: HTMLDivElement | undefined;
-  let card: HTMLDivElement | undefined;
-  // Esc closes it while it's the dialog on top, wherever the focus is.
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key !== 'Escape' || [...document.querySelectorAll('.modal-backdrop')].pop() !== back) return;
-    e.preventDefault();
-    e.stopPropagation();
-    props.onClose();
-  };
-  onMount(() => {
-    window.addEventListener('keydown', onKey, true);
-    card?.focus();
-  });
-  onCleanup(() => window.removeEventListener('keydown', onKey, true));
   return (
-    <Portal>
-      <div ref={back} class="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && props.onClose()}>
-        <div ref={card} tabIndex={-1} class="card modal acct-dialog" role="dialog" aria-modal="true" aria-label={props.title}>
-          <div class="modal-head">
-            <h2>{props.title}</h2>
-            <button class="icon-btn" onClick={props.onClose} aria-label="Close">
-              <CloseIcon />
-            </button>
-          </div>
-          {props.children}
-        </div>
+    <Modal label={props.title} class="acct-dialog" onClose={props.onClose} focusCard>
+      <div class="modal-head">
+        <h2>{props.title}</h2>
+        <button class="icon-btn" onClick={props.onClose} aria-label="Close">
+          <CloseIcon />
+        </button>
       </div>
-    </Portal>
+      {props.children}
+    </Modal>
   );
 }
 

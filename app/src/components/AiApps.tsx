@@ -4,6 +4,7 @@ import { accounts } from '../state';
 import { platform } from '../lib/platform';
 import { showToast } from './Toast';
 import { clock } from '../lib/format';
+import { Modal } from './Modal';
 
 // AI apps (Claude Desktop, Claude Code, any MCP client) working with the mail: Settings › AI apps
 // (what they may do, how to connect one, what they did), and the app's side of it while they
@@ -184,24 +185,22 @@ export function AiAppsHost() {
   return (
     <Show when={asks()[0]}>
       {(c) => (
-        <div class="modal-backdrop confirm-backdrop" onKeyDown={(e) => e.key === 'Escape' && answer(c(), false)}>
-          <div class="card modal confirm mcp-ask" role="alertdialog" aria-modal="true" aria-label={c().title}>
-            <p class="mcp-ask-who">{c().client} asks:</p>
-            <h3 class="mcp-ask-title">{c().title}</h3>
-            <For each={c().lines}>{(l) => <p class="mcp-ask-line">{l}</p>}</For>
-            <Show when={c().body}>
-              <pre class="mcp-ask-body">{c().body}</pre>
-            </Show>
-            <div class="form-actions">
-              <button class="btn secondary" onClick={() => answer(c(), false)}>
-                Don't
-              </button>
-              <button class="btn danger" ref={(el) => queueMicrotask(() => el.focus())} onClick={() => answer(c(), true)}>
-                {c().ok}
-              </button>
-            </div>
+        <Modal label={c().title} role="alertdialog" class="confirm mcp-ask" backdropClass="confirm-backdrop" onClose={() => answer(c(), false)} onBackdrop={false}>
+          <p class="mcp-ask-who">{c().client} asks:</p>
+          <h3 class="mcp-ask-title">{c().title}</h3>
+          <For each={c().lines}>{(l) => <p class="mcp-ask-line">{l}</p>}</For>
+          <Show when={c().body}>
+            <pre class="mcp-ask-body">{c().body}</pre>
+          </Show>
+          <div class="form-actions">
+            <button class="btn secondary" onClick={() => answer(c(), false)}>
+              Don't
+            </button>
+            <button class="btn danger" ref={(el) => queueMicrotask(() => el.focus())} onClick={() => answer(c(), true)}>
+              {c().ok}
+            </button>
           </div>
-        </div>
+        </Modal>
       )}
     </Show>
   );

@@ -1,4 +1,5 @@
 import { createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import { Modal } from './Modal';
 import { hint } from '../lib/shortcuts';
 import { Portal } from 'solid-js/web';
 import { api, type Folder, type FolderRole } from '../api';
@@ -71,26 +72,24 @@ export function ConfirmHost() {
   return (
     <Show when={confirmReq()}>
       {(r) => (
-        <div
-          class="modal-backdrop confirm-backdrop"
-          onMouseDown={(e) => e.target === e.currentTarget && done(false)}
-          onKeyDown={(e) => {
-            e.stopPropagation();
-            if (e.key === 'Escape') done(false);
-          }}
+        <Modal
+          label={r().text}
+          role="alertdialog"
+          class="confirm"
+          backdropClass="confirm-backdrop"
+          onClose={() => done(false)}
+          onKeyDown={(e) => e.stopPropagation()}
         >
-          <div class="card modal confirm" role="alertdialog" aria-modal="true" aria-label={r().text}>
-            <p class="confirm-text">{r().text}</p>
-            <div class="form-actions">
-              <button class="btn secondary" onClick={() => done(false)}>
-                {r().cancel}
-              </button>
-              <button class="btn danger" ref={(el) => queueMicrotask(() => el.focus())} onClick={() => done(true)}>
-                {r().ok}
-              </button>
-            </div>
+          <p class="confirm-text">{r().text}</p>
+          <div class="form-actions">
+            <button class="btn secondary" onClick={() => done(false)}>
+              {r().cancel}
+            </button>
+            <button class="btn danger" ref={(el) => queueMicrotask(() => el.focus())} onClick={() => done(true)}>
+              {r().ok}
+            </button>
           </div>
-        </div>
+        </Modal>
       )}
     </Show>
   );

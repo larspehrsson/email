@@ -1,4 +1,5 @@
-import { createSignal, For, onMount, Show } from 'solid-js';
+import { createSignal, For, onMount, type JSX } from 'solid-js';
+import { CloseIcon, PlusIcon } from './Icons';
 import { api, errorMessage, type Identity } from '../api';
 import { accountIdentities, identities, loadIdentities, reloadIdentities } from '../lib/identities';
 import { loadSignatures, reloadSignatures, setDefaultsHere, sigs } from '../lib/signatures';
@@ -15,7 +16,6 @@ export function SendAsGroup(props: { accountId: number; email: string; name: str
   });
   const list = () => accountIdentities(props.accountId, identities());
   const [msg, setMsg] = createSignal<string | null>(null);
-  const [adding, setAdding] = createSignal(false);
   const [email, setEmail] = createSignal('');
   const [name, setName] = createSignal('');
 
@@ -54,7 +54,6 @@ export function SendAsGroup(props: { accountId: number; email: string; name: str
       });
       setEmail('');
       setName('');
-      setAdding(false);
     });
   };
   const noDefault = () => !list().some((i) => i.isDefault);
@@ -75,111 +74,138 @@ export function SendAsGroup(props: { accountId: number; email: string; name: str
   const sigList = () => sigs().signatures.map((s) => ({ value: s.id, label: s.name }));
   const ownOptions = () => [{ value: 0, label: 'None' }, ...sigList()];
   // Another address: its own, or the account's (whatever that is then).
-  const aliasOptions = () => [{ value: 0, label: 'As the account' }, ...sigList()];
+  const aliasOptions = () => [{ value: 0, label: 'Account’s' }, ...sigList()];
   const sigSelect = (label: string, value: number | null, options: { value: number; label: string }[], set: (id: number | null) => void) => (
     <Select variant="plain" class="sa-sig" label={label} value={value ?? 0} options={options} onChange={(v) => set(v || null)} />
   );
 
+  const remove = (i: Identity) => run(() => api.deleteIdentity(i.id));
+  /** The column after the signatures: × on another address's row, + on the row that adds one. */
+  const iconBtn = (label: string, onClick: (() => void) | undefined, icon: JSX.Element, disabled = false) => (
+    <button class="icon-btn sa-act" type={onClick ? 'button' : 'submit'} aria-label={label} title={label} disabled={disabled} onClick={onClick}>
+      {icon}
+    </button>
+  );
+
+  // One table: the account's own address, its others, and a last row that adds one, all in the
+  // same columns. The adding row is always there (typing in it is how one is added), so nothing
+  // moves or changes shape to add an address.
   return (
-    <div class="sa-list">
-      <div class="sa-head st-muted">
-        <span />
-        <span>Address</span>
-        <span>Name</span>
-        <span title="Signature for new messages">New messages</span>
-        <span title="Signature for replies and forwards">Replies</span>
-        <span />
-      </div>
-      <div class="sa-row">
-        <input
-          type="radio"
-          name={`send-as-${props.accountId}`}
-          checked={noDefault()}
-          onChange={() => void makeDefault(null)}
-          title="Send from this address unless you choose another"
-          aria-label={`Send from ${props.email} by default`}
-        />
-        <span class="sa-email">{props.email}</span>
-        <input
-          class="st-input sa-name"
-          type="text"
-          placeholder="Your name"
-          value={props.name}
-          aria-label={`Name for ${props.email}`}
-          onChange={(e) => {
-            const v = e.currentTarget.value.trim();
-            setMsg(null);
-            void api.setDisplayName(props.accountId, v).then(
-              () => (props.onRename(v), void reloadAccounts()),
-              (err) => setMsg(errorMessage(err)),
-            );
-          }}
-        />
-        {sigSelect(`Signature for new messages from ${props.email}`, own()?.newId ?? null, ownOptions(), (id) => void setOwn('newId', id))}
-        {sigSelect(`Signature for replies from ${props.email}`, own()?.replyId ?? null, ownOptions(), (id) => void setOwn('replyId', id))}
-        <span />
-      </div>
-      <For each={list()}>
-        {(i) => (
-          <div class="sa-row">
+    <div class="sa-wrap">
+      <div class="sa-list" role="table" aria-label="Addresses to send as">
+        <div class="sa-head" role="row">
+          <span role="columnheader" class="sa-def" title="The address mail is from unless you choose another">
+            Default
+          </span>
+          <span role="columnheader">Address</span>
+          <span role="columnheader">Name</span>
+          <span role="columnheader" title="Signature for new messages">
+            Signature
+          </span>
+          <span role="columnheader" title="Signature for replies and forwards">
+            Reply signature
+          </span>
+          <span />
+        </div>
+        <span class="sa-rule" aria-hidden="true" />
+        <div class="sa-row" role="row">
+          <span class="sa-def">
             <input
               type="radio"
               name={`send-as-${props.accountId}`}
-              checked={i.isDefault}
-              onChange={() => void makeDefault(i.id)}
+              checked={noDefault()}
+              onChange={() => void makeDefault(null)}
               title="Send from this address unless you choose another"
-              aria-label={`Send from ${i.email} by default`}
+              aria-label={`Send from ${props.email} by default`}
             />
-            <span class="sa-email">{i.email}</span>
-            <input
-              class="st-input sa-name"
-              type="text"
-              placeholder={props.name || 'Name'}
-              value={i.name}
-              aria-label={`Name for ${i.email}`}
-              onChange={(e) => void save(i, { name: e.currentTarget.value })}
-            />
-            {sigSelect(`Signature for new messages from ${i.email}`, i.newSignatureId, aliasOptions(), (id) => void save(i, { newSignatureId: id }))}
-            {sigSelect(`Signature for replies from ${i.email}`, i.replySignatureId, aliasOptions(), (id) => void save(i, { replySignatureId: id }))}
-            <button class="link-btn" aria-label={`Remove ${i.email}`} onClick={() => void run(() => api.deleteIdentity(i.id))}>
-              Remove
-            </button>
-          </div>
-        )}
-      </For>
-      <Show
-        when={adding()}
-        fallback={
-          <button class="link-btn sa-add" onClick={() => (setAdding(true), setMsg(null))}>
-            + Add an address
-          </button>
-        }
-      >
-        <form class="st-pw sa-new" noValidate onSubmit={add}>
+          </span>
+          <span class="sa-email">{props.email}</span>
           <input
-            class="st-input"
-            type="email"
-            placeholder="you@example.com"
-            value={email()}
-            ref={(el) => queueMicrotask(() => el.focus())}
-            onInput={(e) => setEmail(e.currentTarget.value)}
-            onKeyDown={(e) => e.key === 'Escape' && (e.stopPropagation(), setAdding(false))}
+            class="st-input sa-name"
+            type="text"
+            placeholder="Your name"
+            value={props.name}
+            aria-label={`Name for ${props.email}`}
+            onChange={(e) => {
+              const v = e.currentTarget.value.trim();
+              setMsg(null);
+              void api.setDisplayName(props.accountId, v).then(
+                () => (props.onRename(v), void reloadAccounts()),
+                (err) => setMsg(errorMessage(err)),
+              );
+            }}
           />
-          <input class="st-input" type="text" placeholder={props.name || 'Name'} value={name()} onInput={(e) => setName(e.currentTarget.value)} />
-          <button class="btn primary" type="submit" disabled={!email().trim()}>
-            Add
-          </button>
-          <button class="btn secondary" type="button" onClick={() => setAdding(false)}>
-            Cancel
-          </button>
+          {sigSelect(`Signature for new messages from ${props.email}`, own()?.newId ?? null, ownOptions(), (id) => void setOwn('newId', id))}
+          {sigSelect(`Signature for replies from ${props.email}`, own()?.replyId ?? null, ownOptions(), (id) => void setOwn('replyId', id))}
+          <span />
+        </div>
+        <For each={list()}>
+          {(i) => (
+            <div class="sa-row" role="row">
+              <span class="sa-def">
+                <input
+                  type="radio"
+                  name={`send-as-${props.accountId}`}
+                  checked={i.isDefault}
+                  onChange={() => void makeDefault(i.id)}
+                  title="Send from this address unless you choose another"
+                  aria-label={`Send from ${i.email} by default`}
+                />
+              </span>
+              <span class="sa-email">{i.email}</span>
+              <input
+                class="st-input sa-name"
+                type="text"
+                placeholder={props.name || 'Name'}
+                value={i.name}
+                aria-label={`Name for ${i.email}`}
+                onChange={(e) => void save(i, { name: e.currentTarget.value })}
+              />
+              {sigSelect(`Signature for new messages from ${i.email}`, i.newSignatureId, aliasOptions(), (id) => void save(i, { newSignatureId: id }))}
+              {sigSelect(`Signature for replies from ${i.email}`, i.replySignatureId, aliasOptions(), (id) => void save(i, { replySignatureId: id }))}
+              {iconBtn(`Remove ${i.email}`, () => void remove(i), <CloseIcon size={12} />)}
+            </div>
+          )}
+        </For>
+        <form class="sa-row sa-new" role="row" noValidate data-esc-empties onSubmit={add}>
+          <span />
+          <input
+            class="st-input sa-addr"
+            type="email"
+            placeholder="Add an address…"
+            aria-label="Another address to send as"
+            value={email()}
+            onInput={(e) => (setEmail(e.currentTarget.value), setMsg(null))}
+            onKeyDown={(e) => {
+              // Esc empties it first (Settings leaves it this one: data-esc-empties), then closes
+              // Settings, as anywhere.
+              if (e.key === 'Escape' && (email() || name())) {
+                setEmail('');
+                setName('');
+                setMsg(null);
+              }
+            }}
+          />
+          <input
+            class="st-input sa-name"
+            type="text"
+            placeholder={props.name || 'Name'}
+            aria-label="Name for the address to add"
+            value={name()}
+            onInput={(e) => setName(e.currentTarget.value)}
+          />
+          <span />
+          <span />
+          {iconBtn('Add address', undefined, <PlusIcon size={13} />, !email().trim())}
         </form>
-      </Show>
+      </div>
+      {/* one reserved line: an error comes and goes without moving anything */}
+      <span class="st-status error sa-msg" role="status">
+        {msg() ?? ''}
+      </span>
       <p class="st-muted sa-note">
-        The radio button marks the address mail goes out from unless you choose another. The account’s mail server must allow sending as the other addresses (in Gmail: Settings › Accounts › “Send mail as”).
+        The mail server must allow sending as other addresses (in Gmail: Settings › Accounts › “Send mail as”).
       </p>
-      <Show when={msg()}>
-        <span class="st-status error">{msg()}</span>
-      </Show>
     </div>
   );
 }

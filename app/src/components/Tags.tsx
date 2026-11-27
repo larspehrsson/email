@@ -5,6 +5,7 @@ import { refreshTags, sortTags, tagInfo, tagList, tagTint } from '../lib/tags';
 import { confirmDialog, placeNear, useDismiss } from './Actions';
 import { setSearchQuery } from '../state';
 import { CheckIcon, CloseIcon } from './Icons';
+import { Modal } from './Modal';
 
 /** Defined tags in position order: the ones 1–9 and the menu act on. */
 export const definedTags = () => tagList().filter((t) => t.defined);
@@ -299,50 +300,41 @@ function ManageTags() {
   };
   onMount(() => void refreshTags());
   return (
-    <div
-      class="modal-backdrop"
-      onMouseDown={(e) => e.target === e.currentTarget && setManageOpen(false)}
-      onKeyDown={(e) => {
-        e.stopPropagation();
-        if (e.key === 'Escape' && !document.querySelector('.modal.confirm')) setManageOpen(false);
-      }}
-    >
-      <div class="card modal manage-tags" role="dialog" aria-modal="true" aria-label="Manage tags">
-        <div class="modal-head">
-          <h2>Tags</h2>
-          <button class="icon-btn" onClick={() => setManageOpen(false)} aria-label="Close">
-            <CloseIcon />
-          </button>
-        </div>
-        <div class="tag-rows">
-          <For each={tagList()}>{(t) => <TagRow t={t} onError={setErr} />}</For>
-        </div>
-        <div class="tag-new">
-          <button class="tag-swatch big" style={{ background: newColor() }} aria-label="Colour for the new tag" onClick={() => setNewPalette((v) => !v)} />
-          <input
-            class="tag-name"
-            placeholder="New tag"
-            value={newName()}
-            onInput={(e) => setNewName(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              if (e.key === 'Enter') void add();
-            }}
-          />
-          <button class="btn primary tag-btn" disabled={!newName().trim()} onClick={() => void add()}>
-            Add
-          </button>
-        </div>
-        <Show when={newPalette()}>
-          <ColorPicker value={newColor()} onPick={setNewColor} />
-        </Show>
-        <Show when={err()}>
-          <div class="form-error" role="alert">
-            {err()}
-          </div>
-        </Show>
+    <Modal label="Manage tags" class="manage-tags" onClose={() => setManageOpen(false)} onKeyDown={(e) => e.stopPropagation()}>
+      <div class="modal-head">
+        <h2>Tags</h2>
+        <button class="icon-btn" onClick={() => setManageOpen(false)} aria-label="Close">
+          <CloseIcon />
+        </button>
       </div>
-    </div>
+      <div class="tag-rows">
+        <For each={tagList()}>{(t) => <TagRow t={t} onError={setErr} />}</For>
+      </div>
+      <div class="tag-new">
+        <button class="tag-swatch big" style={{ background: newColor() }} aria-label="Colour for the new tag" onClick={() => setNewPalette((v) => !v)} />
+        <input
+          class="tag-name"
+          placeholder="New tag"
+          value={newName()}
+          onInput={(e) => setNewName(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') void add();
+          }}
+        />
+        <button class="btn primary tag-btn" disabled={!newName().trim()} onClick={() => void add()}>
+          Add
+        </button>
+      </div>
+      <Show when={newPalette()}>
+        <ColorPicker value={newColor()} onPick={setNewColor} />
+      </Show>
+      <Show when={err()}>
+        <div class="form-error" role="alert">
+          {err()}
+        </div>
+      </Show>
+    </Modal>
   );
 }
 

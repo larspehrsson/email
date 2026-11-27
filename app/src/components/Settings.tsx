@@ -36,6 +36,7 @@ import { SendAsGroup } from './SendAs';
 import { autoUpdates, checkForUpdate, restartToUpdate, setAutoUpdates, updateStatus } from '../lib/updates';
 import { AiSection } from './AiSettings';
 import { platform } from '../lib/platform';
+import { Modal } from './Modal';
 
 // Settings: sections on the left, the chosen one on the right (each with its own heading,
 // scrolling and buttons). Fixed size, so switching sections never moves the dialog.
@@ -59,12 +60,16 @@ const setSection = (s: SettingsSection) => {
   savePref('ui.settingsSection', s);
 };
 let returnFocus: HTMLElement | null = null;
+/** Settings › Accounts: the account whose page is shown (each has one, listed under Accounts
+ *  in the sidebar); null: the list of them. Opening Settings starts at the account viewed. */
+const [accountPage, setAccountPage] = createSignal<number | null>(null);
 
 /** Open Settings (at `at`, else where it was last). */
 export function openSettings(at?: SettingsSection): void {
   if (at) setSection(at);
   if (open()) return;
   returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  setAccountPage(folderById(selectedFolderId())?.accountId ?? (accounts()?.length === 1 ? accounts()![0]!.id : null));
   setOpen(true);
 }
 function close() {
@@ -576,7 +581,9 @@ function recountSoon() {
   }, 1000);
 }
 
-function AccountCard(props: { d: AccountDetails; open: boolean; onToggle: () => void }) {
+/** An account's page in Settings › Accounts: who you are (marker, addresses), how it connects,
+ *  what's kept on this computer, what it's connected to; Export and Remove at the foot. */
+function AccountPage(props: { d: AccountDetails }) {
   const stored = () => storage()?.find((s) => s.accountId === props.d.id);
   const [keep, setKeep] = createSignal(props.d.keepAttachments);
   const counts = () => attachmentCounts()?.find((x) => x.accountId === props.d.id);
@@ -630,33 +637,14 @@ function AccountCard(props: { d: AccountDetails; open: boolean; onToggle: () => 
   // The name mail from the account's own address is sent under (edited in Send as); the
   // address alone is stored as the address itself.
   const [name, setName] = createSignal(props.d.displayName === props.d.email ? '' : props.d.displayName);
-  const summary = () => {
-    const st = stored();
-    return st ? `${fmtNum(st.messages)} ${st.messages === 1 ? 'message' : 'messages'} · ${fmtSize(st.localBytes)} local` : '';
-  };
   const connected = () => account()?.provider === 'gmail' || account()?.auth === 'microsoft';
   return (
-    <section class="st-acct" classList={{ open: props.open }}>
-      {/* The head opens and closes the card; closed, it says what's stored. */}
-      <button class="st-acct-head" aria-expanded={props.open} onClick={props.onToggle}>
-        <Show when={account()}>{(a) => <AccountDot account={a()} size={20} />}</Show>
-        <span class="st-acct-email">{props.d.email}</span>
-        <span class="st-acct-sum">
-          <Show when={!props.open}>{summary()}</Show>
-        </span>
-        <span class="st-acct-type">{PROVIDER[props.d.provider] ?? props.d.provider}</span>
-        <span class="st-acct-chev" aria-hidden="true">
-          <ChevronIcon size={12} />
-        </span>
-      </button>
-      <Show when={props.open}>
-        <Group title="You">
-      <Show when={account()}>{(a) => <MarkField account={a()} onError={(text) => setMsg({ text, error: true })} />}</Show>
-        </Group>
-        <Group title="Send as">
+    <div class="st-acct">
+        <Group title="Identity">
+          <Show when={account()}>{(a) => <MarkField account={a()} onError={(text) => setMsg({ text, error: true })} />}</Show>
           <SendAsGroup accountId={props.d.id} email={props.d.email} name={name()} onRename={setName} />
         </Group>
-        <Group title="Server">
+        <Group title="Connection">
       <Field label="Incoming (IMAP)">
         {props.d.imapHost}:{props.d.imapPort}
       </Field>
@@ -773,8 +761,7 @@ function AccountCard(props: { d: AccountDetails; open: boolean; onToggle: () => 
         <div class="st-acct-foot">
           <AccountTools account={props.d} />
         </div>
-      </Show>
-    </section>
+    </div>
   );
 }
 
@@ -788,6 +775,12 @@ function Group(props: { title: string; children: JSX.Element }) {
   );
 }
 
+/** What an account holds, for its row in the overview ("" until counted). */
+function storedSummary(id: number): string {
+  const st = storage()?.find((s) => s.accountId === id);
+  return st ? `${fmtNum(st.messages)} ${st.messages === 1 ? 'message' : 'messages'} · ${fmtSize(st.localBytes)} local` : '';
+}
+
 function AccountsSection() {
   const [details] = createResource(() => api.accountDetails());
   if (storage() == null) countStorage();
@@ -799,24 +792,47 @@ function AccountsSection() {
     recountTimer = undefined;
     void unlisten.then((un) => un());
   });
-  // One account open at a time: the one being viewed to begin with (or the only one).
-  const [openId, setOpenId] = createSignal<number | null>(
-    folderById(selectedFolderId())?.accountId ?? (accounts()?.length === 1 ? accounts()![0]!.id : null),
-  );
   // in the user's order (as in the sidebar)
   const ordered = () => {
     const d = details() ?? [];
     return (accounts() ?? []).map((a) => d.find((x) => x.id === a.id)).filter((x): x is AccountDetails => !!x);
   };
+  // The chosen account's page; none (or one since removed): the list of them.
+  const current = () => ordered().find((d) => d.id === accountPage());
   return (
     <div class="st-body">
-      <For each={ordered()}>
-        {(d) => <AccountCard d={d} open={openId() === d.id} onToggle={() => setOpenId(openId() === d.id ? null : d.id)} />}
-      </For>
+      <Show
+        when={current()}
+        keyed
+        fallback={
+          <>
+            <div class="st-acct-list">
+              <For each={ordered()}>
+                {(d) => {
+                  const account = () => (accounts() ?? []).find((a) => a.id === d.id);
+                  return (
+                    <button class="st-acct-row" onClick={() => setAccountPage(d.id)}>
+                      <Show when={account()}>{(a) => <AccountDot account={a()} size={20} />}</Show>
+                      <span class="st-acct-email">{d.email}</span>
+                      <span class="st-acct-sum">{storedSummary(d.id)}</span>
+                      <span class="st-acct-type">{PROVIDER[d.provider] ?? d.provider}</span>
+                      <span class="st-acct-chev" aria-hidden="true">
+                        <ChevronIcon size={12} />
+                      </span>
+                    </button>
+                  );
+                }}
+              </For>
+            </div>
+            <GoogleClientNote />
+          </>
+        }
+      >
+        {(d) => <AccountPage d={d} />}
+      </Show>
       <Show when={details.error}>
         <p class="st-acct-msg error">{errorMessage(details.error)}</p>
       </Show>
-      <GoogleClientNote />
     </div>
   );
 }
@@ -1183,108 +1199,138 @@ function TroubleshootingSection() {
 function Panel() {
   let card!: HTMLDivElement;
   onMount(() => {
-    card.focus();
     // (Not closed when the window loses focus: a file dialog — a picture for a marker or a
     // signature — takes it, and Settings must be there when it's chosen.)
     // Capture on the window: while a shortcut is being recorded the key is the shortcut (and
-    // reaches nothing else, even with focus fallen out of the dialog); Esc closes. Other keys
-    // go where they're typed (the password field…).
+    // reaches nothing else, even with focus fallen out of the dialog). Other keys go where
+    // they're typed (the password field…).
+    const onKey = (e: KeyboardEvent) => {
+      if (recordKeyPress(e, () => card.focus({ preventScroll: true }))) e.stopImmediatePropagation();
+    };
     window.addEventListener('keydown', onKey, true);
     onCleanup(() => window.removeEventListener('keydown', onKey, true));
   });
 
-  function onKey(e: KeyboardEvent) {
-    if (recordKeyPress(e, () => card.focus({ preventScroll: true }))) {
-      e.stopPropagation();
-      return;
-    }
-    if (e.key === 'Escape') {
-      // A dialog opened over Settings (Export, Remove account…) closes first, on its own.
-      const top = [...document.querySelectorAll('.modal-backdrop')].pop();
-      if (top && top !== card.parentElement) return;
-      // So do the marker's color panel (MarkColor) and a drop-down's menu (Select).
-      if (document.querySelector('.st-color-panel, .sel-menu')) return;
-      e.preventDefault();
-      e.stopPropagation();
-      if (presetMenu()) setPresetMenu(false);
-      // The shortcuts' search empties first.
-      else if (section() === 'keyboard' && keySearch()) setKeySearch('');
-      else close();
-    }
+  // Esc, while Settings is the dialog on top: closes it, or what's open in it first.
+  function onEscape(e: KeyboardEvent): boolean {
+    // A shortcut being recorded takes the key (above).
+    if (recording()) return false;
+    // And a form that Esc empties first (an address being added), while something's typed.
+    const esc = e.target instanceof Element ? e.target.closest('[data-esc-empties]') : null;
+    if (esc && [...esc.querySelectorAll('input')].some((i) => i.value)) return false;
+    if (presetMenu()) setPresetMenu(false);
+    // The shortcuts' search empties first.
+    else if (section() === 'keyboard' && keySearch()) setKeySearch('');
+    else close();
+    return true;
   }
 
+  // The account whose page is shown (one since removed: the list again).
+  const accountShown = () => (accounts() ?? []).find((a) => a.id === accountPage());
   const title = () => SECTIONS.find((s) => s.id === section())?.title ?? '';
   return (
-    <div class="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && close()}>
-      <div class="card modal settings" ref={card} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Settings">
-        <nav class="st-nav" aria-label="Settings sections">
-          <h2>Settings</h2>
-          <For each={SECTIONS}>
-            {(s) => (
+    <Modal label="Settings" class="settings" ref={(el) => (card = el)} onClose={close} onEscape={onEscape} focusCard>
+      <nav class="st-nav" aria-label="Settings sections">
+        <h2>Settings</h2>
+        <For each={SECTIONS}>
+          {(s) => (
+            <>
               <button
                 class="st-nav-item"
-                classList={{ on: section() === s.id }}
-                aria-current={section() === s.id ? 'page' : undefined}
+                classList={{ on: section() === s.id && !(s.id === 'accounts' && accountShown()) }}
+                aria-current={section() === s.id && !(s.id === 'accounts' && accountShown()) ? 'page' : undefined}
                 onClick={() => {
                   setRecording(null);
                   setSection(s.id);
+                  if (s.id === 'accounts') setAccountPage(null);
                 }}
               >
                 {s.title}
               </button>
-            )}
-          </For>
-        </nav>
-        <div class="st-pane">
-          <header class="st-pane-head">
-            <h3>{title()}</h3>
-            <div class="st-head-actions">
-              {/* In the title bar, not after the accounts: there without scrolling past them. */}
-              <Show when={section() === 'accounts'}>
-                <button
-                  class="btn secondary"
-                  onClick={() => {
-                    close();
-                    setAddingAccount(true);
+              {/* Each account has a page of its own, listed under Accounts. */}
+              <Show when={s.id === 'accounts'}>
+                <For each={accounts() ?? []}>
+                  {(a) => {
+                    const on = () => section() === 'accounts' && accountShown()?.id === a.id;
+                    return (
+                      <button
+                        class="st-nav-acct"
+                        classList={{ on: on() }}
+                        aria-current={on() ? 'page' : undefined}
+                        title={a.email}
+                        onClick={() => {
+                          setRecording(null);
+                          setSection('accounts');
+                          setAccountPage(a.id);
+                        }}
+                      >
+                        <AccountDot account={a} size={14} />
+                        <span class="st-nav-acct-email">{a.email}</span>
+                      </button>
+                    );
                   }}
-                >
-                  + Add account
-                </button>
+                </For>
               </Show>
-              <button class="icon-btn" onClick={close} aria-label="Close">
-                <CloseIcon />
+            </>
+          )}
+        </For>
+      </nav>
+      <div class="st-pane">
+        <header class="st-pane-head">
+          <Show when={section() === 'accounts' ? accountShown() : undefined} fallback={<h3>{title()}</h3>}>
+            {(a) => (
+              <h3 class="st-acct-title">
+                {a().email}
+                <span class="st-acct-type">{PROVIDER[a().provider] ?? a().provider}</span>
+              </h3>
+            )}
+          </Show>
+          <div class="st-head-actions">
+            {/* In the title bar, not after the accounts: there without scrolling past them. */}
+            <Show when={section() === 'accounts'}>
+              <button
+                class="btn secondary"
+                onClick={() => {
+                  close();
+                  setAddingAccount(true);
+                }}
+              >
+                + Add account
               </button>
-            </div>
-          </header>
-          <Switch>
-            <Match when={section() === 'general'}>
-              <GeneralSection />
-            </Match>
-            <Match when={section() === 'accounts'}>
-              <AccountsSection />
-            </Match>
-            <Match when={section() === 'signatures'}>
-              <SignaturesSection />
-            </Match>
-            <Match when={section() === 'ai'}>
-              <AiSection />
-            </Match>
-            <Match when={section() === 'aiapps'}>
-              <AiAppsSection />
-            </Match>
-            <Match when={section() === 'notifications'}>
-              <NotificationsSection />
-            </Match>
-            <Match when={section() === 'keyboard'}>
-              <KeyboardSection />
-            </Match>
-            <Match when={section() === 'troubleshooting'}>
-              <TroubleshootingSection />
-            </Match>
-          </Switch>
-        </div>
+            </Show>
+            <button class="icon-btn" onClick={close} aria-label="Close">
+              <CloseIcon />
+            </button>
+          </div>
+        </header>
+        <Switch>
+          <Match when={section() === 'general'}>
+            <GeneralSection />
+          </Match>
+          <Match when={section() === 'accounts'}>
+            <AccountsSection />
+          </Match>
+          <Match when={section() === 'signatures'}>
+            <SignaturesSection />
+          </Match>
+          <Match when={section() === 'ai'}>
+            <AiSection />
+          </Match>
+          <Match when={section() === 'aiapps'}>
+            <AiAppsSection />
+          </Match>
+          <Match when={section() === 'notifications'}>
+            <NotificationsSection />
+          </Match>
+          <Match when={section() === 'keyboard'}>
+            <KeyboardSection />
+          </Match>
+          <Match when={section() === 'troubleshooting'}>
+            <TroubleshootingSection />
+          </Match>
+        </Switch>
       </div>
-    </div>
+    </Modal>
   );
 }
 
