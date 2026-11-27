@@ -6,6 +6,11 @@ fn main() {
     if std::env::args().skip(1).any(|a| a == "--mcp") {
         std::process::exit(mail_app_lib::mcp_bridge());
     }
+    // Started by the app itself to read one PDF for search (`mail_core::pdf_helper`): apart, so
+    // a PDF that crashes the PDF library takes only this process down.
+    if std::env::args().skip(1).any(|a| a == mail_core::pdf_helper::FLAG) {
+        std::process::exit(mail_core::pdf_helper::serve());
+    }
     // WebKitGTK paces its frames by the vblank of the display the window was first shown on.
     // When that display goes off (a laptop's lid closed, an external monitor in use) each wait
     // times out and the window gets about one frame a second: selecting and scrolling the list

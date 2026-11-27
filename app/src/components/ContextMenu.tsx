@@ -4,6 +4,7 @@ import { api, errorMessage, type Folder } from '../api';
 import { favoriteFolders, favoriteIndex, isFavorite, moveFavorite, toggleFavorite } from '../lib/favorites';
 import { fmtNum } from '../lib/format';
 import { showToast } from './Toast';
+import { CheckIcon } from './Icons';
 
 // A right-click menu: the webview's own (Reload, Inspect…) is replaced by the app's, at the
 // pointer. One at a time; any click elsewhere, Escape, scrolling or leaving the window closes it.
@@ -13,6 +14,8 @@ export interface MenuItem {
   disabled?: boolean;
   /** A line above it, starting a new group. */
   separatorBefore?: boolean;
+  /** A choice: ticked when true (the items of a menu with any set leave room for the tick). */
+  checked?: boolean;
   run: () => void;
 }
 
@@ -140,7 +143,8 @@ export function ContextMenuHost() {
                     <div class="vm-sep" role="separator" />
                   </Show>
                   <button
-                    role="menuitem"
+                    role={it.checked != null ? 'menuitemradio' : 'menuitem'}
+                    aria-checked={it.checked != null ? it.checked : undefined}
                     class="vm-item"
                     classList={{ disabled: !!it.disabled }}
                     disabled={it.disabled}
@@ -149,6 +153,13 @@ export function ContextMenuHost() {
                       it.run();
                     }}
                   >
+                    <Show when={m().items.some((x) => x.checked != null)}>
+                      <span class="vm-check" aria-hidden="true">
+                        <Show when={it.checked}>
+                          <CheckIcon size={12} />
+                        </Show>
+                      </span>
+                    </Show>
                     <span class="vm-label">{it.label}</span>
                   </button>
                 </>

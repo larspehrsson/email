@@ -238,7 +238,7 @@ const TOOLS: &[Tool] = &[
     Tool {
         name: "search_messages",
         need: Need::Read,
-        description: "Search mail, newest first. Words match senders, recipients, subjects and the text of downloaded messages; also from:, to:, subject:, body:, \"exact phrase\", -exclude, tag:name, is:unread, is:starred, has:attachment.",
+        description: "Search mail, newest first. Words match senders, recipients, subjects, the text of downloaded messages and of their PDF and text attachments; also from:, to:, subject:, body:, attachment:, \"exact phrase\", -exclude, tag:name, is:unread, is:starred, has:attachment.",
         schema: || {
             json!({ "type": "object", "properties": {
                 "query": { "type": "string" },

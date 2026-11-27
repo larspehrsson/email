@@ -19,6 +19,7 @@ fn field_column(name: &str) -> Option<&'static str> {
         "to" | "cc" => "recipients",
         "subject" | "subj" => "subject",
         "body" | "text" => "body",
+        "attachment" | "attachments" | "file" | "files" => "attachments",
         _ => return None,
     })
 }
@@ -101,26 +102,29 @@ pub fn split_tags(query: &str) -> (String, Vec<String>) {
 }
 
 /// Fields a plain (unprefixed) term may match.
-pub const ALL_FIELDS: &[&str] = &["sender", "recipients", "subject", "body"];
-/// The ones in the header index (msg_fts); `body` is body_fts, a table of its own.
+pub const ALL_FIELDS: &[&str] = &["sender", "recipients", "subject", "body", "attachments"];
+/// The ones in the header index (msg_fts); `body` is body_fts and `attachments` file_fts,
+/// tables of their own.
 const HEAD_FIELDS: &[&str] = &["sender", "recipients", "subject"];
 
 /// One term of a query as FTS5 expressions, one per index: `head` for msg_fts (sender,
-/// recipients, subject) and `body` for body_fts; None where it isn't looked for. A message
-/// matches a term when either matches; it matches the query when it matches every positive
+/// recipients, subject), `body` for body_fts and `files` for file_fts (the text in
+/// attachments); None where it isn't looked for. A message matches a term when any matches; it matches the query when it matches every positive
 /// term and no negated one.
 #[derive(Debug, PartialEq)]
 pub struct TermMatch {
     pub head: Option<String>,
     pub body: Option<String>,
+    pub files: Option<String>,
     pub negated: bool,
 }
 
 fn term_match(t: &Term, plain: &[&str]) -> TermMatch {
     let p = format!("\"{}\"*", t.text.replace('"', "\"\""));
-    let (head, body) = match t.field {
-        Some("body") => (None, Some(p)),
-        Some(col) => (Some(format!("{col} : {p}")), None),
+    let (head, body, files) = match t.field {
+        Some("body") => (None, Some(p), None),
+        Some("attachments") => (None, None, Some(p)),
+        Some(col) => (Some(format!("{col} : {p}")), None, None),
         None => {
             let cols: Vec<&str> = HEAD_FIELDS.iter().copied().filter(|f| plain.contains(f)).collect();
             let head = match cols.len() {
@@ -128,10 +132,10 @@ fn term_match(t: &Term, plain: &[&str]) -> TermMatch {
                 n if n < HEAD_FIELDS.len() => Some(format!("{{{}}} : {p}", cols.join(" "))),
                 _ => Some(p.clone()),
             };
-            (head, plain.contains(&"body").then_some(p))
+            (head, plain.contains(&"body").then(|| p.clone()), plain.contains(&"attachments").then_some(p))
         }
     };
-    TermMatch { head, body, negated: t.negated }
+    TermMatch { head, body, files, negated: t.negated }
 }
 
 /// A query's terms, or None if it has no searchable (positive) ones. `fields` limits plain
@@ -151,7 +155,16 @@ mod tests {
 
     /// Each term as (head expression, body expression, negated).
     fn terms_in(q: &str, fields: &[&str]) -> Option<Vec<(Option<String>, Option<String>, bool)>> {
-        super::terms(q, fields).map(|ts| ts.into_iter().map(|TermMatch { head, body, negated }| (head, body, negated)).collect())
+        super::terms(q, fields).map(|ts| {
+            ts.into_iter()
+                .map(|TermMatch { head, body, files, negated }| {
+                    // The text in attachments is looked through wherever the message's text is,
+                    // unless only one of the two was asked for.
+                    let only_files = files.is_some() && body.is_none();
+                    (head, if only_files { files.map(|f| format!("files:{f}")) } else { body }, negated)
+                })
+                .collect()
+        })
     }
     fn terms(q: &str) -> Option<Vec<(Option<String>, Option<String>, bool)>> {
         terms_in(q, &[])
@@ -198,6 +211,11 @@ mod tests {
         assert_eq!(f("ada", &["sender", "body"]), [(Some(r#"{sender} : "ada"*"#.into()), Some(r#""ada"*"#.into()), false)]);
         assert_eq!(f("ada", &["body"]), [(None, Some(r#""ada"*"#.into()), false)]);
         assert_eq!(f("ada", &["bogus"]), [both(r#""ada"*"#)]);
+        assert_eq!(f("ada", &["attachments"]), [(None, Some(r#"files:"ada"*"#.into()), false)]);
+        let t = super::terms("ada", &["body"]).unwrap();
+        assert_eq!((t[0].body.is_some(), t[0].files.is_some()), (true, false), "Text alone isn't the attachments");
+        let t = super::terms("attachment:wombat", &[]).unwrap();
+        assert_eq!((t[0].head.is_none(), t[0].body.is_none(), t[0].files.as_deref()), (true, true, Some(r#""wombat"*"#)));
         // Explicit prefixes win over the field limit.
         assert_eq!(f("to:bob ada", &["subject"]), [head(r#"recipients : "bob"*"#), head(r#"{subject} : "ada"*"#)]);
     }

@@ -78,7 +78,7 @@ interface ThreadSummary {
   tags: string[];           // tags on any selected message of the conversation
 }
 
-type SearchField = 'sender' | 'recipients' | 'subject';
+type SearchField = 'sender' | 'recipients' | 'subject' | 'body' | 'attachments';
 
 interface ThreadView {
   messages: MessageSummary[];
@@ -140,7 +140,8 @@ interface SyncStatus {
 | `get_message` | `{ id, allowRemote }` | `MessageDetail \| null` — null means not downloaded yet; core queues it at top priority and emits `message-ready` |
 | `list_threads` | `{ folderId, offset, limit, scope, includeTrash }` | `{ total: number, threads: ThreadSummary[] }` newest first — threaded counterpart of `list_messages`. A conversation is listed if any of its messages is in `folderId`; summary fields (count, participants, unread, flagged, attachments, snippet, latestMessageId) cover only the messages `scope`/`includeTrash` select. |
 | `get_thread` | `{ threadId, folderId, scope, includeTrash }` | `ThreadView` — the conversation's messages selected by `scope`/`includeTrash`, oldest first, plus counts of hidden ones. A message's `folderId` is `folderId` when it's in that folder, else its most specific other folder (labels before All Mail) |
-| `search_messages` | `{ accountId, folderId, query, offset, limit, fields }` | `{ total, messages: MessageSummary[] }` newest first. `folderId: null` = whole account. Each result's `folderId` is the most specific folder it's in (Inbox/label over All Mail). `fields: SearchField[] \| null` limits plain (unprefixed) terms to those fields; null or empty = all (`sender`, `recipients`, `subject`, `body`). Query syntax below. |
+| `search_messages` | `{ accountId, folderId, query, offset, limit, fields }` | `{ total, messages: MessageSummary[] }` newest first. `folderId: null` = whole account. Each result's `folderId` is the most specific folder it's in (Inbox/label over All Mail). `fields: SearchField[] \| null` limits plain (unprefixed) terms to those fields; null or empty = all (`sender`, `recipients`, `subject`, `body`, `attachments`). Query syntax below. |
+| `attachment_matches` | `{ messageId, words }` | `number[]` — the `index` of each attachment with one of `words` (lowercase, no accents, matched at the start of a word) in its name or, with `attachment_search` on, its text; read when asked, PDFs through the helper. While a search is shown, the reader marks those chips |
 | `open_attachment` | `{ messageId, index }` | `void` — fetches if needed, writes to the app cache, opens in the default app. Rejects (string) for non-openable types or on failure |
 | `image_data` | `{ src }` | `string` — a picture in a message as a `data:` URL, got as `save_image_as` gets it (Copy image) |
 | `save_image_as` | `{ src, name }` | `string \| null` — a picture in a message (right-click › Save image as…) where the user chooses (the system's save dialog, starting in Downloads): `src` is the address it's shown from (`data:`, `mailimg:`, or http(s) for a remote picture the message may load, fetched again from public addresses only), `name` a name to start from (the extension follows the content); the path written, or null if cancelled |
@@ -197,9 +198,9 @@ interface SyncStatus {
 
 Matches sender (name + address), recipients (To/Cc names + addresses), subject and text; every term must match (AND), case- and accent-insensitive, each word matched as a prefix (`inv` finds "invoice").
 
-- `word` — any of the fields, the message's text included (`body`: its text, HTML as text, and its attachments' names, for messages whose body is downloaded; indexed in the background)
+- `word` — any of the fields, the message's text and attachments included (`body`: its text, HTML as text, and its attachments' names; `attachments`: their names and, with `attachment_search` on, the text in its downloaded PDF and plain-text attachments; both for messages whose body is downloaded, indexed in the background)
 - `"exact phrase"` — phrase (last word still prefix-matched)
-- `from:x`, `to:x`, `subject:x`, `body:x` — restrict a term to one field (`from:"Ada L"` works); these override `fields`
+- `from:x`, `to:x`, `subject:x`, `body:x`, `attachment:x` — restrict a term to one field (`from:"Ada L"` works); these override `fields`
 - `-word` — exclude
 - `tag:work`, `tag:"to do"`, `tag:$label2` — messages with that tag (by tag name or keyword); may be used alone
 

@@ -353,6 +353,15 @@ CREATE TRIGGER IF NOT EXISTS body_fts_del AFTER DELETE ON messages BEGIN
     DELETE FROM body_fts WHERE rowid = OLD.id;
 END;
 CREATE INDEX IF NOT EXISTS messages_unindexed ON messages(id) WHERE has_body=1 AND body_indexed=0;
+-- The names of a message's attachments and the text in them (PDFs, plain-text files), from
+-- the same background indexing: search's Attachments field.
+CREATE VIRTUAL TABLE IF NOT EXISTS file_fts USING fts5(
+    files,
+    content='', contentless_delete=1,
+    tokenize='unicode61 remove_diacritics 2', prefix='2 3');
+CREATE TRIGGER IF NOT EXISTS file_fts_del AFTER DELETE ON messages BEGIN
+    DELETE FROM file_fts WHERE rowid = OLD.id;
+END;
 "#;
 
 /// Schema versions (`PRAGMA user_version`). `SCHEMA` is always the current schema, whole:
@@ -1852,7 +1861,7 @@ impl Store {
         // A term matches in the header index or in the text: the union of the two.
         for t in terms.into_iter().flatten() {
             let mut sets = Vec::new();
-            for (table, expr) in [("msg_fts", t.head), ("body_fts", t.body)] {
+            for (table, expr) in [("msg_fts", t.head), ("body_fts", t.body), ("file_fts", t.files)] {
                 if let Some(expr) = expr {
                     args.push(Box::new(expr));
                     sets.push(format!("SELECT rowid FROM {table} WHERE {table} MATCH ?{}", args.len()));
@@ -2871,14 +2880,23 @@ impl Store {
         if ids.is_empty() {
             return Ok(0);
         }
-        // (id, the body's length as read, its text)
-        let mut texts: Vec<(i64, Option<usize>, Option<String>)> = Vec::with_capacity(ids.len());
+        let read_files = self.attachment_search()?;
+        // (id, the body's length and how many attachments were downloaded apart, as read; its text)
+        let mut texts: Vec<(i64, Option<usize>, usize, Option<(String, String)>)> = Vec::with_capacity(ids.len());
         for id in &ids {
-            let raw: Option<Vec<u8>> = {
+            let (raw, cached): (Option<Vec<u8>>, Vec<(usize, Vec<u8>)>) = {
                 let bodies = self.bodies_read.lock().unwrap_or_else(|e| e.into_inner());
-                bodies.prepare_cached("SELECT raw FROM bodies WHERE message_id=?1")?.query_row([id], |r| r.get(0)).optional()?
+                let raw = bodies.prepare_cached("SELECT raw FROM bodies WHERE message_id=?1")?.query_row([id], |r| r.get(0)).optional()?;
+                let mut stmt = bodies.prepare_cached("SELECT idx, data FROM attachment_cache WHERE message_id=?1 ORDER BY idx")?;
+                let cached = stmt.query_map([id], |r| Ok((r.get::<_, i64>(0)? as usize, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+                (raw, cached)
             };
-            texts.push((*id, raw.as_ref().map(Vec::len), raw.as_deref().and_then(crate::mime::search_text)));
+            let fetched = match &raw {
+                Some(raw) => self.fetched_attachments(*id, raw, cached.iter().filter(|_| read_files).cloned())?,
+                None => Vec::new(),
+            };
+            let text = raw.as_deref().and_then(|r| crate::mime::search_text(r, &fetched, read_files));
+            texts.push((*id, raw.as_ref().map(Vec::len), cached.len(), text));
         }
         let mut db = self.db();
         let tx = db.transaction()?;
@@ -2886,11 +2904,14 @@ impl Store {
         {
             let mut del = tx.prepare_cached("DELETE FROM body_fts WHERE rowid=?1")?;
             let mut add = tx.prepare_cached("INSERT INTO body_fts (rowid, body) VALUES (?1, ?2)")?;
+            let mut del_files = tx.prepare_cached("DELETE FROM file_fts WHERE rowid=?1")?;
+            let mut add_files = tx.prepare_cached("INSERT INTO file_fts (rowid, files) VALUES (?1, ?2)")?;
             let mut done = tx.prepare_cached("UPDATE messages SET body_indexed=1 WHERE id=?1")?;
             let mut waiting = tx.prepare_cached("SELECT 1 FROM messages WHERE id=?1 AND has_body=1 AND body_indexed=0")?;
             let bodies = self.bodies_read.lock().unwrap_or_else(|e| e.into_inner());
             let mut len_now = bodies.prepare_cached("SELECT length(raw) FROM bodies WHERE message_id=?1")?;
-            for (id, len, text) in &texts {
+            let mut cached_now = bodies.prepare_cached("SELECT count(*) FROM attachment_cache WHERE message_id=?1")?;
+            for (id, len, cached, text) in &texts {
                 // Read without a lock: the message may have gone since (its id could come back
                 // for another), or got a new body (which marked it to do again after writing
                 // the body, so the body here is already the new one). Then it's left as it is.
@@ -2898,13 +2919,18 @@ impl Store {
                     continue;
                 }
                 let now: Option<i64> = len_now.query_row([id], |r| r.get(0)).optional()?;
-                if now.map(|n| n as usize) != *len {
+                if now.map(|n| n as usize) != *len || cached_now.query_row([id], |r| r.get::<_, i64>(0))? as usize != *cached {
                     continue;
                 }
                 done_n += 1;
                 del.execute([id])?;
-                if let Some(t) = text.as_deref().filter(|t| !t.trim().is_empty()) {
-                    add.execute(params![id, t])?;
+                del_files.execute([id])?;
+                let (body, files) = text.as_ref().map_or(("", ""), |(b, f)| (b.as_str(), f.as_str()));
+                if !body.trim().is_empty() {
+                    add.execute(params![id, body])?;
+                }
+                if !files.trim().is_empty() {
+                    add_files.execute(params![id, files])?;
                 }
                 done.execute([id])?;
             }
@@ -2913,6 +2939,36 @@ impl Store {
         // Those passed over are still waiting (a later batch takes them); a batch that only
         // passed over still counts as work, so the caller asks again.
         Ok(done_n.max(usize::from(!texts.is_empty())))
+    }
+
+    /// The attachments of a message stored without them, as (name, mime, bytes) from the
+    /// omitted parts' descriptions: with the bytes of those in `cached` (downloaded later, the
+    /// cache's `(idx, bytes)`), none for the others (their names are searched all the same).
+    fn fetched_attachments(&self, id: i64, raw: &[u8], cached: impl Iterator<Item = (usize, Vec<u8>)>) -> Result<Vec<(String, String, Vec<u8>)>> {
+        let omitted: Vec<crate::partial::OmittedPart> = self.omitted(id)?.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
+        if omitted.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut out: Vec<(String, String, Vec<u8>)> = omitted.iter().map(|p| (p.name.clone(), p.mime.clone(), Vec::new())).collect();
+        // Omitted attachments are numbered after those in the body.
+        let stored = crate::mime::stored_attachment_count(raw);
+        for (idx, data) in cached {
+            if let Some(slot) = idx.checked_sub(stored).and_then(|o| out.get_mut(o)) {
+                slot.2 = data;
+            }
+        }
+        Ok(out)
+    }
+
+    /// Once, after the upgrade that made attachments searchable on their own (file_fts):
+    /// messages with attachments indexed before that are indexed again. Returns how many.
+    pub fn index_attachment_text_once(&self) -> Result<usize> {
+        if self.choice("attachment_fts_indexed", false)? {
+            return Ok(0);
+        }
+        let n = self.db().execute("UPDATE messages SET body_indexed=0 WHERE has_body=1 AND body_indexed=1 AND has_attachments=1", [])?;
+        self.set_choice("attachment_fts_indexed", true)?;
+        Ok(n)
     }
 
     /// Messages whose body is here and still to be made searchable.
@@ -3039,6 +3095,23 @@ impl Store {
         Ok(())
     }
 
+    /// Whether search reads the text in attachments (PDFs, plain-text files): off unless the
+    /// user turns it on (Settings › General › Privacy). Off, only their names are searched.
+    pub fn attachment_search(&self) -> Result<bool> {
+        self.choice("attachment_search", false)
+    }
+
+    /// Turn reading attachments for search on or off: messages with attachments are indexed
+    /// again, so their text comes into the index, or goes from it.
+    pub fn set_attachment_search(&self, on: bool) -> Result<()> {
+        if self.attachment_search()? == on {
+            return Ok(());
+        }
+        self.set_choice("attachment_search", on)?;
+        self.db().execute("UPDATE messages SET body_indexed=0 WHERE has_body=1 AND has_attachments=1", [])?;
+        Ok(())
+    }
+
     /// Whether "Always load…" can cover everyone at a domain (off by default).
     pub fn domain_rules(&self) -> Result<bool> {
         self.choice("domain_rules", false)
@@ -3084,6 +3157,12 @@ impl Store {
             "INSERT OR REPLACE INTO attachment_cache (message_id, idx, data) VALUES (?1, ?2, ?3)",
             params![id, idx as i64, data],
         )?;
+        drop(bodies);
+        // Its text is searchable too, if the user chose that: the message is indexed again
+        // (after the write, as in `store_body`).
+        if self.attachment_search()? {
+            self.db().execute("UPDATE messages SET body_indexed=0 WHERE id=?1 AND has_body=1", [id])?;
+        }
         Ok(())
     }
 
@@ -5285,6 +5364,62 @@ mod tests {
         store.db().execute("DELETE FROM messages WHERE subject='Newsletter'", []).unwrap();
         let left: i64 = store.db().query_row("SELECT count(*) FROM body_fts WHERE body_fts MATCH 'kangaroo'", [], |r| r.get(0)).unwrap();
         assert_eq!(left, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn search_in_attachments() {
+        let dir = std::env::temp_dir().join(format!("mail-core-search-files-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = Store::open(&dir).unwrap();
+        let acct = store.insert_account("x@example.com", "x", Provider::Imap, "h", 993).unwrap();
+        store
+            .sync_folder_list(acct.id, &[ListedFolder { raw_name: "INBOX".into(), path: vec!["INBOX".into()], role: Some(FolderRole::Inbox), selectable: true }])
+            .unwrap();
+        let inbox = store.folders(acct.id).unwrap()[0].id;
+        let mk = |uid: u32, subject: &str| HeaderRecord { gm_msgid: None, gm_labels: None, subject: subject.into(), ..rec(uid, 0, &[]) };
+        store.upsert_headers(acct.id, inbox, &[mk(1, "Whole"), mk(2, "Partial")], &HashMap::new()).unwrap();
+        store.set_attachment_search(true).unwrap();
+        let id = |subject: &str| -> i64 { store.db().query_row("SELECT id FROM messages WHERE subject=?1", [subject], |r| r.get(0)).unwrap() };
+        let hits = |q: &str| -> Vec<String> { store.search(acct.id, None, q, &[], 0, 50).unwrap().messages.into_iter().map(|m| m.subject).collect() };
+        let b64 = |d: &[u8]| base64::Engine::encode(&base64::engine::general_purpose::STANDARD, d);
+        // Stored with its PDF.
+        let whole = format!(
+            "Subject: Whole\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nHi\r\n--b\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename=\"a.pdf\"\r\nContent-Transfer-Encoding: base64\r\n\r\n{}\r\n--b--\r\n",
+            b64(&crate::mime::tests::tiny_pdf("wombat lease"))
+        );
+        store.store_body(id("Whole"), whole.as_bytes(), None, true, None).unwrap();
+        // Stored without its PDF, which is downloaded later.
+        let omitted = r#"[{"name":"later.pdf","mime":"application/pdf","size":900}]"#;
+        store.store_body(id("Partial"), b"Subject: Partial\r\nContent-Type: text/plain\r\n\r\nSee attached\r\n", None, true, Some(omitted)).unwrap();
+        while store.index_bodies(100).unwrap() > 0 {}
+        assert_eq!(hits("wombat"), ["Whole"], "the text of a stored PDF");
+        assert!(hits("echidna").is_empty());
+        store.cache_attachment(id("Partial"), 0, &crate::mime::tests::tiny_pdf("echidna census")).unwrap();
+        assert_eq!(store.bodies_to_index().unwrap(), 1, "indexed again once downloaded");
+        while store.index_bodies(100).unwrap() > 0 {}
+        assert_eq!(hits("echidna census"), ["Partial"]);
+        assert_eq!(hits("attachment:echidna"), ["Partial"]);
+        assert!(hits("body:echidna").is_empty(), "the message's text is apart");
+        let only = |q: &str, fields: &[&str]| store.search(acct.id, None, q, fields, 0, 50).unwrap().total;
+        assert_eq!((only("echidna", &["attachments"]), only("echidna", &["body"]), only("echidna", &["subject", "attachments"])), (1, 0, 1));
+        assert_eq!(only("later", &["attachments"]), 1, "by name");
+
+        // Once, after the upgrade: messages with attachments, indexed before, are done again.
+        store.db().execute("DELETE FROM settings WHERE key='attachment_fts_indexed'", []).unwrap();
+        assert_eq!(store.index_attachment_text_once().unwrap(), 2);
+        assert_eq!(store.index_attachment_text_once().unwrap(), 0, "only once");
+        while store.index_bodies(100).unwrap() > 0 {}
+        assert_eq!(hits("wombat"), ["Whole"]);
+
+        // Turned off: their text goes from the index, their names stay; on again, it's back.
+        store.set_attachment_search(false).unwrap();
+        while store.index_bodies(100).unwrap() > 0 {}
+        assert!(hits("wombat").is_empty() && hits("echidna").is_empty(), "no text in attachments");
+        assert_eq!(hits("attachment:later"), ["Partial"], "names still");
+        store.set_attachment_search(true).unwrap();
+        while store.index_bodies(100).unwrap() > 0 {}
+        assert_eq!((hits("wombat"), hits("echidna")), (vec!["Whole".to_string()], vec!["Partial".to_string()]));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

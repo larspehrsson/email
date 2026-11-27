@@ -355,7 +355,7 @@ export interface ListGroup {
 }
 
 /** Fields plain (unprefixed) quick-search terms look in; null/empty = all three. */
-export type SearchField = 'sender' | 'recipients' | 'subject' | 'body';
+export type SearchField = 'sender' | 'recipients' | 'subject' | 'body' | 'attachments';
 
 /** One conversation as it appears in a folder. */
 export interface ThreadSummary {
@@ -711,6 +711,7 @@ export interface CommandMap {
   check_now: { args: undefined; ret: void };
   set_read: { args: { id: number; read: boolean }; ret: void };
   open_attachment: { args: { messageId: number; index: number }; ret: void };
+  attachment_matches: { args: { messageId: number; words: string[] }; ret: number[] };
   save_attachment: { args: { messageId: number; index: number }; ret: string };
   save_all_attachments: { args: { messageId: number }; ret: string[] };
   save_attachment_as: { args: { messageId: number; index: number }; ret: string | null };
@@ -779,6 +780,8 @@ export interface CommandMap {
   set_domain_rules: { args: { on: boolean }; ret: void };
   http_pictures: { args: undefined; ret: boolean };
   set_http_pictures: { args: { on: boolean }; ret: void };
+  attachment_search: { args: undefined; ret: boolean };
+  set_attachment_search: { args: { on: boolean }; ret: void };
   set_remote_sender: { args: { addr: string; on: boolean }; ret: void };
   update_password: { args: { accountId: number; password: string }; ret: void };
   set_keep_attachments: { args: { accountId: number; keep: boolean }; ret: void };

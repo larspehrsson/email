@@ -214,10 +214,18 @@ pub fn parse_header_block(raw: &[u8]) -> ParsedHeader {
 /// How much of a message's text search looks through (a long newsletter's tail isn't worth the
 /// index's space).
 pub const SEARCH_TEXT_MAX: usize = 100_000;
+/// How much of the text in a message's attachments (PDFs, plain-text files) search looks
+/// through, all of them together, on top of the message's own text.
+pub const ATTACHMENT_TEXT_MAX: usize = 100_000;
+/// PDFs larger than this aren't read for search (time and memory on the indexing thread).
+const PDF_MAX_BYTES: usize = 20 << 20;
 
-/// What search finds a message by in its body: its text (HTML as text), then its attachments'
-/// names; at most `SEARCH_TEXT_MAX` bytes. None: not a message the parser can read.
-pub fn search_text(raw: &[u8]) -> Option<String> {
+/// What search finds a message by in its body, as (the message's text, its attachments'):
+/// its text (HTML as text) and its attachments' names, at most `SEARCH_TEXT_MAX`; then the
+/// attachments' names and, with `read_files` (the user's choice, off by default), the text in
+/// them (stored in the body, or downloaded later: `fetched`, as (name, mime, bytes)), at most
+/// `ATTACHMENT_TEXT_MAX`. None: not a message the parser can read.
+pub fn search_text(raw: &[u8], fetched: &[(String, String, Vec<u8>)], read_files: bool) -> Option<(String, String)> {
     let msg = MessageParser::default().parse(raw)?;
     let mut text = String::new();
     let mut i = 0;
@@ -231,20 +239,89 @@ pub fn search_text(raw: &[u8]) -> Option<String> {
             break;
         }
     }
-    for a in msg.attachments() {
+    truncate_at(&mut text, SEARCH_TEXT_MAX);
+    let stored = stored_attachments(&msg);
+    for a in &stored {
         if let Some(name) = a.attachment_name() {
             text.push('\n');
             text.push_str(name);
         }
     }
-    if text.len() > SEARCH_TEXT_MAX {
-        let mut end = SEARCH_TEXT_MAX;
+    let mut files = String::new();
+    let parts: Vec<(String, String, &[u8])> = stored
+        .iter()
+        .map(|p| (attachment_name(p), part_mime(p), p.contents()))
+        .chain(fetched.iter().map(|(n, m, d)| (n.clone(), m.clone(), d.as_slice())))
+        .collect();
+    for (name, ..) in &parts {
+        files.push_str(name);
+        files.push('\n');
+    }
+    for (name, mime, data) in parts.iter().filter(|p| read_files && !p.2.is_empty()) {
+        if files.len() >= ATTACHMENT_TEXT_MAX {
+            break;
+        }
+        if let Some(t) = attachment_text(name, mime, data) {
+            files.push('\n');
+            files.push_str(t.trim());
+        }
+    }
+    truncate_at(&mut files, ATTACHMENT_TEXT_MAX);
+    Some((text, files))
+}
+
+fn truncate_at(text: &mut String, max: usize) {
+    if text.len() > max {
+        let mut end = max;
         while !text.is_char_boundary(end) {
             end -= 1;
         }
         text.truncate(end);
     }
-    Some(text)
+}
+
+/// The text in an attachment, for search: a PDF's (by type, name or content), or a plain-text
+/// file's (.txt, .csv, .md, .ics, .vcf…). None for anything else, and for a PDF that can't be
+/// read: damaged, encrypted, only pictures, or too large.
+pub fn attachment_text(name: &str, mime: &str, data: &[u8]) -> Option<String> {
+    let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    if mime == "application/pdf" || ext == "pdf" || data.starts_with(b"%PDF-") {
+        return pdf_text(data);
+    }
+    let texty = matches!(mime, "text/plain" | "text/csv" | "text/markdown" | "text/calendar" | "text/vcard" | "text/x-vcard")
+        || matches!(ext.as_str(), "txt" | "csv" | "tsv" | "md" | "log" | "ics" | "vcf");
+    // A file named .txt that's really binary isn't worth indexing.
+    (texty && !data.iter().take(4096).any(|&b| b == 0)).then(|| String::from_utf8_lossy(data).into_owned())
+}
+
+/// How PDFs are read for search: set by the app (`pdf_helper`, in a process of its own). Unset,
+/// they aren't read (the core's tests read them here).
+type PdfReader = Box<dyn Fn(&[u8]) -> Option<String> + Send + Sync>;
+static PDF_READER: std::sync::OnceLock<PdfReader> = std::sync::OnceLock::new();
+
+/// Read PDFs with `read` from now on (once; later calls are ignored).
+pub fn set_pdf_reader(read: impl Fn(&[u8]) -> Option<String> + Send + Sync + 'static) {
+    let _ = PDF_READER.set(Box::new(read));
+}
+
+fn pdf_text(data: &[u8]) -> Option<String> {
+    if data.len() > PDF_MAX_BYTES {
+        return None;
+    }
+    match PDF_READER.get() {
+        Some(read) => read(data),
+        None if cfg!(test) => pdf_text_here(data),
+        None => None,
+    }
+}
+
+/// A PDF's text, read in this process: only in the helper (`pdf_helper::serve`), since a
+/// PDF can crash the library in ways nothing here can catch.
+pub fn pdf_text_here(data: &[u8]) -> Option<String> {
+    // Panics at least (most damaged files) just give no text.
+    let text = std::panic::catch_unwind(|| pdf_extract::extract_text_from_mem(data)).ok()?.ok()?;
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!text.is_empty()).then_some(text)
 }
 
 /// Snippet and real attachment presence, computed once a body is downloaded.
@@ -462,6 +539,23 @@ pub fn stored_attachment(raw: &[u8], index: usize) -> Option<(String, String, Ve
     Some((attachment_name(part), part_mime(part), part.contents().to_vec()))
 }
 
+/// Every stored attachment's (name, mime, bytes), in index order.
+pub fn stored_attachment_parts(raw: &[u8]) -> Vec<(String, String, Vec<u8>)> {
+    let Some(msg) = MessageParser::default().parse(raw) else { return Vec::new() };
+    stored_attachments(&msg).into_iter().map(|p| (attachment_name(p), part_mime(p), p.contents().to_vec())).collect()
+}
+
+/// Whether `text` has a word starting with any of `words` (lowercase), as search's prefix
+/// matching finds them.
+pub fn has_word_prefix(text: &str, words: &[String]) -> bool {
+    use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
+    // As search's index has it: no accents (café is cafe), any case.
+    let lower: String = text.nfd().filter(|c| !is_combining_mark(*c)).collect::<String>().to_lowercase();
+    words.iter().filter(|w| !w.is_empty()).any(|w| {
+        lower.match_indices(w.as_str()).any(|(i, _)| !lower[..i].chars().next_back().is_some_and(char::is_alphanumeric))
+    })
+}
+
 /// How many attachments are stored in the raw message (omitted ones are numbered after these).
 pub fn stored_attachment_count(raw: &[u8]) -> usize {
     MessageParser::default().parse(raw).map(|m| stored_attachments(&m).len()).unwrap_or(0)
@@ -664,8 +758,146 @@ fn has_remote(html: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// A one-page PDF saying `text` (in Helvetica), for tests.
+    pub(crate) fn tiny_pdf(text: &str) -> Vec<u8> {
+        let content = format!("BT /F1 12 Tf 72 720 Td ({text}) Tj ET");
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>".to_string(),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_string(),
+            format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
+        ];
+        let mut out = b"%PDF-1.4\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, o) in objects.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+        }
+        let xref = out.len();
+        out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+        for o in offsets {
+            out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+        }
+        out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes());
+        out
+    }
+
+    /// A message with `files` attached ((name, mime, bytes), base64).
+    fn with_attachments(files: &[(&str, &str, &[u8])]) -> Vec<u8> {
+        let mut m = String::from("Subject: Files\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nSee attached.\r\n");
+        for (name, mime, data) in files {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(data);
+            m.push_str(&format!("--b\r\nContent-Type: {mime}\r\nContent-Disposition: attachment; filename=\"{name}\"\r\nContent-Transfer-Encoding: base64\r\n\r\n{b64}\r\n"));
+        }
+        m.push_str("--b--\r\n");
+        m.into_bytes()
+    }
+
+    /// Reading every PDF in a real bodies.db (opened read-only), for time and trouble:
+    /// MAIL_DB_DIR=/path cargo test --release -p mail-core real_pdfs -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn real_pdfs() {
+        let dir = std::path::PathBuf::from(std::env::var("MAIL_DB_DIR").unwrap());
+        let db = rusqlite::Connection::open_with_flags(dir.join("bodies.db"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let mut stmt = db.prepare("SELECT raw FROM bodies UNION ALL SELECT data FROM attachment_cache").unwrap();
+        let mut rows = stmt.query([]).unwrap();
+        let (mut n, mut read, mut bytes, mut text_len) = (0, 0, 0usize, 0usize);
+        let mut slowest = std::time::Duration::ZERO;
+        let t = std::time::Instant::now();
+        while let Some(r) = rows.next().unwrap() {
+            let raw: Vec<u8> = r.get(0).unwrap();
+            let pdfs: Vec<Vec<u8>> = if raw.starts_with(b"%PDF-") {
+                vec![raw]
+            } else {
+                let Some(msg) = MessageParser::default().parse(&raw) else { continue };
+                stored_attachments(&msg)
+                    .into_iter()
+                    .filter(|p| part_mime(p) == "application/pdf" || attachment_name(p).to_ascii_lowercase().ends_with(".pdf"))
+                    .map(|p| p.contents().to_vec())
+                    .collect()
+            };
+            for pdf in pdfs {
+                n += 1;
+                bytes += pdf.len();
+                let one = std::time::Instant::now();
+                let out = attachment_text("x.pdf", "application/pdf", &pdf);
+                let took = one.elapsed();
+                if took > slowest {
+                    slowest = took;
+                }
+                if took.as_secs() >= 2 {
+                    println!("slow: {} KB took {took:?}", pdf.len() / 1000);
+                }
+                if let Some(o) = out {
+                    read += 1;
+                    text_len += o.len();
+                }
+            }
+        }
+        println!("{n} PDFs ({} MB), {read} with text ({} KB of it), in {:?}; slowest {slowest:?}", bytes / 1_000_000, text_len / 1000, t.elapsed());
+    }
+
+    #[test]
+    fn search_text_reads_pdfs_and_text_files() {
+        let pdf = tiny_pdf("Invoice for the wombat enclosure");
+        assert!(attachment_text("x.pdf", "application/pdf", &pdf).unwrap().contains("wombat enclosure"));
+        let raw = with_attachments(&[
+            ("invoice.pdf", "application/octet-stream", &pdf), // a PDF by its name and content
+            ("notes.txt", "text/plain", b"platypus sightings"),
+            ("photo.jpg", "image/jpeg", b"\xff\xd8\xff\x00wallaby"),
+        ]);
+        let (text, files) = search_text(&raw, &[], true).unwrap();
+        assert!(text.contains("See attached.") && text.contains("invoice.pdf"), "{text}");
+        assert!(!text.contains("wombat"), "the message's own text is apart: {text}");
+        assert!(files.contains("invoice.pdf") && files.contains("photo.jpg"), "names: {files}");
+        assert!(files.contains("wombat enclosure"), "the PDF's text: {files}");
+        assert!(files.contains("platypus"), "a text file's: {files}");
+        assert!(!files.contains("wallaby"), "not a picture's bytes");
+        // Unless the user turned it on: the names only.
+        let (_, names) = search_text(&raw, &[], false).unwrap();
+        assert!(names.contains("invoice.pdf") && !names.contains("wombat") && !names.contains("platypus"), "{names}");
+        // Downloaded apart (the body stored without them).
+        let plain = b"Subject: Hi\r\nContent-Type: text/plain\r\n\r\nHello\r\n";
+        let fetched = [("later.pdf".to_string(), "application/pdf".to_string(), tiny_pdf("echidna report"))];
+        assert!(search_text(plain, &fetched, true).unwrap().1.contains("echidna report"));
+    }
+
+    #[test]
+    fn words_match_at_the_start_of_words() {
+        let w = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert!(has_word_prefix("Invoice for the Wombat enclosure", &w(&["wom"])), "a prefix, any case");
+        assert!(has_word_prefix("Café menu", &w(&["cafe"])), "no accents");
+        assert!(!has_word_prefix("Combat ready", &w(&["bat"])), "not inside a word");
+        assert!(has_word_prefix("2026-invoice.pdf", &w(&["xyz", "invoice"])), "any of them");
+        assert!(!has_word_prefix("anything", &w(&[""])));
+    }
+
+    #[test]
+    fn broken_pdfs_are_passed_over() {
+        let pdf = tiny_pdf("Hello there");
+        for bad in [b"%PDF-1.4 nothing else".to_vec(), pdf[..pdf.len() / 2].to_vec(), b"%PDF-".to_vec(), Vec::new()] {
+            assert_eq!(attachment_text("bad.pdf", "application/pdf", &bad), None);
+        }
+        let raw = with_attachments(&[("bad.pdf", "application/pdf", b"%PDF-1.7 garbage")]);
+        assert!(search_text(&raw, &[], true).unwrap().1.contains("bad.pdf"), "the name still counts");
+    }
+
+    #[test]
+    fn attachment_text_has_its_own_limit() {
+        let long = "kookaburra ".repeat(SEARCH_TEXT_MAX / 5);
+        let raw = with_attachments(&[("a.txt", "text/plain", long.as_bytes()), ("b.txt", "text/plain", long.as_bytes())]);
+        let (_, files) = search_text(&raw, &[], true).unwrap();
+        assert!(files.len() <= ATTACHMENT_TEXT_MAX && files.len() > ATTACHMENT_TEXT_MAX / 2);
+        let long_body = format!("Subject: Long\r\nContent-Type: text/plain\r\n\r\n{long}{long}\r\n");
+        let fetched = [("c.txt".to_string(), "text/plain".to_string(), b"dingo".to_vec())];
+        let (text, files) = search_text(long_body.as_bytes(), &fetched, true).unwrap();
+        assert!(text.len() <= SEARCH_TEXT_MAX && files.contains("dingo"), "a long body doesn't crowd attachments out");
+    }
 
     #[test]
     fn a_sender_domain_counts_only_when_the_receiving_server_vouched() {

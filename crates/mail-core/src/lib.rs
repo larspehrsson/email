@@ -14,6 +14,7 @@ pub mod mime;
 pub mod oauth;
 pub mod model;
 pub mod partial;
+pub mod pdf_helper;
 pub mod search;
 pub mod signatures;
 pub mod smtp;
@@ -372,6 +373,11 @@ impl Core {
     fn spawn_body_indexer(&self) {
         let store = self.store.clone();
         let spawned = std::thread::Builder::new().name("body-index".into()).spawn(move || {
+            match store.index_attachment_text_once() {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(messages = n, "making the text in attachments searchable"),
+                Err(e) => tracing::warn!("making the text in attachments searchable: {e:#}"),
+            }
             let mut started: Option<(std::time::Instant, usize)> = None;
             loop {
                 match store.index_bodies(100) {
@@ -896,6 +902,38 @@ impl Core {
         let data = rx.await.map_err(|_| anyhow!("download was cancelled"))??;
         self.store.cache_attachment(message_id, index, &data)?;
         Ok((part.name.clone(), part.mime.clone(), data))
+    }
+
+    /// Which of a message's attachments (their `index`) have one of `words` (lowercase, as
+    /// typed in search) in their name or, with `attachment_search` on, their text: those stored
+    /// with the body and those downloaded since.
+    /// Read now, not from the index (which only knows the message): a large PDF can take a few
+    /// seconds.
+    pub fn attachment_matches(&self, message_id: i64, words: &[String]) -> Result<Vec<usize>> {
+        let Some(raw) = self.store.body(message_id)? else { return Ok(Vec::new()) };
+        // Their text only if the user turned that on (PDFs through the helper, like search).
+        let read = self.store.attachment_search()?;
+        let stored = mime::stored_attachment_parts(&raw);
+        let omitted: Vec<partial::OmittedPart> = self.store.omitted(message_id)?.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
+        let mut files: Vec<(usize, String, String, Vec<u8>)> = Vec::new();
+        let n = stored.len();
+        for (i, (name, mime, data)) in stored.into_iter().enumerate() {
+            files.push((i, name, mime, data));
+        }
+        for idx in self.store.cached_attachment_indices(message_id)? {
+            if let (Some(part), Some(data)) = (idx.checked_sub(n).and_then(|o| omitted.get(o)), self.store.cached_attachment(message_id, idx)?) {
+                files.push((idx, part.name.clone(), part.mime.clone(), data));
+            }
+        }
+        let mut out: Vec<usize> = files
+            .into_iter()
+            .filter(|(_, name, mime, data)| {
+                mime::has_word_prefix(name, words) || read && mime::attachment_text(name, mime, data).is_some_and(|t| mime::has_word_prefix(&t, words))
+            })
+            .map(|(i, ..)| i)
+            .collect();
+        out.sort_unstable();
+        Ok(out)
     }
 
     /// The whole message as sent (RFC 822 bytes) and its subject: the stored copy when it's
@@ -2039,6 +2077,15 @@ impl Core {
     /// Whether "Always load…" can cover everyone at a domain (off unless the user turns it on).
     pub fn domain_rules(&self) -> Result<bool> {
         self.store.domain_rules()
+    }
+
+    /// Whether search reads the text in attachments (off unless turned on).
+    pub fn attachment_search(&self) -> Result<bool> {
+        self.store.attachment_search()
+    }
+
+    pub fn set_attachment_search(&self, on: bool) -> Result<()> {
+        self.store.set_attachment_search(on)
     }
 
     pub fn set_domain_rules(&self, on: bool) -> Result<()> {

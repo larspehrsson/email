@@ -89,9 +89,11 @@ message count shows everything. In Sent and Drafts each message shows who it wen
 
 ![The Newsletters folder sorted by sender](docs/screenshots/sorted.png)
 
-**Search** as you type, over senders, recipients, subjects and the text of your mail (and
-attachment names), in every folder or just the current one. It understands `from:`, `to:`,
-`subject:`, `body:`, `"exact phrases"` and `-exclusions`.
+**Search** as you type, over senders, recipients, subjects, the text of your mail and its
+attachments (their names, and if you turn it on the text in PDFs and plain-text files on
+your computer), in every
+folder or just the current one, in all of them or only some ("Search in"). It understands
+`from:`, `to:`, `subject:`, `body:`, `attachment:`, `"exact phrases"` and `-exclusions`.
 
 ![Search results for "from:sarah roadmap"](docs/screenshots/search.png)
 

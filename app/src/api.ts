@@ -250,6 +250,8 @@ export const api = {
     call('message_in_folder', { id, folderId }),
   openAttachment: (messageId: number, index: number): Promise<void> =>
     call('open_attachment', { messageId, index }),
+  /** Which attachments (their `index`) have one of `words` (lowercase, no accents) in their text. */
+  attachmentMatches: (messageId: number, words: string[]): Promise<number[]> => call('attachment_matches', { messageId, words }),
   /** Returns the absolute path written in Downloads. */
   saveAttachment: (messageId: number, index: number): Promise<string> =>
     call('save_attachment', { messageId, index }),
@@ -324,6 +326,9 @@ export const api = {
   /** Whether a picture that only loads over plain http may be fetched that way. */
   httpPictures: (): Promise<boolean> => call('http_pictures', undefined),
   setHttpPictures: (on: boolean): Promise<void> => call('set_http_pictures', { on }),
+  /** Whether search reads the text in attachments (PDFs, plain-text files). */
+  attachmentSearch: (): Promise<boolean> => call('attachment_search', undefined),
+  setAttachmentSearch: (on: boolean): Promise<void> => call('set_attachment_search', { on }),
   /** Senders whose images always load. */
   remoteSenders: (): Promise<string[]> => call('remote_senders', undefined),
   setRemoteSender: (addr: string, on: boolean): Promise<void> => call('set_remote_sender', { addr, on }),

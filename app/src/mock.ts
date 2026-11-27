@@ -634,6 +634,7 @@ export function createMockBackend(): Backend {
   let domainRules = false;
   /** Settings › General › Privacy: pictures that only load over plain http */
   let httpPictures = true;
+  let attachmentSearch = false;
   /** "Always from this sender": lowercase addresses */
   const remoteSenders = new Set<string>();
   /** resolves a pending mock browser sign-in as cancelled */
@@ -1317,6 +1318,8 @@ export function createMockBackend(): Backend {
         const subjT = tokenize(m.subject);
         // The demo's bodies are made from the snippet.
         const textT = tokenize(m.snippet ?? '');
+        // Attachments: the demo's have no text, only names.
+        const filesT = tokenize((meta.get(m.id)?.attachments ?? []).map((a) => a.name).join(' '));
         const ok = terms.every((t) => {
           const hit =
             t.field === 'tag'
@@ -1329,7 +1332,10 @@ export function createMockBackend(): Backend {
                   ? fieldMatches(subjT, t.words)
                   : t.field === 'body'
                     ? fieldMatches(textT, t.words)
-                    : (inField('sender') && fieldMatches(fromT, t.words)) ||
+                    : t.field === 'attachment'
+                    ? fieldMatches(filesT, t.words)
+                    : (inField('attachments') && fieldMatches(filesT, t.words)) ||
+                      (inField('sender') && fieldMatches(fromT, t.words)) ||
                       (inField('subject') && fieldMatches(subjT, t.words)) ||
                       (inField('recipients') && fieldMatches(toTokens, t.words)) ||
                       (inField('body') && fieldMatches(textT, t.words));
@@ -2088,6 +2094,14 @@ export function createMockBackend(): Backend {
       await sleep(3);
       httpPictures = on;
     },
+    async attachment_search() {
+      await sleep(3);
+      return attachmentSearch;
+    },
+    async set_attachment_search({ on }) {
+      await sleep(3);
+      attachmentSearch = on;
+    },
     async remote_senders() {
       await sleep(3);
       return [...remoteSenders].sort();
@@ -2101,6 +2115,11 @@ export function createMockBackend(): Backend {
       await sleep(3);
       if (allow) remoteAllowed.add(id);
       else remoteAllowed.delete(id);
+    },
+    async attachment_matches({ messageId, words }) {
+      await sleep(50);
+      // The demo's attachments have no text: by name.
+      return (meta.get(messageId)?.attachments ?? []).filter((a) => tokenize(a.name).some((t) => words.some((w) => t.startsWith(w)))).map((a) => a.index);
     },
     async open_attachment({ messageId, index }) {
       const a = await fetchAttachment(messageId, index);
