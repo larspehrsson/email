@@ -2116,6 +2116,11 @@ export function createMockBackend(): Backend {
       if (allow) remoteAllowed.add(id);
       else remoteAllowed.delete(id);
     },
+    async attachment_matches({ messageId, words }) {
+      await sleep(50);
+      // The demo's attachments have no text: by name.
+      return (meta.get(messageId)?.attachments ?? []).filter((a) => tokenize(a.name).some((t) => words.some((w) => t.startsWith(w)))).map((a) => a.index);
+    },
     async open_attachment({ messageId, index }) {
       const a = await fetchAttachment(messageId, index);
       if (!a.openable) throw `${a.name} can't be opened directly — save it instead`;

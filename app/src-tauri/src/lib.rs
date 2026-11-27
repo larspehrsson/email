@@ -537,6 +537,13 @@ fn mark_downloaded(path: &std::path::Path) {
     let _ = path;
 }
 
+/// Which attachments of a message have one of the search's words in their text.
+#[tauri::command]
+async fn attachment_matches(core: State<'_, Arc<Core>>, message_id: i64, words: Vec<String>) -> Res<Vec<usize>> {
+    let core = core.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || core.attachment_matches(message_id, &words)).await.map_err(|e| e.to_string())?.map_err(err)
+}
+
 #[tauri::command]
 async fn open_attachment(
     app: tauri::AppHandle,
@@ -1751,6 +1758,7 @@ pub fn run() {
             search_index_of,
             message_in_folder,
             open_attachment,
+            attachment_matches,
             save_attachment,
             save_all_attachments,
             save_attachment_as,

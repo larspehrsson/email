@@ -250,6 +250,8 @@ export const api = {
     call('message_in_folder', { id, folderId }),
   openAttachment: (messageId: number, index: number): Promise<void> =>
     call('open_attachment', { messageId, index }),
+  /** Which attachments (their `index`) have one of `words` (lowercase, no accents) in their text. */
+  attachmentMatches: (messageId: number, words: string[]): Promise<number[]> => call('attachment_matches', { messageId, words }),
   /** Returns the absolute path written in Downloads. */
   saveAttachment: (messageId: number, index: number): Promise<string> =>
     call('save_attachment', { messageId, index }),

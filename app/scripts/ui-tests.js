@@ -822,6 +822,27 @@ describe('search', () => {
     }
   });
 
+  test('while searching, an attachment with a word of the search is marked', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      // The demo's attachments are found by name ("invoice-2291.pdf").
+      await page.fill('.search-field input', 'attachment:invoice');
+      await page.waitForTimeout(500);
+      const rows = page.locator('.search-layer .row');
+      assert.ok((await rows.count()) > 0);
+      await rows.first().click();
+      const marked = page.locator('.att-chip.att-match');
+      await marked.first().waitFor();
+      assert.deepEqual(await marked.locator('.att-chip-name').allTextContents(), ['invoice-2291.pdf'], 'only that one');
+      // Not among the fields looked in: no marks.
+      await page.fill('.search-field input', 'subject:invoice');
+      await page.waitForFunction(() => document.querySelectorAll('.att-chip.att-match').length === 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('the text in attachments is searched only once turned on in Settings', async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {
