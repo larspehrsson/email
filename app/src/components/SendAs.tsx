@@ -3,7 +3,7 @@ import { CloseIcon, PlusIcon } from './Icons';
 import { api, errorMessage, type Identity } from '../api';
 import { accountIdentities, identities, loadIdentities, reloadIdentities } from '../lib/identities';
 import { loadSignatures, reloadSignatures, setDefaultsHere, sigs } from '../lib/signatures';
-import { Select } from './Select';
+import { Select, type SelectOption } from './Select';
 import { reloadAccounts } from '../state';
 
 /** An account's addresses to send as (Settings › Accounts): its own and its others (an alias,
@@ -73,11 +73,20 @@ export function SendAsGroup(props: { accountId: number; email: string; name: str
   };
   const sigList = () => sigs().signatures.map((s) => ({ value: s.id, label: s.name }));
   const ownOptions = () => [{ value: 0, label: 'None' }, ...sigList()];
-  // Another address: its own, or the account's (whatever that is then).
-  const aliasOptions = () => [{ value: 0, label: 'Account’s' }, ...sigList()];
-  const sigSelect = (label: string, value: number | null, options: { value: number; label: string }[], set: (id: number | null) => void) => (
-    <Select variant="plain" class="sa-sig" label={label} value={value ?? 0} options={options} onChange={(v) => set(v || null)} />
+  const ownSelect = (label: string, value: number | null, set: (id: number | null) => void) => (
+    <Select variant="plain" class="sa-sig" label={label} value={value ?? 0} options={ownOptions()} onChange={(v) => set(v || null)} />
   );
+  // Another address: the account's own address's signature (whatever that is then: shown greyed,
+  // by name), None, or one of its own. Stored as null, 0 and the signature's id; -1 here.
+  const aliasSelect = (label: string, value: number | null, which: 'newId' | 'replyId', set: (id: number | null) => void) => {
+    const inherited = () => sigs().signatures.find((x) => x.id === own()?.[which])?.name ?? 'None';
+    const options = (): SelectOption<number>[] => [
+      { value: -1, label: `Same as ${props.email}`, short: inherited(), title: `Same as ${props.email}`, muted: true },
+      { value: 0, label: 'None' },
+      ...sigList(),
+    ];
+    return <Select variant="plain" class="sa-sig" label={label} value={value ?? -1} options={options()} onChange={(v) => set(v === -1 ? null : v)} />;
+  };
 
   const remove = (i: Identity) => run(() => api.deleteIdentity(i.id));
   /** The column after the signatures: × on another address's row, + on the row that adds one. */
@@ -135,8 +144,8 @@ export function SendAsGroup(props: { accountId: number; email: string; name: str
               );
             }}
           />
-          {sigSelect(`Signature for new messages from ${props.email}`, own()?.newId ?? null, ownOptions(), (id) => void setOwn('newId', id))}
-          {sigSelect(`Signature for replies from ${props.email}`, own()?.replyId ?? null, ownOptions(), (id) => void setOwn('replyId', id))}
+          {ownSelect(`Signature for new messages from ${props.email}`, own()?.newId ?? null, (id) => void setOwn('newId', id))}
+          {ownSelect(`Signature for replies from ${props.email}`, own()?.replyId ?? null, (id) => void setOwn('replyId', id))}
           <span />
         </div>
         <For each={list()}>
@@ -161,8 +170,8 @@ export function SendAsGroup(props: { accountId: number; email: string; name: str
                 aria-label={`Name for ${i.email}`}
                 onChange={(e) => void save(i, { name: e.currentTarget.value })}
               />
-              {sigSelect(`Signature for new messages from ${i.email}`, i.newSignatureId, aliasOptions(), (id) => void save(i, { newSignatureId: id }))}
-              {sigSelect(`Signature for replies from ${i.email}`, i.replySignatureId, aliasOptions(), (id) => void save(i, { replySignatureId: id }))}
+              {aliasSelect(`Signature for new messages from ${i.email}`, i.newSignatureId, 'newId', (id) => void save(i, { newSignatureId: id }))}
+              {aliasSelect(`Signature for replies from ${i.email}`, i.replySignatureId, 'replyId', (id) => void save(i, { replySignatureId: id }))}
               {iconBtn(`Remove ${i.email}`, () => void remove(i), <CloseIcon size={12} />)}
             </div>
           )}

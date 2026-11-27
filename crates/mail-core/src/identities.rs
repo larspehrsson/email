@@ -22,7 +22,7 @@ pub struct Identity {
     #[serde(default)]
     pub name: String,
     /// Its default signatures for new messages and for replies and forwards; None: the
-    /// account's.
+    /// account's; 0: none at all.
     #[serde(default)]
     pub new_signature_id: Option<i64>,
     #[serde(default)]

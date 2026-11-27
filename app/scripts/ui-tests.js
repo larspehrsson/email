@@ -85,7 +85,8 @@ async function setSendAsSignature(page, label, { account = 0, row = 0, which = '
 /** An account's Send as signatures as shown: [own new, own replies, next address new, …]. */
 async function sendAsSignatures(page, account = 0) {
   const card = await accountCard(page, account);
-  return card.locator('.sel.sa-sig .sel-text').allTextContents();
+  // greyed (another address's, the same as the account's own address's): in brackets
+  return card.locator('.sel.sa-sig .sel-text').evaluateAll((els) => els.map((e) => (e.classList.contains('muted') ? `(${e.textContent.trim()})` : e.textContent.trim())));
 }
 /** The options of one of our drop-downs, opened and closed again. */
 async function optionsOf(box) {
@@ -984,18 +985,18 @@ describe('settings layout', () => {
       // …in tabs, the first picked
       const tabs = page.locator('.st-acct .st-tab');
       await page.locator('.st-acct .st-tab.on', { hasText: 'Identity' }).waitFor();
-      assert.deepEqual((await tabs.allTextContents()).slice(0, 3), ['Identity', 'Connection', 'On this computer']);
+      assert.deepEqual((await tabs.allTextContents()).slice(0, 3), ['Identity', 'Connection', 'Storage']);
       // A tab shows only its rows; the arrow keys go from tab to tab
       await tabs.filter({ hasText: 'Connection' }).click();
       await page.locator('.st-acct .st-field', { hasText: 'Incoming (IMAP)' }).waitFor();
       assert.equal(await page.locator('.st-acct .sa-list').count(), 0, 'not the Identity tab’s');
       await page.keyboard.press('ArrowRight');
-      await page.locator('.st-acct .st-tab.on', { hasText: 'On this computer' }).waitFor();
-      assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'On this computer', 'focus follows');
-      await page.locator('.st-acct .st-field', { hasText: 'Storage' }).waitFor();
+      await page.locator('.st-acct .st-tab.on', { hasText: 'Storage' }).waitFor();
+      assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'Storage', 'focus follows');
+      await page.locator('.st-acct .st-field', { hasText: 'Mail' }).waitFor();
       // Another account's page opens at the same tab; Export… and Remove account… are on every tab
       await page.locator('.st-nav-acct').nth(0).click();
-      await page.locator('.st-acct .st-tab.on', { hasText: 'On this computer' }).waitFor();
+      await page.locator('.st-acct .st-tab.on', { hasText: 'Storage' }).waitFor();
       await page.locator('.st-acct').getByRole('button', { name: 'Remove account…' }).waitFor();
       await tabs.filter({ hasText: 'Identity' }).click();
       // Accounts goes back to the list
@@ -1719,23 +1720,56 @@ describe('signature defaults', () => {
       await setSendAsSignature(page, 'Work', { account: 1, which: 'new' });
       assert.deepEqual(await sendAsSignatures(page, 0), ['Home', 'Short']);
       assert.deepEqual(await sendAsSignatures(page, 1), ['Work', 'Home']);
-      // Another address of the first account: the account's until it has its own.
+      // Another address of the first account: the account's own address's until it has its own
+      // (shown greyed, by name).
       const card = await accountCard(page, 0);
       await card.locator('.sa-new input[type=email]').fill('me@alias.example');
       await card.locator('.sa-new input[type=email]').press('Enter');
       await page.waitForTimeout(300);
-      assert.deepEqual(await sendAsSignatures(page, 0), ['Home', 'Short', 'Account’s', 'Account’s']);
+      assert.deepEqual(await sendAsSignatures(page, 0), ['Home', 'Short', '(Home)', '(Short)']);
       await setSendAsSignature(page, 'Work', { account: 0, row: 1, which: 'reply' });
-      assert.deepEqual(await sendAsSignatures(page, 0), ['Home', 'Short', 'Account’s', 'Work']);
-      // The list shows where each is used.
+      assert.deepEqual(await sendAsSignatures(page, 0), ['Home', 'Short', '(Home)', 'Work']);
+      // It follows the account's own address's; or it can have none.
+      await setSendAsSignature(page, 'Short', { account: 0, which: 'new' });
+      assert.deepEqual(await sendAsSignatures(page, 0), ['Short', 'Short', '(Short)', 'Work']);
+      await setSendAsSignature(page, 'None', { account: 0, row: 1, which: 'new' });
+      assert.deepEqual(await sendAsSignatures(page, 0), ['Short', 'Short', 'None', 'Work']);
+      await setSendAsSignature(page, 'Same as john.doe@example.com', { account: 0, row: 1, which: 'new' });
+      assert.deepEqual(await sendAsSignatures(page, 0), ['Short', 'Short', '(Short)', 'Work']);
+      await setSendAsSignature(page, 'Home', { account: 0, which: 'new' });
+      // Under each, the addresses that use it (their own choice or their account's), and for what.
       await page.locator('.st-nav-item', { hasText: 'Signatures' }).click();
-      assert.equal(await page.locator('.sig-item', { hasText: 'Home' }).locator('.acct-dot').count(), 2);
+      await page.locator('.sig-item', { hasText: 'Home' }).click();
+      const used = page.locator('.sig-used-list');
+      await used.waitFor();
+      assert.deepEqual(await used.locator('.sig-used-what').allTextContents(), ['new messages', 'new messages', 'replies']);
+      assert.equal((await used.locator('.sig-used-addr').nth(1).textContent()).trim(), 'me@alias.example');
+      await page.locator('.sig-item', { hasText: 'Short' }).click();
+      assert.deepEqual(await used.locator('.sig-used-what').allTextContents(), ['replies']);
       // Renaming a signature (the list reloads) changes no one's choice.
       await page.locator('.sig-item', { hasText: 'Work' }).click();
       await page.locator('.sig-name').fill('Work 2');
       await page.waitForTimeout(800);
       assert.deepEqual(await sendAsSignatures(page, 1), ['Work 2', 'Home']);
-      assert.deepEqual(await sendAsSignatures(page, 0), ['Home', 'Short', 'Account’s', 'Work 2']);
+      assert.deepEqual(await sendAsSignatures(page, 0), ['Home', 'Short', '(Home)', 'Work 2']);
+      // An address there goes to its account's page.
+      await page.locator('.st-nav-item', { hasText: 'Signatures' }).click();
+      await page.locator('.sig-item', { hasText: 'Work 2' }).click();
+      await accountCard(page, 0, 'Connection');
+      await page.locator('.st-nav-item', { hasText: 'Signatures' }).click();
+      await page.locator('.sig-item', { hasText: 'Work 2' }).click();
+      await page.locator('.sig-used-addr', { hasText: 'me@alias.example' }).click();
+      await page.locator('.st-nav-acct.on', { hasText: 'john.doe@example.com' }).waitFor();
+      await page.locator('.st-acct .st-tab.on', { hasText: 'Identity' }).waitFor();
+      await page.locator('.st-acct .sa-list').waitFor();
+      // Deleted, the addresses that had chosen it send with none (None, not their account's).
+      await page.locator('.st-nav-item', { hasText: 'Signatures' }).click();
+      await page.locator('.sig-item', { hasText: 'Work 2' }).click();
+      await page.getByRole('button', { name: 'Delete signature…' }).click();
+      assert.match(await page.locator('.confirm-text').textContent(), /The 2 addresses using it will send without it\./);
+      await page.locator('.confirm-backdrop .btn.danger').click();
+      await page.locator('.sig-item', { hasText: 'Work 2' }).waitFor({ state: 'detached' });
+      assert.deepEqual(await sendAsSignatures(page, 0), ['Home', 'Short', '(Home)', 'None']);
       assert.deepEqual(errors, []);
     } finally {
       await close();

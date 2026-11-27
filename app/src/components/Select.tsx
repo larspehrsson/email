@@ -16,6 +16,9 @@ export interface SelectOption<T> {
   short?: string;
   title?: string;
   disabled?: boolean;
+  /** Greyed (in the box when chosen, and in the menu): a choice that stands for another (an
+   *  address's signature that is the account's). */
+  muted?: boolean;
 }
 
 export function Select<T>(props: {
@@ -151,7 +154,9 @@ export function Select<T>(props: {
           }
         }}
       >
-        <span class="sel-text">{shown()}</span>
+        <span class="sel-text" classList={{ muted: !props.action && !!chosen()?.muted }}>
+          {shown()}
+        </span>
         <ChevronIcon size={10} />
       </button>
       <Show when={open()}>
@@ -195,7 +200,9 @@ export function Select<T>(props: {
                         </Show>
                       </span>
                     </Show>
-                    <span class="vm-label">{o.label}</span>
+                    <span class="vm-label" classList={{ muted: !!o.muted }}>
+                      {o.label}
+                    </span>
                   </button>
                 );
               }}

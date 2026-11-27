@@ -2421,6 +2421,8 @@ export function createMockBackend(): Backend {
         if (d.replyId === id) d.replyId = null;
       }
       sigSave(st);
+      // Another address that had chosen it: None (as the core does).
+      idSave(idLoad().map((i) => ({ ...i, newSignatureId: i.newSignatureId === id ? 0 : i.newSignatureId, replySignatureId: i.replySignatureId === id ? 0 : i.replySignatureId })));
     },
     async set_signature_defaults({ accountId, newId, replyId }) {
       await sleep(3);

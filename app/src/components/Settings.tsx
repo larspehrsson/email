@@ -64,6 +64,14 @@ let returnFocus: HTMLElement | null = null;
  *  in the sidebar); null: the list of them. Opening Settings starts at the account viewed. */
 const [accountPage, setAccountPage] = createSignal<number | null>(null);
 
+/** Settings › Accounts › an account's page, at its Identity tab (from elsewhere in Settings: a
+ *  signature's "Used by", where an address's signatures are chosen). */
+export function showAccountPage(accountId: number): void {
+  setSection('accounts');
+  setAccountPage(accountId);
+  setAccountTab('identity');
+}
+
 /** Open Settings (at `at`, else where it was last). */
 export function openSettings(at?: SettingsSection): void {
   if (at) setSection(at);
@@ -727,8 +735,8 @@ function AccountPage(props: { d: AccountDetails }) {
             </Field>
             </Show>
           </Match>
-          <Match when={tab() === 'computer'}>
-            <Field label="Storage">
+          <Match when={tab() === 'storage'}>
+            <Field label="Mail">
               {/* the row is there from the start; its text arrives when counted */}
               <span class="st-oneline">
                 <Show
@@ -799,11 +807,11 @@ function AccountPage(props: { d: AccountDetails }) {
 }
 
 /** An account page's tabs. */
-type AccountTab = 'identity' | 'connection' | 'computer' | 'connected';
+type AccountTab = 'identity' | 'connection' | 'storage' | 'connected';
 const ACCOUNT_TABS: { id: AccountTab; title: string }[] = [
   { id: 'identity', title: 'Identity' },
   { id: 'connection', title: 'Connection' },
-  { id: 'computer', title: 'On this computer' },
+  { id: 'storage', title: 'Storage' },
   // Gmail's and Microsoft's accounts only
   { id: 'connected', title: 'Connected' },
 ];

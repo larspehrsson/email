@@ -9,14 +9,20 @@ import { accounts } from '../state';
 import { loadSignatures, pictureForSignature, reloadSignatures, sigs } from '../lib/signatures';
 import { confirmDialog } from './Actions';
 import { MOD } from '../lib/shortcuts';
-import { AccountDot } from './FolderSwitcher';
+import { accountIdentities, identities, loadIdentities, reloadIdentities } from '../lib/identities';
+import { showAccountPage } from './Settings';
 
 /** HTML the simple editor can't keep (colours, fonts, tables, layout attributes). */
 const needsHtml = (html: string) => /<(table|font|center|style)\b|\sstyle\s*=|\s(bgcolor|color|face|align|valign|cellpadding)\s*=/i.test(html);
 import { ImageIcon } from './Icons';
 
 // Settings › Signatures: the list on the left, the one chosen on the right (saved as it's
-// typed, like a draft), with the accounts it's the default for under it.
+// typed, like a draft), with the addresses that use it under it.
+
+/** An address that sends with a signature (its own choice or its account's): for new messages,
+ *  replies or both. */
+type Use = { accountId: number; email: string; new: boolean; reply: boolean };
+const useText = (u: Use) => (u.new && u.reply ? 'new messages and replies' : u.new ? 'new messages' : 'replies');
 
 export function SignaturesSection() {
   const [current, setCurrent] = createSignal<number | null>(null);
@@ -183,12 +189,15 @@ export function SignaturesSection() {
 
   async function remove() {
     const s = sigs().signatures.find((x) => x.id === current());
-    if (!s || !(await confirmDialog(`Delete the signature “${s.name}”?`, 'Delete'))) return;
+    const n = s ? usedBy(s.id).length : 0;
+    const text = n === 0 ? '' : n === 1 ? ' The address using it will send without it.' : ` The ${n} addresses using it will send without it.`;
+    if (!s || !(await confirmDialog(`Delete the signature “${s.name}”?${text}`, 'Delete'))) return;
     clearTimeout(saveTimer);
     saveTimer = undefined;
     try {
       await api.deleteSignature(s.id);
-      await reloadSignatures();
+      // (Addresses that had chosen it now have None: their table, and the composer's, reload.)
+      await Promise.all([reloadSignatures(), reloadIdentities()]);
       setCurrent(sigs().signatures[0]?.id ?? null);
     } catch (e) {
       setMsg(errorMessage(e));
@@ -204,9 +213,23 @@ export function SignaturesSection() {
     setCurrent(id);
   }
 
-  const defaults = (accountId: number) => sigs().defaults.find((d) => d.accountId === accountId);
-  /** The accounts a signature is a default for (new messages, replies or both). */
-  const usedBy = (id: number) => (accounts() ?? []).filter((a) => defaults(a.id)?.newId === id || defaults(a.id)?.replyId === id);
+  void loadIdentities().catch(() => {});
+  /** The addresses that send with signature `id`, the accounts in their order, each account's
+   *  own address first. Another address without its own (null) has its account's; 0 is none. */
+  const usedBy = (id: number): Use[] => {
+    const out: Use[] = [];
+    for (const a of accounts() ?? []) {
+      const d = sigs().defaults.find((x) => x.accountId === a.id);
+      const own = { new: d?.newId ?? null, reply: d?.replyId ?? null };
+      if (own.new === id || own.reply === id) out.push({ accountId: a.id, email: a.email, new: own.new === id, reply: own.reply === id });
+      for (const i of accountIdentities(a.id, identities())) {
+        const isNew = (i.newSignatureId ?? own.new) === id;
+        const isReply = (i.replySignatureId ?? own.reply) === id;
+        if (isNew || isReply) out.push({ accountId: a.id, email: i.email, new: isNew, reply: isReply });
+      }
+    }
+    return out;
+  };
 
   const fmt = (label: string, mark: string, key: string, run: (e: Editor) => void) => (
     <button
@@ -237,10 +260,6 @@ export function SignaturesSection() {
                 onClick={() => void select(s.id)}
               >
                 <span class="sig-item-name">{s.name}</span>
-                {/* the accounts it's a default for */}
-                <span class="sig-item-dots" aria-hidden="true">
-                  <For each={usedBy(s.id)}>{(a) => <AccountDot account={a} size={10} />}</For>
-                </span>
               </button>
             )}
           </For>
@@ -322,6 +341,35 @@ export function SignaturesSection() {
             <div class="sig-preview-label st-muted">As it's sent (scripts and the like taken out):</div>
             {/* The core's sanitized copy, never the raw text. */}
             <div class="sig-preview" innerHTML={savedHtml()} />
+          </Show>
+          {/* Where it's used: chosen on each account's page (a link there). */}
+          <Show when={current()}>
+            {(id) => (
+              <div class="sig-used">
+                <div class="sig-used-title">Used by</div>
+                <Show
+                  when={usedBy(id()).length}
+                  fallback={<p class="st-muted sig-used-none">Not used by any address yet. Choose it on an account’s page, under Accounts.</p>}
+                >
+                  <div class="sig-used-list">
+                    <For each={usedBy(id())}>
+                      {(u) => (
+                        <>
+                          <button
+                            class="link-btn sig-used-addr"
+                            title={`Change it on ${u.email}’s account page`}
+                            onClick={() => showAccountPage(u.accountId)}
+                          >
+                            {u.email}
+                          </button>
+                          <span class="sig-used-what">{useText(u)}</span>
+                        </>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              </div>
+            )}
           </Show>
           {/* At the foot, as Remove account is on an account's page: it's about the whole
               signature, not its text, so not among the formatting buttons. */}

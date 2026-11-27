@@ -211,7 +211,10 @@ CREATE TABLE IF NOT EXISTS identities (
     name       TEXT NOT NULL,
     new_sig    INTEGER REFERENCES signatures(id) ON DELETE SET NULL,
     reply_sig  INTEGER REFERENCES signatures(id) ON DELETE SET NULL,
-    is_default INTEGER NOT NULL DEFAULT 0
+    is_default INTEGER NOT NULL DEFAULT 0,
+    -- None chosen (no signature) rather than the account's, for new messages / replies
+    new_none   INTEGER NOT NULL DEFAULT 0,
+    reply_none INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS signature_defaults (
     account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
@@ -442,6 +445,17 @@ const MIGRATIONS: &[fn(&Connection) -> Result<()>] = &[
              INSERT OR IGNORE INTO settings (key, value)
                SELECT 'domain_rules', '1' WHERE EXISTS (SELECT 1 FROM remote_senders WHERE addr LIKE '@%');",
         )?)
+    },
+    // 15: another address can have no signature (None), not only its own or the account's
+    |db| {
+        // (No table yet: `SCHEMA` makes it with them.)
+        let cols: Vec<String> = db.prepare("SELECT name FROM pragma_table_info('identities')")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        for col in ["new_none", "reply_none"] {
+            if !cols.is_empty() && !cols.iter().any(|c| c == col) {
+                db.execute_batch(&format!("ALTER TABLE identities ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0;"))?;
+            }
+        }
+        Ok(())
     },
 ];
 const SCHEMA_VERSION: i64 = BASE_VERSION + MIGRATIONS.len() as i64;
@@ -2549,15 +2563,19 @@ impl Store {
     /// Every account's other addresses, each account's in the order added.
     pub fn identities(&self) -> Result<Vec<crate::identities::Identity>> {
         let db = self.rdb();
-        let mut stmt = db.prepare_cached("SELECT id, account_id, email, name, new_sig, reply_sig, is_default FROM identities ORDER BY account_id, id")?;
+        let mut stmt = db.prepare_cached(
+            "SELECT id, account_id, email, name, new_sig, reply_sig, is_default, new_none, reply_none FROM identities ORDER BY account_id, id",
+        )?;
+        // None chosen reads as signature 0 (`Identity::new_signature_id`).
+        let sig = |id: Option<i64>, none: bool| if none { Some(0) } else { id };
         let rows = stmt.query_map([], |r| {
             Ok(crate::identities::Identity {
                 id: r.get(0)?,
                 account_id: r.get(1)?,
                 email: r.get(2)?,
                 name: r.get(3)?,
-                new_signature_id: r.get(4)?,
-                reply_signature_id: r.get(5)?,
+                new_signature_id: sig(r.get(4)?, r.get(7)?),
+                reply_signature_id: sig(r.get(5)?, r.get(8)?),
                 is_default: r.get(6)?,
             })
         })?;
@@ -2569,16 +2587,22 @@ impl Store {
     pub fn save_identity(&self, i: &crate::identities::Identity) -> Result<i64> {
         let mut db = self.db();
         let tx = db.transaction()?;
+        // Signature 0 (None chosen) is stored as its flag: the columns name real signatures.
+        let sig = |id: Option<i64>| (id.filter(|&id| id != 0), id == Some(0));
+        let (new_sig, new_none) = sig(i.new_signature_id);
+        let (reply_sig, reply_none) = sig(i.reply_signature_id);
         let id = if i.id == 0 {
             tx.execute(
-                "INSERT INTO identities (account_id, email, name, new_sig, reply_sig, is_default) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![i.account_id, i.email, i.name, i.new_signature_id, i.reply_signature_id, i.is_default],
+                "INSERT INTO identities (account_id, email, name, new_sig, reply_sig, is_default, new_none, reply_none)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![i.account_id, i.email, i.name, new_sig, reply_sig, i.is_default, new_none, reply_none],
             )?;
             tx.last_insert_rowid()
         } else {
             tx.execute(
-                "UPDATE identities SET email=?2, name=?3, new_sig=?4, reply_sig=?5, is_default=?6 WHERE id=?1 AND account_id=?7",
-                params![i.id, i.email, i.name, i.new_signature_id, i.reply_signature_id, i.is_default, i.account_id],
+                "UPDATE identities SET email=?2, name=?3, new_sig=?4, reply_sig=?5, is_default=?6, new_none=?8, reply_none=?9
+                 WHERE id=?1 AND account_id=?7",
+                params![i.id, i.email, i.name, new_sig, reply_sig, i.is_default, i.account_id, new_none, reply_none],
             )?;
             i.id
         };
@@ -4422,11 +4446,18 @@ impl Store {
     }
 
     /// Delete a signature; accounts using it by default then have none.
+    /// Delete a signature: the addresses that sent with it send with none (an account's own
+    /// address, and another address that had chosen it: None, not its account's, which may be
+    /// another signature).
     pub fn delete_signature(&self, id: i64) -> Result<()> {
-        let db = self.db();
-        db.execute("UPDATE signature_defaults SET new_id=NULL WHERE new_id=?1", [id])?;
-        db.execute("UPDATE signature_defaults SET reply_id=NULL WHERE reply_id=?1", [id])?;
-        db.execute("DELETE FROM signatures WHERE id=?1", [id])?;
+        let mut db = self.db();
+        let tx = db.transaction()?;
+        tx.execute("UPDATE signature_defaults SET new_id=NULL WHERE new_id=?1", [id])?;
+        tx.execute("UPDATE signature_defaults SET reply_id=NULL WHERE reply_id=?1", [id])?;
+        tx.execute("UPDATE identities SET new_sig=NULL, new_none=1 WHERE new_sig=?1", [id])?;
+        tx.execute("UPDATE identities SET reply_sig=NULL, reply_none=1 WHERE reply_sig=?1", [id])?;
+        tx.execute("DELETE FROM signatures WHERE id=?1", [id])?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -5563,6 +5594,9 @@ mod tests {
                  ALTER TABLE accounts DROP COLUMN graph;
                  ALTER TABLE messages DROP COLUMN attachments_stored;
                  DROP INDEX messages_unindexed; ALTER TABLE messages DROP COLUMN body_indexed;
+                 DROP TABLE identities;
+                 CREATE TABLE identities (id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, email TEXT NOT NULL,
+                   name TEXT NOT NULL, new_sig INTEGER, reply_sig INTEGER, is_default INTEGER NOT NULL DEFAULT 0);
                  DROP TABLE signature_defaults; DROP TABLE signatures;
                  PRAGMA user_version={BASE_VERSION};"
             ))
@@ -5572,6 +5606,7 @@ mod tests {
         assert_eq!(store.accounts().unwrap().len(), 1);
         assert!(!store.keeps_attachments(store.accounts().unwrap()[0].id).unwrap());
         assert!(store.signatures().unwrap().signatures.is_empty());
+        assert!(store.identities().unwrap().is_empty(), "other addresses: None can be chosen");
         assert!(!store.domain_rules().unwrap(), "no rule for a domain: domain rules stay off");
         drop(store);
         assert_eq!(version(&dir), SCHEMA_VERSION);
@@ -5581,7 +5616,7 @@ mod tests {
             db.execute_batch(&format!(
                 "DROP TABLE settings; INSERT INTO remote_senders (addr) VALUES ('@example.net');
                  PRAGMA user_version={};",
-                SCHEMA_VERSION - 1
+                13 // before step 14 (settings)
             ))
             .unwrap();
         }

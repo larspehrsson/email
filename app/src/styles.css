@@ -5476,14 +5476,6 @@ body.dragging-message * {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.sig-item-dots {
-  flex: none;
-  display: flex;
-  gap: 2px;
-}
-.sig-item-dots .acct-dot {
-  font-size: 0;
-}
 .sig-item:hover {
   background: var(--bg-hover);
 }
@@ -5542,53 +5534,39 @@ body.dragging-message * {
   margin: 8px 0 0;
   font-size: 13px;
 }
-/* Under the signature: the accounts it's the default for (SignatureSettings.tsx). */
-.sig-use {
-  display: grid;
-  grid-template-columns: minmax(0, max-content) max-content max-content;
-  gap: 6px 22px;
-  align-items: center;
-  margin-top: 10px;
-  padding-top: 12px;
-  border-top: 1px solid var(--sep);
+/* Under the signature: the addresses that use it (SignatureSettings.tsx). */
+.sig-used {
+  margin-top: 16px;
   font-size: 13px;
 }
-.sig-use-title {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--text-3);
+.sig-used-title {
+  margin-bottom: 6px;
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--text);
 }
-.sig-use-col {
-  font-size: 12px;
-  color: var(--text-3);
+.sig-used-list {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) 1fr;
+  gap: 4px 18px;
+  align-items: baseline;
 }
-.sig-use-acct {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-}
-.sig-use-acct > span:last-child {
+.sig-used-addr {
+  justify-self: start;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 13px;
 }
-.sig-use-cell {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  cursor: pointer;
+.sig-used-what {
+  color: var(--text-2);
 }
-.sig-use-other {
-  min-width: 76px;
-  font-size: 11.5px;
+.sig-used-none {
   color: var(--text-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+.sig-used-none {
+  margin: 0;
 }
 
 /* The sender pane: everything from the sender on screen, beside the reader */
@@ -6921,6 +6899,11 @@ body.dragging-message iframe {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* A choice that stands for another (an address's signature that is the account's). */
+.sel-text.muted,
+.sel-menu .vm-label.muted {
+  color: var(--text-3);
+}
 .sel-item:disabled {
   opacity: 0.45;
   cursor: default;
@@ -6997,7 +6980,7 @@ body.dragging-message iframe {
    or typed in, so the rows read as a table that edits in place. */
 .sa-list {
   display: grid;
-  /* the signature columns are a fixed width, so adding an address ("Account’s") moves nothing */
+  /* the signature columns are a fixed width, so adding an address moves nothing */
   grid-template-columns: 48px minmax(150px, max-content) minmax(130px, 1fr) 104px 104px 24px;
   column-gap: 8px;
   align-items: center;

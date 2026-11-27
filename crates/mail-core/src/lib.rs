@@ -2484,6 +2484,25 @@ mod send_as_tests {
         s.is_default = true;
         core.save_identity(s).unwrap();
         assert_eq!(core.identities().unwrap().iter().filter(|i| i.is_default).map(|i| i.id).collect::<Vec<_>>(), [shop]);
+        // Its signatures: the account's (None), one of its own, or none at all (0), kept apart.
+        let sig = core.store.save_signature(None, "Shop", "<p>The shop</p>").unwrap();
+        let mut s = core.identities().unwrap().into_iter().find(|i| i.id == shop).unwrap();
+        (s.new_signature_id, s.reply_signature_id) = (Some(sig), Some(0));
+        core.save_identity(s.clone()).unwrap();
+        let sigs_of = |id| core.identities().unwrap().into_iter().find(|i| i.id == id).map(|i| (i.new_signature_id, i.reply_signature_id)).unwrap();
+        assert_eq!(sigs_of(shop), (Some(sig), Some(0)));
+        assert_eq!(sigs_of(au), (None, None));
+        (s.new_signature_id, s.reply_signature_id) = (Some(0), None);
+        core.save_identity(s).unwrap();
+        assert_eq!(sigs_of(shop), (Some(0), None));
+        // A signature deleted: an address that had chosen it has none (not its account's).
+        let other = core.store.save_signature(None, "Other", "<p>Other</p>").unwrap();
+        let mut s = core.identities().unwrap().into_iter().find(|i| i.id == shop).unwrap();
+        s.reply_signature_id = Some(other);
+        core.save_identity(s).unwrap();
+        core.store.set_signature_defaults(acct.id, Some(sig), Some(sig)).unwrap();
+        core.delete_signature(other).unwrap();
+        assert_eq!(sigs_of(shop), (Some(0), Some(0)));
 
         // Sent as it: From has it and its name; the envelope is the account's.
         let req = |from_identity: Option<i64>| -> SendRequest {
