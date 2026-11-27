@@ -55,7 +55,7 @@ Email's data folder:
 
 | What | Where | Contains |
 |---|---|---|
-| Mail list | `mail.db` | Folders, message headers (sender, recipients, subject, date), tags, drafts, the address book, and the search index of message text |
+| Mail list | `mail.db` | Folders, message headers (sender, recipients, subject, date), tags, drafts, the address book, and the search index of message text (and of the text in attachments, if you turn that on) |
 | Messages | `bodies.db` | The messages themselves, and attachments if you keep them for offline use |
 | Passwords and tokens | The system keychain (one item, `dev.mail-client`) | Account passwords, sign-in tokens, your writing-help API key, and your Google sign-in client |
 | Log | `logs/` in the data folder (macOS: `~/Library/Logs/dev.mailclient.desktop`; Windows: `%LOCALAPPDATA%\dev.mailclient.desktop\logs`) | What Email did and any problems: account addresses, folder and server names, and timings, and which tools AI apps used; no subjects or message text |
@@ -89,6 +89,11 @@ nothing on the server. Your lists of senders and domains whose pictures always l
   (programs, scripts, shortcuts, disk images, web pages, Office files with macros) is only saved.
   On Windows and macOS, what Email saves or opens is marked as downloaded from the internet, so
   the system warns, or opens it in a protected mode.
+- **Attachments are read for search only if you turn it on** (Settings › General › Privacy,
+  "Search the text in attachments"). Then PDFs already on this computer are read in a separate,
+  short-lived process with a time limit, so a PDF made to crash the reader takes only that
+  process down, never Email; plain-text files are read directly. Nothing is downloaded for it,
+  and nothing leaves the computer (`pdf_helper`, `mime::attachment_text`).
 - **Connections are verified.** Every server's certificate is checked, except for the
   plain-`http://` pictures above.
 - **Updates are signed** and checked before they're installed; the macOS app is also notarized

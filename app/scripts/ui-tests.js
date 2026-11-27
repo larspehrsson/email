@@ -822,6 +822,30 @@ describe('search', () => {
     }
   });
 
+  test('the text in attachments is searched only once turned on in Settings', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      const note = () => page.locator('.search-help .sh-note', { hasText: 'Attachments:' }).textContent();
+      await page.locator('.search-field input').fill('?');
+      await page.locator('.search-help').waitFor();
+      assert.match(await note(), /turn it on in Settings/, 'off by default');
+      await page.keyboard.press('Escape');
+      await page.locator('.search-field input').fill('');
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'General' }).click();
+      const choice = page.locator('.st-level', { hasText: 'Search the text in attachments' }).locator('input');
+      assert.equal(await choice.isChecked(), false);
+      await choice.check();
+      await page.keyboard.press('Escape');
+      await page.locator('.search-field input').fill('?');
+      await page.locator('.search-help').waitFor();
+      assert.match(await note(), /text in PDFs and text files on this computer/);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('a saved choice of every field from before includes the text and attachments', async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {

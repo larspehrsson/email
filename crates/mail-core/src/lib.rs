@@ -14,6 +14,7 @@ pub mod mime;
 pub mod oauth;
 pub mod model;
 pub mod partial;
+pub mod pdf_helper;
 pub mod search;
 pub mod signatures;
 pub mod smtp;
@@ -2044,6 +2045,15 @@ impl Core {
     /// Whether "Always load…" can cover everyone at a domain (off unless the user turns it on).
     pub fn domain_rules(&self) -> Result<bool> {
         self.store.domain_rules()
+    }
+
+    /// Whether search reads the text in attachments (off unless turned on).
+    pub fn attachment_search(&self) -> Result<bool> {
+        self.store.attachment_search()
+    }
+
+    pub fn set_attachment_search(&self, on: bool) -> Result<()> {
+        self.store.set_attachment_search(on)
     }
 
     pub fn set_domain_rules(&self, on: bool) -> Result<()> {

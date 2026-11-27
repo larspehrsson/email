@@ -7,6 +7,7 @@ import { newMessage } from '../lib/compose';
 import { searchActive, searchQuery, setSearchQuery } from '../state';
 import { CloseIcon, ComposeIcon, HelpIcon, SearchIcon } from './Icons';
 import { DRAG } from '../lib/platform';
+import { attachmentSearch } from '../lib/privacy';
 
 function isTypingTarget(t: EventTarget | null): boolean {
   if (!(t instanceof HTMLElement)) return false;
@@ -42,7 +43,7 @@ const EXAMPLES: [string, string][] = [
   ['to:bob@corp', 'recipients only'],
   ['subject:invoice', 'subject only'],
   ['body:refund', 'the message\'s text only'],
-  ['attachment:invoice', 'attachments only (names, text in PDFs)'],
+  ['attachment:invoice', 'attachments only'],
   ['tag:work', 'tagged Work'],
   ['tag:"to do"', 'tag with spaces'],
 ];
@@ -88,7 +89,12 @@ function SearchHelp(props: { anchor: HTMLElement; onPick: (q: string) => void; o
           </For>
         </div>
         <p class="sh-note">Words match prefixes as you type (inv → invoice).</p>
-        <p class="sh-note">"Search in" limits plain words: to the subject, sender, recipients, text (of messages downloaded to this computer) or attachments (their names, and the text in downloaded PDFs and text files), or some of them together; All folders / the folder name sets the scope.</p>
+        <p class="sh-note">"Search in" limits plain words: to the subject, sender, recipients, text (of messages downloaded to this computer) or attachments, or some of them together; All folders / the folder name sets the scope.</p>
+        <p class="sh-note">
+          {attachmentSearch()
+            ? 'Attachments: their names, and the text in PDFs and text files on this computer.'
+            : 'Attachments: their names. The text inside PDFs and text files too: turn it on in Settings › General › Privacy.'}
+        </p>
         <div class="sh-foot">
           <button
             class="link-btn"

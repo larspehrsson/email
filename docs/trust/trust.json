@@ -1021,6 +1021,46 @@
         ],
         "verify": "Read is_openable (a list of types that open) and where opening checks it.",
         "refuted_if": "A type that can run code opens directly."
+      },
+      {
+        "id": "untrusted-input.attachment-text",
+        "claim": "Search reads the text in attachments only if the user turns it on (off by default). Then PDFs already on this computer are read in a separate, short-lived process (the app's own program with --pdf-text) that is killed after a time limit, so a PDF that crashes or hangs the PDF library takes down only that process; plain-text files are read in the app. Nothing is downloaded for it and nothing leaves the computer.",
+        "level": "tested",
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/pdf_helper.rs",
+            "symbol": "read"
+          },
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/mime.rs",
+            "symbol": "attachment_text"
+          },
+          {
+            "kind": "code",
+            "path": "crates/mail-core/src/store.rs",
+            "symbol": "attachment_search",
+            "note": "the choice, off unless set"
+          },
+          {
+            "kind": "test",
+            "path": "crates/mail-core/src/pdf_helper.rs",
+            "symbol": "a_crashing_pdf_takes_only_the_helper_down"
+          },
+          {
+            "kind": "test",
+            "path": "crates/mail-core/src/pdf_helper.rs",
+            "symbol": "a_helper_that_takes_too_long_is_stopped"
+          },
+          {
+            "kind": "test",
+            "path": "crates/mail-core/src/store.rs",
+            "symbol": "search_in_attachments"
+          }
+        ],
+        "verify": "Check that pdf_text reads PDFs only through the reader the app sets (pdf_helper::read), that pdf_text_here runs only in the helper, and that index_bodies reads attachments' text only when attachment_search is on.",
+        "refuted_if": "A PDF is parsed in the app's own process, attachments are read for search with the choice off, or anything is downloaded or sent for it."
       }
     ],
     "updates": [

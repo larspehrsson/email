@@ -4,7 +4,7 @@ import { AiAppsSection } from './AiApps';
 import { GoogleClientNote, GoogleContactsField } from './GoogleContacts';
 import { BrowserSignIn, SwitchToGoogle } from './AccountSignIn';
 import { pictureLevel, setPictureLevel, type PictureLevel } from '../lib/senderIcons';
-import { domainRules, httpPictures, setDomainRules, setHttpPictures } from '../lib/privacy';
+import { attachmentSearch, domainRules, httpPictures, setAttachmentSearch, setDomainRules, setHttpPictures } from '../lib/privacy';
 import { setTheme, theme, THEMES } from '../lib/theme';
 import { pinFavorites, setPinFavorites } from '../lib/favorites';
 import { accountLogo, logoFromFile, setAccountLogo } from '../lib/accountLogos';
@@ -952,6 +952,14 @@ function GeneralSection() {
             onChange={(on) => void setHttpPictures(on)}
             label="Load pictures from insecure (http) addresses"
             note="Only in mail whose pictures you allow, when a picture doesn’t load securely. Others on your network can see its address."
+          />
+        </Field>
+        <Field label="Search" class="st-field-top st-divided">
+          <Choice
+            checked={attachmentSearch()}
+            onChange={(on) => void setAttachmentSearch(on)}
+            label="Search the text in attachments (PDFs and text files)"
+            note="Attachments on this computer are read here, in a separate process; nothing is downloaded for it and nothing leaves the computer. It makes the search index larger."
           />
         </Field>
         <Field label="Notifications" class="st-field-top st-divided">

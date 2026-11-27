@@ -31,3 +31,7 @@ export const [domainRules, setDomainRules] = coreChoice(false, api.domainRules, 
 /** A picture that only loads over plain http may be fetched that way (`rescueHttpImages`), its
  *  address visible on the network. On unless turned off. */
 export const [httpPictures, setHttpPictures] = coreChoice(true, api.httpPictures, api.setHttpPictures);
+
+/** Search reads the text in attachments (PDFs, plain-text files) on this computer. Off unless
+ *  turned on: it grows the index, and a PDF reader then runs on what senders send. */
+export const [attachmentSearch, setAttachmentSearch] = coreChoice(false, api.attachmentSearch, api.setAttachmentSearch);

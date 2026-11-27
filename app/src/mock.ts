@@ -634,6 +634,7 @@ export function createMockBackend(): Backend {
   let domainRules = false;
   /** Settings › General › Privacy: pictures that only load over plain http */
   let httpPictures = true;
+  let attachmentSearch = false;
   /** "Always from this sender": lowercase addresses */
   const remoteSenders = new Set<string>();
   /** resolves a pending mock browser sign-in as cancelled */
@@ -2092,6 +2093,14 @@ export function createMockBackend(): Backend {
     async set_http_pictures({ on }) {
       await sleep(3);
       httpPictures = on;
+    },
+    async attachment_search() {
+      await sleep(3);
+      return attachmentSearch;
+    },
+    async set_attachment_search({ on }) {
+      await sleep(3);
+      attachmentSearch = on;
     },
     async remote_senders() {
       await sleep(3);

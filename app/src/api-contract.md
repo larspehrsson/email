@@ -195,7 +195,7 @@ interface SyncStatus {
 
 Matches sender (name + address), recipients (To/Cc names + addresses), subject and text; every term must match (AND), case- and accent-insensitive, each word matched as a prefix (`inv` finds "invoice").
 
-- `word` — any of the fields, the message's text and attachments included (`body`: its text, HTML as text, and its attachments' names; `attachments`: their names and the text in its downloaded PDF and plain-text attachments; both for messages whose body is downloaded, indexed in the background)
+- `word` — any of the fields, the message's text and attachments included (`body`: its text, HTML as text, and its attachments' names; `attachments`: their names and, with `attachment_search` on, the text in its downloaded PDF and plain-text attachments; both for messages whose body is downloaded, indexed in the background)
 - `"exact phrase"` — phrase (last word still prefix-matched)
 - `from:x`, `to:x`, `subject:x`, `body:x`, `attachment:x` — restrict a term to one field (`from:"Ada L"` works); these override `fields`
 - `-word` — exclude

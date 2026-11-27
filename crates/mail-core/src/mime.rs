@@ -222,10 +222,10 @@ const PDF_MAX_BYTES: usize = 20 << 20;
 
 /// What search finds a message by in its body, as (the message's text, its attachments'):
 /// its text (HTML as text) and its attachments' names, at most `SEARCH_TEXT_MAX`; then the
-/// attachments' names and the text in them (stored in the body, or downloaded later:
-/// `fetched`, as (name, mime, bytes)), at most `ATTACHMENT_TEXT_MAX`. None: not a message the
-/// parser can read.
-pub fn search_text(raw: &[u8], fetched: &[(String, String, Vec<u8>)]) -> Option<(String, String)> {
+/// attachments' names and, with `read_files` (the user's choice, off by default), the text in
+/// them (stored in the body, or downloaded later: `fetched`, as (name, mime, bytes)), at most
+/// `ATTACHMENT_TEXT_MAX`. None: not a message the parser can read.
+pub fn search_text(raw: &[u8], fetched: &[(String, String, Vec<u8>)], read_files: bool) -> Option<(String, String)> {
     let msg = MessageParser::default().parse(raw)?;
     let mut text = String::new();
     let mut i = 0;
@@ -257,7 +257,7 @@ pub fn search_text(raw: &[u8], fetched: &[(String, String, Vec<u8>)]) -> Option<
         files.push_str(name);
         files.push('\n');
     }
-    for (name, mime, data) in &parts {
+    for (name, mime, data) in parts.iter().filter(|p| read_files && !p.2.is_empty()) {
         if files.len() >= ATTACHMENT_TEXT_MAX {
             break;
         }
@@ -294,12 +294,31 @@ pub fn attachment_text(name: &str, mime: &str, data: &[u8]) -> Option<String> {
     (texty && !data.iter().take(4096).any(|&b| b == 0)).then(|| String::from_utf8_lossy(data).into_owned())
 }
 
+/// How PDFs are read for search: set by the app (`pdf_helper`, in a process of its own). Unset,
+/// they aren't read (the core's tests read them here).
+type PdfReader = Box<dyn Fn(&[u8]) -> Option<String> + Send + Sync>;
+static PDF_READER: std::sync::OnceLock<PdfReader> = std::sync::OnceLock::new();
+
+/// Read PDFs with `read` from now on (once; later calls are ignored).
+pub fn set_pdf_reader(read: impl Fn(&[u8]) -> Option<String> + Send + Sync + 'static) {
+    let _ = PDF_READER.set(Box::new(read));
+}
+
 fn pdf_text(data: &[u8]) -> Option<String> {
     if data.len() > PDF_MAX_BYTES {
         return None;
     }
-    // The PDF comes from whoever sent the mail: a file the library chokes on mustn't take the
-    // indexing thread down with it.
+    match PDF_READER.get() {
+        Some(read) => read(data),
+        None if cfg!(test) => pdf_text_here(data),
+        None => None,
+    }
+}
+
+/// A PDF's text, read in this process: only in the helper (`pdf_helper::serve`), since a
+/// PDF can crash the library in ways nothing here can catch.
+pub fn pdf_text_here(data: &[u8]) -> Option<String> {
+    // Panics at least (most damaged files) just give no text.
     let text = std::panic::catch_unwind(|| pdf_extract::extract_text_from_mem(data)).ok()?.ok()?;
     let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
     (!text.is_empty()).then_some(text)
@@ -815,17 +834,20 @@ pub(crate) mod tests {
             ("notes.txt", "text/plain", b"platypus sightings"),
             ("photo.jpg", "image/jpeg", b"\xff\xd8\xff\x00wallaby"),
         ]);
-        let (text, files) = search_text(&raw, &[]).unwrap();
+        let (text, files) = search_text(&raw, &[], true).unwrap();
         assert!(text.contains("See attached.") && text.contains("invoice.pdf"), "{text}");
         assert!(!text.contains("wombat"), "the message's own text is apart: {text}");
         assert!(files.contains("invoice.pdf") && files.contains("photo.jpg"), "names: {files}");
         assert!(files.contains("wombat enclosure"), "the PDF's text: {files}");
         assert!(files.contains("platypus"), "a text file's: {files}");
         assert!(!files.contains("wallaby"), "not a picture's bytes");
+        // Unless the user turned it on: the names only.
+        let (_, names) = search_text(&raw, &[], false).unwrap();
+        assert!(names.contains("invoice.pdf") && !names.contains("wombat") && !names.contains("platypus"), "{names}");
         // Downloaded apart (the body stored without them).
         let plain = b"Subject: Hi\r\nContent-Type: text/plain\r\n\r\nHello\r\n";
         let fetched = [("later.pdf".to_string(), "application/pdf".to_string(), tiny_pdf("echidna report"))];
-        assert!(search_text(plain, &fetched).unwrap().1.contains("echidna report"));
+        assert!(search_text(plain, &fetched, true).unwrap().1.contains("echidna report"));
     }
 
     #[test]
@@ -835,18 +857,18 @@ pub(crate) mod tests {
             assert_eq!(attachment_text("bad.pdf", "application/pdf", &bad), None);
         }
         let raw = with_attachments(&[("bad.pdf", "application/pdf", b"%PDF-1.7 garbage")]);
-        assert!(search_text(&raw, &[]).unwrap().1.contains("bad.pdf"), "the name still counts");
+        assert!(search_text(&raw, &[], true).unwrap().1.contains("bad.pdf"), "the name still counts");
     }
 
     #[test]
     fn attachment_text_has_its_own_limit() {
         let long = "kookaburra ".repeat(SEARCH_TEXT_MAX / 5);
         let raw = with_attachments(&[("a.txt", "text/plain", long.as_bytes()), ("b.txt", "text/plain", long.as_bytes())]);
-        let (_, files) = search_text(&raw, &[]).unwrap();
+        let (_, files) = search_text(&raw, &[], true).unwrap();
         assert!(files.len() <= ATTACHMENT_TEXT_MAX && files.len() > ATTACHMENT_TEXT_MAX / 2);
         let long_body = format!("Subject: Long\r\nContent-Type: text/plain\r\n\r\n{long}{long}\r\n");
         let fetched = [("c.txt".to_string(), "text/plain".to_string(), b"dingo".to_vec())];
-        let (text, files) = search_text(long_body.as_bytes(), &fetched).unwrap();
+        let (text, files) = search_text(long_body.as_bytes(), &fetched, true).unwrap();
         assert!(text.len() <= SEARCH_TEXT_MAX && files.contains("dingo"), "a long body doesn't crowd attachments out");
     }
 

@@ -2880,6 +2880,7 @@ impl Store {
         if ids.is_empty() {
             return Ok(0);
         }
+        let read_files = self.attachment_search()?;
         // (id, the body's length and how many attachments were downloaded apart, as read; its text)
         let mut texts: Vec<(i64, Option<usize>, usize, Option<(String, String)>)> = Vec::with_capacity(ids.len());
         for id in &ids {
@@ -2890,11 +2891,11 @@ impl Store {
                 let cached = stmt.query_map([id], |r| Ok((r.get::<_, i64>(0)? as usize, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
                 (raw, cached)
             };
-            let fetched = match (&raw, cached.is_empty()) {
-                (Some(raw), false) => self.fetched_attachments(*id, raw, cached.iter().cloned())?,
-                _ => Vec::new(),
+            let fetched = match &raw {
+                Some(raw) => self.fetched_attachments(*id, raw, cached.iter().filter(|_| read_files).cloned())?,
+                None => Vec::new(),
             };
-            let text = raw.as_deref().and_then(|r| crate::mime::search_text(r, &fetched));
+            let text = raw.as_deref().and_then(|r| crate::mime::search_text(r, &fetched, read_files));
             texts.push((*id, raw.as_ref().map(Vec::len), cached.len(), text));
         }
         let mut db = self.db();
@@ -2940,18 +2941,23 @@ impl Store {
         Ok(done_n.max(usize::from(!texts.is_empty())))
     }
 
-    /// Attachments of a message stored without them that were downloaded later (the cache's
-    /// `(idx, bytes)`), as (name, mime, bytes) from the omitted parts' descriptions.
+    /// The attachments of a message stored without them, as (name, mime, bytes) from the
+    /// omitted parts' descriptions: with the bytes of those in `cached` (downloaded later, the
+    /// cache's `(idx, bytes)`), none for the others (their names are searched all the same).
     fn fetched_attachments(&self, id: i64, raw: &[u8], cached: impl Iterator<Item = (usize, Vec<u8>)>) -> Result<Vec<(String, String, Vec<u8>)>> {
         let omitted: Vec<crate::partial::OmittedPart> = self.omitted(id)?.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
+        if omitted.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut out: Vec<(String, String, Vec<u8>)> = omitted.iter().map(|p| (p.name.clone(), p.mime.clone(), Vec::new())).collect();
         // Omitted attachments are numbered after those in the body.
         let stored = crate::mime::stored_attachment_count(raw);
-        Ok(cached
-            .filter_map(|(idx, data)| {
-                let part = omitted.get(idx.checked_sub(stored)?)?;
-                Some((part.name.clone(), part.mime.clone(), data))
-            })
-            .collect())
+        for (idx, data) in cached {
+            if let Some(slot) = idx.checked_sub(stored).and_then(|o| out.get_mut(o)) {
+                slot.2 = data;
+            }
+        }
+        Ok(out)
     }
 
     /// Once, after the upgrade that made attachments searchable on their own (file_fts):
@@ -3089,6 +3095,23 @@ impl Store {
         Ok(())
     }
 
+    /// Whether search reads the text in attachments (PDFs, plain-text files): off unless the
+    /// user turns it on (Settings › General › Privacy). Off, only their names are searched.
+    pub fn attachment_search(&self) -> Result<bool> {
+        self.choice("attachment_search", false)
+    }
+
+    /// Turn reading attachments for search on or off: messages with attachments are indexed
+    /// again, so their text comes into the index, or goes from it.
+    pub fn set_attachment_search(&self, on: bool) -> Result<()> {
+        if self.attachment_search()? == on {
+            return Ok(());
+        }
+        self.set_choice("attachment_search", on)?;
+        self.db().execute("UPDATE messages SET body_indexed=0 WHERE has_body=1 AND has_attachments=1", [])?;
+        Ok(())
+    }
+
     /// Whether "Always load…" can cover everyone at a domain (off by default).
     pub fn domain_rules(&self) -> Result<bool> {
         self.choice("domain_rules", false)
@@ -3135,9 +3158,11 @@ impl Store {
             params![id, idx as i64, data],
         )?;
         drop(bodies);
-        // Its text is searchable too: the message is indexed again (after the write, as in
-        // `store_body`).
-        self.db().execute("UPDATE messages SET body_indexed=0 WHERE id=?1 AND has_body=1", [id])?;
+        // Its text is searchable too, if the user chose that: the message is indexed again
+        // (after the write, as in `store_body`).
+        if self.attachment_search()? {
+            self.db().execute("UPDATE messages SET body_indexed=0 WHERE id=?1 AND has_body=1", [id])?;
+        }
         Ok(())
     }
 
@@ -5354,6 +5379,7 @@ mod tests {
         let inbox = store.folders(acct.id).unwrap()[0].id;
         let mk = |uid: u32, subject: &str| HeaderRecord { gm_msgid: None, gm_labels: None, subject: subject.into(), ..rec(uid, 0, &[]) };
         store.upsert_headers(acct.id, inbox, &[mk(1, "Whole"), mk(2, "Partial")], &HashMap::new()).unwrap();
+        store.set_attachment_search(true).unwrap();
         let id = |subject: &str| -> i64 { store.db().query_row("SELECT id FROM messages WHERE subject=?1", [subject], |r| r.get(0)).unwrap() };
         let hits = |q: &str| -> Vec<String> { store.search(acct.id, None, q, &[], 0, 50).unwrap().messages.into_iter().map(|m| m.subject).collect() };
         let b64 = |d: &[u8]| base64::Engine::encode(&base64::engine::general_purpose::STANDARD, d);
@@ -5385,6 +5411,15 @@ mod tests {
         assert_eq!(store.index_attachment_text_once().unwrap(), 0, "only once");
         while store.index_bodies(100).unwrap() > 0 {}
         assert_eq!(hits("wombat"), ["Whole"]);
+
+        // Turned off: their text goes from the index, their names stay; on again, it's back.
+        store.set_attachment_search(false).unwrap();
+        while store.index_bodies(100).unwrap() > 0 {}
+        assert!(hits("wombat").is_empty() && hits("echidna").is_empty(), "no text in attachments");
+        assert_eq!(hits("attachment:later"), ["Partial"], "names still");
+        store.set_attachment_search(true).unwrap();
+        while store.index_bodies(100).unwrap() > 0 {}
+        assert_eq!((hits("wombat"), hits("echidna")), (vec!["Whole".to_string()], vec!["Partial".to_string()]));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

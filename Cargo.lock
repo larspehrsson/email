@@ -3024,6 +3024,7 @@ dependencies = [
  "imap-proto",
  "keyring",
  "lettre",
+ "libc",
  "mail-builder",
  "mail-parser",
  "pdf-extract",

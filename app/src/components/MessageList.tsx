@@ -1053,6 +1053,52 @@ export function MessageList(props: {
         {(sp) => (
           <header class="list-head search-head" data-tauri-drag-region={DRAG}>
             <div class="search-head-row" data-tauri-drag-region={DRAG}>
+              <div class="search-fields" data-tauri-drag-region={DRAG}>
+                <span class="search-fields-label" data-tauri-drag-region={DRAG}>Search in</span>
+                <button
+                  class="search-in"
+                  aria-haspopup="menu"
+                  title={`Plain words are looked for in: ${(searchFieldSet(searchFields())?.label ?? '').toLowerCase()}`}
+                  onClick={(e) => {
+                    const r = e.currentTarget.getBoundingClientRect();
+                    openContextMenu(
+                      new MouseEvent('click', { clientX: r.left, clientY: r.bottom + 4 }),
+                      SEARCH_FIELD_SETS.map((s) => ({
+                        label: s.label,
+                        checked: searchFieldSet(searchFields())?.label === s.label,
+                        run: () => setSearchFields(s.fields),
+                      })),
+                      e.currentTarget,
+                    );
+                  }}
+                >
+                  <span class="search-in-label">{(() => {
+                    const s = searchFieldSet(searchFields());
+                    return s?.short ?? s?.label ?? 'Everything';
+                  })()}</span>
+                  <ChevronIcon size={11} class="icon search-in-chev" />
+                </button>
+              </div>
+              <div class="segmented" role="radiogroup" aria-label="Search scope">
+                <button
+                  role="radio"
+                  aria-checked={searchScope() === 'all'}
+                  classList={{ on: searchScope() === 'all' }}
+                  onClick={() => setSearchScope('all')}
+                >
+                  All folders
+                </button>
+                <button
+                  role="radio"
+                  aria-checked={searchScope() === 'folder'}
+                  classList={{ on: searchScope() === 'folder' }}
+                  onClick={() => setSearchScope('folder')}
+                  title={props.folder.displayName}
+                >
+                  {props.folder.displayName}
+                </button>
+              </div>
+            </div>
             <div class="list-title" data-tauri-drag-region={DRAG}>
               {/* The query itself is already in the search field; show only the outcome. */}
               <div class="list-sub search-count" data-tauri-drag-region={DRAG}>
@@ -1072,52 +1118,6 @@ export function MessageList(props: {
                   aria-hidden="true"
                 />
               </div>
-            </div>
-            <div class="segmented" role="radiogroup" aria-label="Search scope">
-              <button
-                role="radio"
-                aria-checked={searchScope() === 'all'}
-                classList={{ on: searchScope() === 'all' }}
-                onClick={() => setSearchScope('all')}
-              >
-                All folders
-              </button>
-              <button
-                role="radio"
-                aria-checked={searchScope() === 'folder'}
-                classList={{ on: searchScope() === 'folder' }}
-                onClick={() => setSearchScope('folder')}
-                title={props.folder.displayName}
-              >
-                {props.folder.displayName}
-              </button>
-            </div>
-            </div>
-            <div class="search-fields" data-tauri-drag-region={DRAG}>
-              <span class="search-fields-label" data-tauri-drag-region={DRAG}>Search in</span>
-              <button
-                class="search-in"
-                aria-haspopup="menu"
-                title={`Plain words are looked for in: ${(searchFieldSet(searchFields())?.label ?? '').toLowerCase()}`}
-                onClick={(e) => {
-                  const r = e.currentTarget.getBoundingClientRect();
-                  openContextMenu(
-                    new MouseEvent('click', { clientX: r.left, clientY: r.bottom + 4 }),
-                    SEARCH_FIELD_SETS.map((s) => ({
-                      label: s.label,
-                      checked: searchFieldSet(searchFields())?.label === s.label,
-                      run: () => setSearchFields(s.fields),
-                    })),
-                    e.currentTarget,
-                  );
-                }}
-              >
-                <span class="search-in-label">{(() => {
-                  const s = searchFieldSet(searchFields());
-                  return s?.short ?? s?.label ?? 'Everything';
-                })()}</span>
-                <ChevronIcon size={11} class="icon search-in-chev" />
-              </button>
             </div>
           </header>
         )}

@@ -777,6 +777,8 @@ export interface CommandMap {
   set_domain_rules: { args: { on: boolean }; ret: void };
   http_pictures: { args: undefined; ret: boolean };
   set_http_pictures: { args: { on: boolean }; ret: void };
+  attachment_search: { args: undefined; ret: boolean };
+  set_attachment_search: { args: { on: boolean }; ret: void };
   set_remote_sender: { args: { addr: string; on: boolean }; ret: void };
   update_password: { args: { accountId: number; password: string }; ret: void };
   set_keep_attachments: { args: { accountId: number; keep: boolean }; ret: void };

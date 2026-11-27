@@ -135,6 +135,16 @@ async fn domain_rules(core: State<'_, Arc<Core>>) -> Res<bool> {
 }
 
 #[tauri::command]
+async fn attachment_search(core: State<'_, Arc<Core>>) -> Res<bool> {
+    core.attachment_search().map_err(err)
+}
+
+#[tauri::command]
+async fn set_attachment_search(core: State<'_, Arc<Core>>, on: bool) -> Res<()> {
+    core.set_attachment_search(on).map_err(err)
+}
+
+#[tauri::command]
 async fn set_domain_rules(core: State<'_, Arc<Core>>, on: bool) -> Res<()> {
     core.set_domain_rules(on).map_err(err)
 }
@@ -1613,6 +1623,13 @@ pub fn run() {
             if let Ok(dir) = opened_attachments_dir(app.handle()) {
                 let _ = std::fs::remove_dir_all(dir);
             }
+            // PDFs are read for search by this program started again (`pdf_helper`), never here.
+            match std::env::current_exe() {
+                Ok(exe) => mail_core::mime::set_pdf_reader(move |data| {
+                    mail_core::pdf_helper::read(&exe, &[mail_core::pdf_helper::FLAG], &[], data, mail_core::pdf_helper::TIME_LIMIT)
+                }),
+                Err(e) => tracing::warn!("no search in PDFs: {e}"),
+            }
             let dir = app.path().app_data_dir()?;
             let core = match Core::open(&dir, Secrets::keyring()) {
                 Ok(core) => Arc::new(core),
@@ -1709,6 +1726,8 @@ pub fn run() {
             remote_senders,
             domain_rules,
             set_domain_rules,
+            attachment_search,
+            set_attachment_search,
             http_pictures,
             set_http_pictures,
             set_remote_sender,

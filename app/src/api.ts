@@ -319,6 +319,9 @@ export const api = {
   /** Whether a picture that only loads over plain http may be fetched that way. */
   httpPictures: (): Promise<boolean> => call('http_pictures', undefined),
   setHttpPictures: (on: boolean): Promise<void> => call('set_http_pictures', { on }),
+  /** Whether search reads the text in attachments (PDFs, plain-text files). */
+  attachmentSearch: (): Promise<boolean> => call('attachment_search', undefined),
+  setAttachmentSearch: (on: boolean): Promise<void> => call('set_attachment_search', { on }),
   /** Senders whose images always load. */
   remoteSenders: (): Promise<string[]> => call('remote_senders', undefined),
   setRemoteSender: (addr: string, on: boolean): Promise<void> => call('set_remote_sender', { addr, on }),
