@@ -5,6 +5,7 @@ import { hideToast, showToast } from '../components/Toast';
 import { broadcast, closeThisWindow, composeDraftId, isComposeWindow, onBroadcast, openComposeWindow } from './windows';
 import { parseMailto } from './mailto';
 import { defaultSignature, loadSignatures, withSignature } from './signatures';
+import { defaultIdentity, identityById, loadIdentities } from './identities';
 
 // Writing mail happens in compose windows, one per draft (see lib/windows.ts). The main window
 // starts them (new message, reply, forward) and shows "Sending… Undo" once one sends; the core
@@ -17,6 +18,9 @@ export interface ComposeState {
   key: number;
   mode: ComposeMode;
   accountId: number;
+  /** sent as this other address of the account; null: its own (undefined: its default, to be
+   *  filled in when the window opens) */
+  fromIdentity?: number | null;
   to: Addr[];
   cc: Addr[];
   bcc: Addr[];
@@ -51,6 +55,7 @@ let keySeq = 0;
 function request(c: ComposeState, draftId: number | null): SendRequest {
   return {
     accountId: c.accountId,
+    fromIdentity: c.fromIdentity ?? null,
     to: c.to,
     cc: c.cc,
     bcc: c.bcc,
@@ -89,8 +94,11 @@ function defaultAccount(): number | null {
  *  gets the account's default signature for it (one reopened keeps what it had). */
 async function openDraftWindow(state: Omit<ComposeState, 'key'>): Promise<void> {
   try {
+    const ids = await loadIdentities().catch(() => []);
+    if (state.fromIdentity === undefined) state = { ...state, fromIdentity: defaultIdentity(state.accountId, ids) };
     if (state.signatureId === undefined) {
-      const sig = defaultSignature(await loadSignatures().catch(() => ({ signatures: [], defaults: [] })), state.accountId, state.mode !== 'new');
+      const identity = identityById(state.fromIdentity, ids);
+      const sig = defaultSignature(await loadSignatures().catch(() => ({ signatures: [], defaults: [] })), state.accountId, state.mode !== 'new', identity);
       state = { ...state, signatureId: sig?.id ?? null, signatureHtml: sig?.html ?? null };
     }
     const id = await api.saveDraft(null, request({ ...state, key: 0 }, null));
@@ -192,6 +200,7 @@ export async function startReply(id: number, mode: ReplyMode): Promise<void> {
     await openDraftWindow({
       mode,
       accountId: r.accountId,
+      fromIdentity: r.fromIdentity,
       to: r.to,
       cc: r.cc,
       bcc: [],
@@ -257,9 +266,14 @@ export async function openDraftMessage(m: { id: number; accountId: number; draft
     const files = paths.length ? await api.fileInfo(paths) : [];
     const html = d.html ? bodyHtml(d.html) : textHtml(d.text ?? '');
     const bcc = d.bcc ?? [];
+    // From the address it was written from, if that's one of the account's others.
+    const from = d.from.addr.toLowerCase();
+    const ids = await loadIdentities().catch(() => []);
+    const fromIdentity = ids.find((i) => i.accountId === m.accountId && i.email.toLowerCase() === from)?.id ?? null;
     await openDraftWindow({
       mode: 'new',
       accountId: m.accountId,
+      fromIdentity,
       to: d.to,
       cc: d.cc,
       bcc,

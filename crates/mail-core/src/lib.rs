@@ -6,6 +6,7 @@ pub mod addressbook;
 pub mod ai;
 pub mod gcontacts;
 pub mod icons;
+pub mod identities;
 pub mod mcp;
 pub mod compose;
 pub mod contacts;
@@ -1163,6 +1164,10 @@ impl Core {
         let account = self.store.accounts()?.into_iter().find(|a| a.id == account_id).ok_or_else(|| anyhow!("no such account"))?;
         let d = self.detail_now(id).await?;
         let raw = self.store.body(id)?.unwrap_or_default();
+        // Answered from the address it came to (an alias, a catch-all's), else the default.
+        let ids: Vec<identities::Identity> = self.store.identities()?.into_iter().filter(|i| i.account_id == account_id).collect();
+        let came_to: Vec<String> = d.to.iter().chain(&d.cc).map(|a| a.addr.clone()).chain(mime::delivered_to(&raw)).collect();
+        let from_identity = identities::for_reply(&account.email, &ids, &came_to);
         let original = d.html.clone().unwrap_or_else(|| compose::text_to_html(d.text.as_deref().unwrap_or("")));
         let when = chrono::DateTime::from_timestamp(d.date, 0)
             .map(|t| t.with_timezone(&chrono::Local).format("%a, %b %-d, %Y at %-I:%M %p").to_string())
@@ -1185,6 +1190,7 @@ impl Core {
                 replying_to: None,
                 forwarding: Some(id),
                 attachments: d.attachments,
+                from_identity,
             });
         }
         let orig = compose::Original {
@@ -1194,7 +1200,8 @@ impl Core {
             cc: d.cc.clone(),
             ..Default::default()
         };
-        let (to, cc) = compose::reply_recipients(&orig, &[account.email.clone()], mode == ReplyMode::ReplyAll);
+        let own: Vec<String> = std::iter::once(account.email.clone()).chain(ids.iter().map(|i| i.email.clone())).collect();
+        let (to, cc) = compose::reply_recipients(&orig, &own, mode == ReplyMode::ReplyAll);
         let attribution = format!("On {}, {} wrote:", compose::escape_html(&when), compose::display_addr(&d.from));
         Ok(ReplyContext {
             account_id,
@@ -1205,7 +1212,28 @@ impl Core {
             replying_to: Some(id),
             forwarding: None,
             attachments: vec![],
+            from_identity,
         })
+    }
+
+    /// Every account's other addresses to send as.
+    pub fn identities(&self) -> Result<Vec<identities::Identity>> {
+        self.store.identities()
+    }
+
+    /// Add (`id` 0) or change an address to send as. Returns its id.
+    pub fn save_identity(&self, mut i: identities::Identity) -> Result<i64> {
+        let account = self.account(i.account_id)?;
+        let others: Vec<identities::Identity> = self.store.identities()?.into_iter().filter(|o| o.account_id == i.account_id).collect();
+        if i.id != 0 && !others.iter().any(|o| o.id == i.id) {
+            bail!("That address is no longer there.");
+        }
+        (i.email, i.name) = identities::check(&i, &account.email, &others).map_err(|e| anyhow!(e))?;
+        self.store.save_identity(&i)
+    }
+
+    pub fn delete_identity(&self, id: i64) -> Result<()> {
+        self.store.delete_identity(id)
     }
 
     /// Queue a message: built now, sent after the undo window (`SEND_DELAY_MS`) unless taken
@@ -1278,8 +1306,11 @@ impl Core {
     /// The message a composer request describes (without attachments): From, recipients,
     /// subject, body, and threading headers for a reply.
     fn outgoing_of(&self, account: &Account, req: &SendRequest) -> Result<compose::Outgoing> {
+        let ids: Vec<identities::Identity> = self.store.identities()?.into_iter().filter(|i| i.account_id == account.id).collect();
+        let from = identities::sender(&account.email, &account.display_name, &ids, req.from_identity)
+            .ok_or_else(|| anyhow!("The address to send from is no longer one of {}'s.", account.email))?;
         let mut msg = compose::Outgoing {
-            from: Some(Addr { name: Some(account.display_name.clone()).filter(|n| !n.trim().is_empty()), addr: account.email.clone() }),
+            from: Some(from),
             to: req.to.clone(),
             cc: req.cc.clone(),
             bcc: req.bcc.clone(),
@@ -1309,7 +1340,11 @@ impl Core {
                 (self.store.create_draft(account.id, &state, &mid)?, mid)
             }
         };
-        let msg = self.outgoing_of(&account, &req)?;
+        // A draft from an address since removed is kept, as from the account's own.
+        let msg = match self.outgoing_of(&account, &req) {
+            Err(_) if req.from_identity.is_some() => self.outgoing_of(&account, &SendRequest { from_identity: None, ..req.clone() })?,
+            m => m?,
+        };
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
         let raw = compose::build(&msg, &message_id, now)?;
         // A just-opened, still empty composer isn't a draft worth listing.
@@ -2408,6 +2443,102 @@ mod local_draft_tests {
         }
         assert!(core.store.list_messages(drafts, 0, 10).unwrap().messages.is_empty());
         assert!(core.store.draft(a).unwrap().is_none() && core.store.draft(b).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod send_as_tests {
+    use super::*;
+    use crate::identities::Identity;
+    use crate::store::{HeaderRecord, ListedFolder};
+
+    fn identity(account_id: i64, email: &str, name: &str, default: bool) -> Identity {
+        Identity { id: 0, account_id, email: email.into(), name: name.into(), new_signature_id: None, reply_signature_id: None, is_default: default }
+    }
+
+    /// Another address of the account: kept and checked; mail goes out with it in From (and its
+    /// name), through the account's server with the account's own address as the envelope
+    /// sender; replies go out from the address the mail came to, and leave every one of the
+    /// account's addresses out of the recipients.
+    #[tokio::test]
+    async fn sending_as_another_address() {
+        let dir = std::env::temp_dir().join(format!("mail-core-send-as-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let core = Core::open(&dir, Secrets::memory()).unwrap();
+        let acct = core.store.insert_account("lars@pehrsson.info", "Lars Pehrsson", Provider::Imap, "imap.example.com", 993).unwrap();
+        core.store.set_smtp_server(acct.id, Some(("smtp.example.com", 587))).unwrap();
+        let lf = |name: &str, role| ListedFolder { raw_name: name.into(), path: vec![name.into()], role: Some(role), selectable: true };
+        core.store.sync_folder_list(acct.id, &[lf("INBOX", FolderRole::Inbox), lf("Sent", FolderRole::Sent), lf("Drafts", FolderRole::Drafts)]).unwrap();
+
+        // Kept and checked.
+        let au = core.save_identity(identity(acct.id, " lars@pehrsson.au ", "Lars", true)).unwrap();
+        let shop = core.save_identity(identity(acct.id, "shop@store.example", "", false)).unwrap();
+        for bad in ["lars@pehrsson.info", "LARS@pehrsson.au", "nobody"] {
+            assert!(core.save_identity(identity(acct.id, bad, "", false)).is_err(), "{bad}");
+        }
+        let list = core.identities().unwrap();
+        assert_eq!(list.iter().map(|i| (i.email.as_str(), i.is_default)).collect::<Vec<_>>(), [("lars@pehrsson.au", true), ("shop@store.example", false)]);
+        // One default per account: making another the default takes it from the first.
+        let mut s = list[1].clone();
+        s.is_default = true;
+        core.save_identity(s).unwrap();
+        assert_eq!(core.identities().unwrap().iter().filter(|i| i.is_default).map(|i| i.id).collect::<Vec<_>>(), [shop]);
+
+        // Sent as it: From has it and its name; the envelope is the account's.
+        let req = |from_identity: Option<i64>| -> SendRequest {
+            let mut r: SendRequest = serde_json::from_value(serde_json::json!({
+                "accountId": acct.id, "to": [{ "addr": "bob@example.org" }], "subject": "Hi", "html": "<p>Hi</p>",
+                "replyingTo": null, "forwarding": null, "draft": null,
+            }))
+            .unwrap();
+            r.from_identity = from_identity;
+            r
+        };
+        core.send_message(req(Some(au))).await.unwrap();
+        core.send_message(req(Some(shop))).await.unwrap();
+        core.send_message(req(None)).await.unwrap();
+        // (What the sender would take, past the undo window, oldest first.)
+        let sent: Vec<(String, String)> = std::iter::from_fn(|| core.store.claim_due_outgoing(acct.id, i64::MAX / 2).unwrap())
+            .map(|o| (String::from_utf8_lossy(&o.raw).into_owned(), o.envelope_from))
+            .collect();
+        assert_eq!(sent.len(), 3);
+        let from = |raw: &str| raw.lines().find(|l| l.starts_with("From:")).unwrap_or_default().to_string();
+        assert!(from(&sent[0].0).contains("Lars") && from(&sent[0].0).contains("<lars@pehrsson.au>"), "{}", from(&sent[0].0));
+        assert!(from(&sent[1].0).contains("Lars Pehrsson") && from(&sent[1].0).contains("<shop@store.example>"), "no name of its own: the account's: {}", from(&sent[1].0));
+        assert!(from(&sent[2].0).contains("<lars@pehrsson.info>"), "{}", from(&sent[2].0));
+        assert!(sent.iter().all(|(_, env)| env == "lars@pehrsson.info"), "the account's own address as the envelope sender");
+        // An address that isn't the account's (or no longer is): not sent.
+        assert!(core.send_message(req(Some(9999))).await.is_err());
+
+        // A reply goes out from the address the mail came to, and leaves all of them out.
+        let inbox = core.store.folders(acct.id).unwrap().into_iter().find(|f| f.raw_name == "INBOX").unwrap().id;
+        let none = std::collections::HashMap::new();
+        let mail = |uid: u32, to: &str, delivered: &str| {
+            let rec = HeaderRecord { uid, subject: format!("m{uid}"), from_addr: "bob@example.org".into(), to_addrs: to.into(), date: 1_800_000_000, ..Default::default() };
+            core.store.upsert_headers(acct.id, inbox, &[rec], &none).unwrap();
+            let id = core.store.message_ids_for_uids(inbox, &[uid]).unwrap()[0];
+            let raw = format!("{delivered}From: Bob <bob@example.org>\r\nTo: {to}\r\nCc: lars@pehrsson.au, ann@example.org\r\nSubject: m{uid}\r\nContent-Type: text/plain\r\n\r\nHello\r\n");
+            core.store.store_body(id, raw.as_bytes(), None, false, None).unwrap();
+            id
+        };
+        let to_shop = mail(1, "shop@store.example", "");
+        let ctx = core.reply_context(to_shop, ReplyMode::ReplyAll).await.unwrap();
+        assert_eq!(ctx.from_identity, Some(shop));
+        let all: Vec<String> = ctx.to.iter().chain(&ctx.cc).map(|a| a.addr.clone()).collect();
+        assert_eq!(all, ["bob@example.org", "ann@example.org"], "none of the account's addresses");
+        // Came to the account's own address: answered from it.
+        let to_me = mail(2, "lars@pehrsson.info", "");
+        assert_eq!(core.reply_context(to_me, ReplyMode::Reply).await.unwrap().from_identity, Some(au), "Cc has .au: that one");
+        // Only the server's note says where it came to (a catch-all, Bcc): that domain's.
+        let bcc = mail(3, "list@lists.example", "Delivered-To: webshop@pehrsson.au\r\n");
+        assert_eq!(core.reply_context(bcc, ReplyMode::Reply).await.unwrap().from_identity, Some(au));
+
+        // Removing the account removes its addresses.
+        core.delete_identity(au).unwrap();
+        assert_eq!(core.identities().unwrap().len(), 1);
+        core.store.delete_account(acct.id).unwrap();
+        assert!(core.identities().unwrap().is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

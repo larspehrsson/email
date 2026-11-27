@@ -32,6 +32,7 @@ import { AccountTools } from './AccountTools';
 import { fmtNum, fmtSize, loadPref, savePref, smartDate } from '../lib/format';
 import { AccountDot } from './FolderSwitcher';
 import { SignaturesSection } from './SignatureSettings';
+import { SendAsGroup } from './SendAs';
 import { autoUpdates, checkForUpdate, restartToUpdate, setAutoUpdates, updateStatus } from '../lib/updates';
 import { AiSection } from './AiSettings';
 
@@ -600,26 +601,9 @@ function AccountCard(props: { d: AccountDetails; open: boolean; onToggle: () => 
       setBusy(false);
     }
   };
-  // The name mail is sent under; the address alone is stored as the address itself.
+  // The name mail from the account's own address is sent under (edited in Send as); the
+  // address alone is stored as the address itself.
   const [name, setName] = createSignal(props.d.displayName === props.d.email ? '' : props.d.displayName);
-  const [editingName, setEditingName] = createSignal(false);
-  const [nameDraft, setNameDraft] = createSignal('');
-  const saveName = async (e: Event) => {
-    e.preventDefault();
-    if (busy()) return;
-    setBusy(true);
-    setMsg(null);
-    try {
-      await api.setDisplayName(props.d.id, nameDraft());
-      setName(nameDraft().trim());
-      setEditingName(false);
-      void reloadAccounts(); // the composer's From and the rail follow
-    } catch (err) {
-      setMsg({ text: errorMessage(err), error: true });
-    } finally {
-      setBusy(false);
-    }
-  };
   const summary = () => {
     const st = stored();
     return st ? `${fmtNum(st.messages)} ${st.messages === 1 ? 'message' : 'messages'} · ${fmtSize(st.localBytes)} local` : '';
@@ -641,42 +625,10 @@ function AccountCard(props: { d: AccountDetails; open: boolean; onToggle: () => 
       </button>
       <Show when={props.open}>
         <Group title="You">
-      <Field label="Your name">
-        <Show
-          when={editingName()}
-          fallback={
-            // the name itself is the button (no separate "Change…")
-            <button
-              class="st-editable"
-              classList={{ 'link-btn': !name() }}
-              title="Click to change the name your mail is sent under"
-              onClick={() => (setNameDraft(name()), setEditingName(true), setMsg(null))}
-            >
-              {name() || 'Add your name'}
-            </button>
-          }
-        >
-          <form class="st-pw" onSubmit={saveName}>
-            <input
-              class="st-input"
-              type="text"
-              placeholder="Jane Appleseed"
-              autocomplete="name"
-              value={nameDraft()}
-              ref={(el) => queueMicrotask(() => (el.focus(), el.select()))}
-              onInput={(e) => setNameDraft(e.currentTarget.value)}
-              onKeyDown={(e) => e.key === 'Escape' && (e.stopPropagation(), setEditingName(false))}
-            />
-            <button class="btn primary st-pw-save" type="submit" disabled={busy() || nameDraft().trim() === name()}>
-              Save
-            </button>
-            <button class="btn secondary" type="button" onClick={() => setEditingName(false)}>
-              Cancel
-            </button>
-          </form>
-        </Show>
-      </Field>
       <Show when={account()}>{(a) => <MarkField account={a()} onError={(text) => setMsg({ text, error: true })} />}</Show>
+        </Group>
+        <Group title="Send as">
+          <SendAsGroup accountId={props.d.id} email={props.d.email} name={name()} onRename={setName} />
         </Group>
         <Group title="Server">
       <Field label="Incoming (IMAP)">

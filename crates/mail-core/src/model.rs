@@ -470,6 +470,9 @@ pub struct SendRequest {
     /// The draft this comes from: discarded once the message is queued.
     #[serde(default)]
     pub draft_id: Option<i64>,
+    /// Send as this other address of the account (`identities`); None: its own address.
+    #[serde(default)]
+    pub from_identity: Option<i64>,
     /// `save_draft`: list it in Drafts (false until the user has changed something: a reply
     /// opened and closed again isn't a draft).
     #[serde(default = "yes")]
@@ -508,6 +511,8 @@ pub struct ReplyContext {
     pub forwarding: Option<i64>,
     /// Forward: the original's attachments, sent along unless removed (`forward_attachments`).
     pub attachments: Vec<Attachment>,
+    /// The address to answer from (see `identities::for_reply`); None: the account's own.
+    pub from_identity: Option<i64>,
 }
 
 /// A queued message: `id` for `cancel_send`, sent at `send_at` (ms) unless taken back.

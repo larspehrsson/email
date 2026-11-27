@@ -64,6 +64,27 @@ async function choose(box, label) {
   await menu.getByRole('option', { name: label, exact: true }).click();
   await menu.waitFor({ state: 'detached' });
 }
+/** Settings (open) › Accounts: an account's (by its place) card, opened if it isn't. */
+async function accountCard(page, account = 0) {
+  await page.locator('.st-nav-item', { hasText: 'Accounts' }).click();
+  const card = page.locator('.st-acct').nth(account);
+  await card.waitFor();
+  if (!(await card.evaluate((e) => e.classList.contains('open')))) await card.locator('.st-acct-head').click();
+  await card.locator('.sa-list').waitFor();
+  return card;
+}
+/** Settings (open) › Accounts › Send as: the signature of an account's own address (row 0) or
+ *  another of its addresses, for new messages or replies. */
+async function setSendAsSignature(page, label, { account = 0, row = 0, which = 'new' } = {}) {
+  const card = await accountCard(page, account);
+  await choose(card.locator('.sel.sa-sig').nth(row * 2 + (which === 'new' ? 0 : 1)), label);
+  await page.waitForTimeout(250);
+}
+/** An account's Send as signatures as shown: [own new, own replies, next address new, …]. */
+async function sendAsSignatures(page, account = 0) {
+  const card = await accountCard(page, account);
+  return card.locator('.sel.sa-sig .sel-text').allTextContents();
+}
 /** The options of one of our drop-downs, opened and closed again. */
 async function optionsOf(box) {
   await box.click();
@@ -1545,9 +1566,7 @@ describe('signatures', () => {
       await page.waitForTimeout(700);
       assert.deepEqual(await page.locator('.sig-item').allTextContents(), ['Work', 'Short']);
       // Work: the first account's new messages.
-      await page.locator('.sig-item', { hasText: 'Work' }).click();
-      await page.locator('.sig-use input[type="checkbox"]').first().check();
-      await page.waitForTimeout(200);
+      await setSendAsSignature(page, 'Work');
       await page.keyboard.press('Escape');
       const popup = context.waitForEvent('page');
       await page.keyboard.press('c');
@@ -1572,7 +1591,7 @@ describe('signatures', () => {
 });
 
 describe('signature defaults', () => {
-  test("choosing one account's default leaves the others' as they were", async () => {
+  test("each address's signatures are chosen in Send as; one account's leave the others' as they were", async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {
       await page.keyboard.press(process.platform === 'darwin' ? 'Meta+,' : 'Control+,');
@@ -1583,44 +1602,92 @@ describe('signature defaults', () => {
         await page.locator('.sig-name').fill(name);
         await page.waitForTimeout(650);
       }
-      // Each signature's boxes: [account 1 new, account 1 replies, account 2 new, account 2 replies].
-      const boxes = page.locator('.sig-use input[type="checkbox"]');
-      const checked = () => boxes.evaluateAll((els) => els.slice(0, 4).map((e) => e.checked));
-      const show = async (name) => {
-        await page.locator('.sig-item', { hasText: name }).click();
-        await page.waitForTimeout(150);
-      };
-      await show('Home');
-      assert.ok((await boxes.count()) >= 4, 'two accounts, two choices each');
-      await boxes.nth(0).check();
-      await page.waitForTimeout(250);
-      await boxes.nth(3).check();
-      await page.waitForTimeout(250);
-      await show('Short');
-      await boxes.nth(1).check();
-      await page.waitForTimeout(250);
-      await show('Work');
-      // Where another signature is the default, it says which.
-      assert.match(await page.locator('.sig-use-cell').nth(0).textContent(), /now Home/);
-      await boxes.nth(2).check();
-      await page.waitForTimeout(400);
-      assert.deepEqual(await checked(), [false, false, true, false]);
-      await show('Home');
-      assert.deepEqual(await checked(), [true, false, false, true]);
-      await show('Short');
-      assert.deepEqual(await checked(), [false, true, false, false]);
+      assert.equal(await page.locator('.sig-use').count(), 0, 'chosen in Accounts now, not here');
+      await setSendAsSignature(page, 'Home', { account: 0, which: 'new' });
+      await setSendAsSignature(page, 'Short', { account: 0, which: 'reply' });
+      await setSendAsSignature(page, 'Home', { account: 1, which: 'reply' });
+      await setSendAsSignature(page, 'Work', { account: 1, which: 'new' });
+      assert.deepEqual(await sendAsSignatures(page, 0), ['Home', 'Short']);
+      assert.deepEqual(await sendAsSignatures(page, 1), ['Work', 'Home']);
+      // Another address of the first account: the account's until it has its own.
+      const card = await accountCard(page, 0);
+      await card.locator('.sa-add').click();
+      await card.locator('.sa-new input[type=email]').fill('me@alias.example');
+      await card.locator('.sa-new button[type=submit]').click();
+      await page.waitForTimeout(300);
+      assert.deepEqual(await sendAsSignatures(page, 0), ['Home', 'Short', 'As the account', 'As the account']);
+      await setSendAsSignature(page, 'Work', { account: 0, row: 1, which: 'reply' });
+      assert.deepEqual(await sendAsSignatures(page, 0), ['Home', 'Short', 'As the account', 'Work']);
       // The list shows where each is used.
+      await page.locator('.st-nav-item', { hasText: 'Signatures' }).click();
       assert.equal(await page.locator('.sig-item', { hasText: 'Home' }).locator('.acct-dot').count(), 2);
-      // Taking an account's default for one signature takes it from the other.
-      await boxes.nth(0).check();
-      await page.waitForTimeout(400);
-      await show('Home');
-      assert.deepEqual(await checked(), [false, false, false, true]);
-      // Renaming a signature (the list reloads) changes no one's choice either.
-      await show('Work');
+      // Renaming a signature (the list reloads) changes no one's choice.
+      await page.locator('.sig-item', { hasText: 'Work' }).click();
       await page.locator('.sig-name').fill('Work 2');
       await page.waitForTimeout(800);
-      assert.deepEqual(await checked(), [false, false, true, false]);
+      assert.deepEqual(await sendAsSignatures(page, 1), ['Work 2', 'Home']);
+      assert.deepEqual(await sendAsSignatures(page, 0), ['Home', 'Short', 'As the account', 'Work 2']);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('send as', () => {
+  test("another address: made the default in Settings, it's what new mail is from, with its name and signature", async () => {
+    const { page, errors, context, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+,' : 'Control+,');
+      await page.locator('.st-nav-item', { hasText: 'Signatures' }).click();
+      for (const name of ['Work', 'Alias']) {
+        await page.locator('.sig-add').click();
+        await page.waitForTimeout(150);
+        await page.locator('.sig-name').fill(name);
+        await page.waitForTimeout(650);
+      }
+      await setSendAsSignature(page, 'Work');
+      // The account's own name is edited in its row.
+      const card = await accountCard(page, 0);
+      const ownName = card.locator('.sa-name').first();
+      await ownName.fill('John Q Doe');
+      await ownName.press('Tab');
+      await page.waitForTimeout(200);
+      await page.locator('.st-nav-item', { hasText: 'Signatures' }).click();
+      assert.equal(await (await accountCard(page, 0)).locator('.sa-name').first().inputValue(), 'John Q Doe', 'kept');
+      // Another address: the first one added becomes the default.
+      await card.locator('.sa-add').click();
+      await card.locator('.sa-new input[type=email]').fill('me@alias.example');
+      await card.locator('.sa-new input[type=text]').fill('Johnny');
+      await card.locator('.sa-new button[type=submit]').click();
+      await page.waitForTimeout(300);
+      const radios = card.locator('.sa-list input[type=radio]');
+      assert.deepEqual(await radios.evaluateAll((els) => els.map((e) => e.checked)), [false, true]);
+      await setSendAsSignature(page, 'Alias', { row: 1 });
+      // A bad address isn't taken.
+      await card.locator('.sa-add').click();
+      await card.locator('.sa-new input[type=email]').fill('not an address');
+      await card.locator('.sa-new button[type=submit]').click();
+      await card.locator('.sa-list .st-status.error').waitFor();
+      await card.locator('.sa-new .btn', { hasText: 'Cancel' }).click();
+      await page.keyboard.press('Escape');
+
+      const popup = context.waitForEvent('page');
+      await page.keyboard.press('c');
+      const w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      const fromBox = w.locator('.sel.cmp-select');
+      await fromBox.waitFor();
+      // From shows who it goes out as: the name with the address.
+      await hasText(fromBox.locator('.sel-text'), 'Johnny <me@alias.example>', 'the default');
+      await hasText(w.locator('.sel.cmp-sig-select .sel-text'), 'Alias', 'its signature');
+      const opts = await optionsOf(fromBox);
+      // (The demo keeps account names apart in each window: the name as this one has it.)
+      const own = opts.find((o) => o.endsWith(' <john.doe@example.com>'));
+      assert.ok(own && opts.includes('Johnny <me@alias.example>'), opts.join(' | '));
+      // The account's own address: its name, and its signature.
+      await choose(fromBox, own);
+      await hasText(w.locator('.sel.cmp-sig-select .sel-text'), 'Work', 'the account\'s signature');
       assert.deepEqual(errors, []);
     } finally {
       await close();
@@ -1647,8 +1714,7 @@ describe('signature html', () => {
       await page.locator('.confirm-backdrop').waitFor();
       await page.locator('.confirm-backdrop .btn', { hasText: 'Cancel' }).click();
       assert.equal(await page.locator('textarea.sig-html').count(), 1, 'still HTML');
-      await page.locator('.sig-use input[type="checkbox"]').first().check();
-      await page.waitForTimeout(200);
+      await setSendAsSignature(page, 'Signature');
       await page.keyboard.press('Escape');
       const popup = context.waitForEvent('page');
       await page.keyboard.press('c');
@@ -1738,8 +1804,7 @@ describe('signature pictures', () => {
       // (ProseMirror puts spacer <img>s of its own around inline nodes: count pictures.)
       await page.waitForFunction(() => document.querySelectorAll('.sig-editor img[src^="data:"]').length === 2);
       await page.waitForTimeout(800);
-      await page.locator('.sig-use input[type="checkbox"]').first().check();
-      await page.waitForTimeout(200);
+      await setSendAsSignature(page, 'Signature');
       await page.keyboard.press('Escape');
       const popup = context.waitForEvent('page');
       await page.keyboard.press('c');

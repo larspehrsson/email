@@ -203,6 +203,16 @@ CREATE TABLE IF NOT EXISTS signatures (
     html     TEXT NOT NULL,
     position INTEGER NOT NULL
 );
+-- Other addresses an account sends as (see crate::identities).
+CREATE TABLE IF NOT EXISTS identities (
+    id         INTEGER PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    email      TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    new_sig    INTEGER REFERENCES signatures(id) ON DELETE SET NULL,
+    reply_sig  INTEGER REFERENCES signatures(id) ON DELETE SET NULL,
+    is_default INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS signature_defaults (
     account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
     new_id     INTEGER REFERENCES signatures(id) ON DELETE SET NULL,
@@ -2534,6 +2544,54 @@ impl Store {
             .query_row("SELECT keep_attachments FROM accounts WHERE id=?1", [account_id], |r| r.get(0))
             .optional()?
             .unwrap_or(false))
+    }
+
+    /// Every account's other addresses, each account's in the order added.
+    pub fn identities(&self) -> Result<Vec<crate::identities::Identity>> {
+        let db = self.rdb();
+        let mut stmt = db.prepare_cached("SELECT id, account_id, email, name, new_sig, reply_sig, is_default FROM identities ORDER BY account_id, id")?;
+        let rows = stmt.query_map([], |r| {
+            Ok(crate::identities::Identity {
+                id: r.get(0)?,
+                account_id: r.get(1)?,
+                email: r.get(2)?,
+                name: r.get(3)?,
+                new_signature_id: r.get(4)?,
+                reply_signature_id: r.get(5)?,
+                is_default: r.get(6)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Add (`id` 0) or change an identity, already checked. Returns its id. As the default, the
+    /// account's others stop being it.
+    pub fn save_identity(&self, i: &crate::identities::Identity) -> Result<i64> {
+        let mut db = self.db();
+        let tx = db.transaction()?;
+        let id = if i.id == 0 {
+            tx.execute(
+                "INSERT INTO identities (account_id, email, name, new_sig, reply_sig, is_default) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![i.account_id, i.email, i.name, i.new_signature_id, i.reply_signature_id, i.is_default],
+            )?;
+            tx.last_insert_rowid()
+        } else {
+            tx.execute(
+                "UPDATE identities SET email=?2, name=?3, new_sig=?4, reply_sig=?5, is_default=?6 WHERE id=?1 AND account_id=?7",
+                params![i.id, i.email, i.name, i.new_signature_id, i.reply_signature_id, i.is_default, i.account_id],
+            )?;
+            i.id
+        };
+        if i.is_default {
+            tx.execute("UPDATE identities SET is_default=0 WHERE account_id=?1 AND id<>?2", params![i.account_id, id])?;
+        }
+        tx.commit()?;
+        Ok(id)
+    }
+
+    pub fn delete_identity(&self, id: i64) -> Result<()> {
+        self.db().execute("DELETE FROM identities WHERE id=?1", [id])?;
+        Ok(())
     }
 
     pub fn set_display_name(&self, account_id: i64, name: &str) -> Result<()> {

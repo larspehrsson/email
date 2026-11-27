@@ -5,6 +5,7 @@
 // or `?limited` for a connection-limit refusal.
 
 import type {
+  Identity,
   Account,
   AddAccountArgs,
   Attachment,
@@ -635,6 +636,15 @@ export function createMockBackend(): Backend {
   /** Settings › General › Privacy: pictures that only load over plain http */
   let httpPictures = true;
   let attachmentSearch = false;
+  // Other addresses to send as: kept like the signatures, so every window sees the same.
+  const idLoad = (): Identity[] => {
+    try {
+      return JSON.parse(localStorage.getItem('mock.identities') ?? '[]') as Identity[];
+    } catch {
+      return [];
+    }
+  };
+  const idSave = (l: Identity[]) => localStorage.setItem('mock.identities', JSON.stringify(l));
   /** "Always from this sender": lowercase addresses */
   const remoteSenders = new Set<string>();
   /** resolves a pending mock browser sign-in as cancelled */
@@ -2348,6 +2358,32 @@ export function createMockBackend(): Backend {
     async ai_cancel({ requestId }) {
       aiCancelled.add(requestId);
     },
+    async identities() {
+      await sleep(3);
+      return idLoad();
+    },
+    async save_identity({ identity }) {
+      await sleep(3);
+      const email = identity.email.trim();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw `“${email}” isn't an email address.`;
+      const l = idLoad();
+      if (identity.isDefault) for (const x of l) if (x.accountId === identity.accountId) x.isDefault = false;
+      let id = identity.id;
+      if (id) {
+        const x = l.find((y) => y.id === id);
+        if (!x) throw 'That address is no longer there.';
+        Object.assign(x, { ...identity, email, name: identity.name.trim() });
+      } else {
+        id = Math.max(0, ...l.map((y) => y.id)) + 1;
+        l.push({ ...identity, id, email, name: identity.name.trim() });
+      }
+      idSave(l);
+      return id;
+    },
+    async delete_identity({ id }) {
+      await sleep(3);
+      idSave(idLoad().filter((x) => x.id !== id));
+    },
     async list_signatures() {
       await sleep(3);
       const st = sigLoad();
@@ -2736,6 +2772,7 @@ export function createMockBackend(): Backend {
           replyingTo: null,
           forwarding: id,
           attachments: d.attachments,
+          fromIdentity: idLoad().find((x) => x.accountId === acc.id && x.isDefault)?.id ?? null,
         };
       }
       const me = acc.email.toLowerCase();
@@ -2750,6 +2787,7 @@ export function createMockBackend(): Backend {
         replyingTo: id,
         forwarding: null,
         attachments: [],
+        fromIdentity: idLoad().find((x) => x.accountId === acc.id && x.isDefault)?.id ?? null,
       };
     },
     async cancel_send({ id }) {

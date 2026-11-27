@@ -45,6 +45,20 @@ fn addr_list(a: Option<&Address>) -> Vec<Addr> {
 }
 
 /// The Reply-To addresses of a raw message (empty if none).
+/// The addresses a message was delivered to, as the receiving server noted them
+/// (Delivered-To, X-Original-To, Envelope-To): who it came to when that isn't in To or Cc
+/// (Bcc, a mailing list, a catch-all).
+pub fn delivered_to(raw: &[u8]) -> Vec<String> {
+    let Some(msg) = MessageParser::default().parse_headers(raw) else { return Vec::new() };
+    msg.headers()
+        .iter()
+        .filter(|h| ["delivered-to", "x-original-to", "envelope-to"].iter().any(|n| h.name.as_str().eq_ignore_ascii_case(n)))
+        .filter_map(|h| raw.get(h.offset_start as usize..h.offset_end as usize))
+        .map(|v| String::from_utf8_lossy(v).trim().trim_start_matches('<').trim_end_matches('>').trim().to_string())
+        .filter(|a| a.contains('@'))
+        .collect()
+}
+
 pub fn reply_to(raw: &[u8]) -> Vec<Addr> {
     mail_parser::MessageParser::default().parse(raw).map(|m| addr_list(m.reply_to())).unwrap_or_default()
 }

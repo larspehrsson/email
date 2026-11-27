@@ -347,6 +347,17 @@ export interface Signatures {
   signatures: Signature[];
   defaults: SignatureDefaults[];
 }
+/** Another address an account sends as (an alias, a catch-all domain's): its own name and
+ *  default signatures (null: the account's). */
+export interface Identity {
+  id: number;
+  accountId: number;
+  email: string;
+  name: string;
+  newSignatureId: number | null;
+  replySignatureId: number | null;
+  isDefault: boolean;
+}
 
 /** A run of rows in a sorted list: a sender, a recipient, or (by date, label null) a period. */
 export interface ListGroup {
@@ -485,6 +496,8 @@ export interface SelectionInfo {
 }
 
 export interface SendRequest {
+  /** send as this other address of the account (`Identity`); null: its own */
+  fromIdentity?: number | null;
   /** whole messages to send along as .eml attachments (forwarding several at once) */
   forwardMessages?: number[];
   accountId: number;
@@ -572,6 +585,8 @@ export interface ReplyContext {
   forwarding: number | null;
   /** forward: the original's attachments (sent along unless removed) */
   attachments: Attachment[];
+  /** the address to answer from (the one it came to, else the default); null: the account's own */
+  fromIdentity: number | null;
 }
 
 /** queued: sent at `sendAt` (ms) unless taken back with cancel_send(id) */
@@ -668,6 +683,9 @@ export interface CommandMap {
   open_folder: { args: { folderId: number }; ret: void };
   list_messages: { args: { folderId: number; offset: number; limit: number; sort: ListSort; filter?: ListFilter }; ret: MessagePage };
   list_signatures: { args: undefined; ret: Signatures };
+  identities: { args: undefined; ret: Identity[] };
+  save_identity: { args: { identity: Identity }; ret: number };
+  delete_identity: { args: { id: number }; ret: void };
   list_cards: { args: undefined; ret: Card[] };
   save_card: { args: { card: Card }; ret: number };
   delete_card: { args: { id: number }; ret: void };

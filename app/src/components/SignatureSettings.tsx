@@ -6,7 +6,7 @@ import Placeholder from '@tiptap/extension-placeholder';
 import Image from '@tiptap/extension-image';
 import { api, errorMessage } from '../api';
 import { accounts } from '../state';
-import { loadSignatures, pictureForSignature, reloadSignatures, setDefaultsHere, sigs } from '../lib/signatures';
+import { loadSignatures, pictureForSignature, reloadSignatures, sigs } from '../lib/signatures';
 import { confirmDialog } from './Actions';
 import { MOD } from '../lib/shortcuts';
 import { AccountDot } from './FolderSwitcher';
@@ -207,17 +207,6 @@ export function SignaturesSection() {
   const defaults = (accountId: number) => sigs().defaults.find((d) => d.accountId === accountId);
   /** The accounts a signature is a default for (new messages, replies or both). */
   const usedBy = (id: number) => (accounts() ?? []).filter((a) => defaults(a.id)?.newId === id || defaults(a.id)?.replyId === id);
-  async function setDefault(accountId: number, which: 'newId' | 'replyId', id: number | null) {
-    const d = defaults(accountId);
-    const next = { newId: d?.newId ?? null, replyId: d?.replyId ?? null, [which]: id };
-    setDefaultsHere(accountId, next.newId, next.replyId);
-    try {
-      await api.setSignatureDefaults(accountId, next.newId, next.replyId);
-      await reloadSignatures();
-    } catch (e) {
-      setMsg(errorMessage(e));
-    }
-  }
 
   const fmt = (label: string, mark: string, key: string, run: (e: Editor) => void) => (
     <button
@@ -341,47 +330,7 @@ export function SignaturesSection() {
             <div class="sig-preview" innerHTML={savedHtml()} />
           </Show>
           <Show when={current() == null}>
-            <p class="st-muted sig-none">No signatures yet. Add one, then choose the accounts it’s for.</p>
-          </Show>
-          <Show when={current()}>
-            {(id) => (
-              <div class="sig-use" role="group" aria-label="Use this signature by default">
-                <span class="sig-use-title">Use for</span>
-                <span class="sig-use-col">New messages</span>
-                <span class="sig-use-col">Replies and forwards</span>
-                <For each={accounts() ?? []}>
-                  {(a) => (
-                    <>
-                      <span class="sig-use-acct" title={a.email}>
-                        <AccountDot account={a} size={12} />
-                        <span>{a.email}</span>
-                      </span>
-                      <For each={['newId', 'replyId'] as const}>
-                        {(which) => {
-                          const on = () => defaults(a.id)?.[which] === id();
-                          // Another signature is the default there now: this one would take its place.
-                          const other = () => {
-                            const o = defaults(a.id)?.[which];
-                            return o != null && o !== id() ? sigs().signatures.find((x) => x.id === o)?.name : undefined;
-                          };
-                          return (
-                            <label class="sig-use-cell" title={other() ? `Instead of ${other()}` : undefined}>
-                              <input
-                                type="checkbox"
-                                checked={on()}
-                                aria-label={`${a.email}: ${which === 'newId' ? 'new messages' : 'replies and forwards'}`}
-                                onChange={(e) => void setDefault(a.id, which, e.currentTarget.checked ? id() : null)}
-                              />
-                              <Show when={other()}>{(n) => <span class="sig-use-other">now {n()}</span>}</Show>
-                            </label>
-                          );
-                        }}
-                      </For>
-                    </>
-                  )}
-                </For>
-              </div>
-            )}
+            <p class="st-muted sig-none">No signatures yet. Add one, then choose where it’s used in Settings › Accounts › Send as.</p>
           </Show>
         </div>
       </div>

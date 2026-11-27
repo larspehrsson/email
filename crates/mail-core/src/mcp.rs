@@ -564,9 +564,18 @@ async fn compose<H: Host>(core: &Core, _host: &H, s: &Settings, a: &Args<'_>) ->
         }
     }
     let subject = a.str("subject").filter(|x| !x.trim().is_empty()).or_else(|| ctx.as_ref().map(|c| c.subject.clone())).unwrap_or_default();
-    // The account's default signature for new messages or for replies and forwards.
+    // Sent as: for a reply or forward, the address it came to; else the account's default.
+    let ids: Vec<crate::identities::Identity> = core.identities()?.into_iter().filter(|i| i.account_id == account_id).collect();
+    let from_identity = match &ctx {
+        Some(c) if c.account_id == account_id => c.from_identity,
+        _ => crate::identities::default(&ids),
+    };
+    let identity = ids.iter().find(|i| Some(i.id) == from_identity);
+    // That address's default signature (or the account's) for new messages or for replies and
+    // forwards.
     let sigs = core.signatures()?;
-    let default = sigs.defaults.iter().find(|d| d.account_id == account_id).and_then(|d| if original.is_some() { d.reply_id } else { d.new_id });
+    let own = identity.and_then(|i| if original.is_some() { i.reply_signature_id } else { i.new_signature_id });
+    let default = own.or_else(|| sigs.defaults.iter().find(|d| d.account_id == account_id).and_then(|d| if original.is_some() { d.reply_id } else { d.new_id }));
     let signature = default.and_then(|id| sigs.signatures.iter().find(|x| x.id == id));
     let text_html = text_to_html(&body);
     let mut html = text_html.clone();
@@ -582,6 +591,7 @@ async fn compose<H: Host>(core: &Core, _host: &H, s: &Settings, a: &Args<'_>) ->
     let state = json!({
         "mode": mode,
         "accountId": account_id,
+        "fromIdentity": from_identity,
         "to": to, "cc": cc, "bcc": bcc,
         "showCc": !cc.is_empty() || !bcc.is_empty(),
         "subject": subject,
@@ -608,6 +618,7 @@ async fn compose<H: Host>(core: &Core, _host: &H, s: &Settings, a: &Args<'_>) ->
         forward_messages: vec![],
         draft: Some(state.clone()),
         draft_id: None,
+        from_identity,
         listed: true,
         replaces: None,
     };
