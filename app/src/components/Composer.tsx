@@ -34,6 +34,7 @@ import { buildSrcdoc } from './Reader';
 import { fmtSize } from '../lib/format';
 import { showToast } from './Toast';
 import { defaultSignature, loadSignatures, signatureById, sigs } from '../lib/signatures';
+import { identities, identityById, loadIdentities } from '../lib/identities';
 import { AiPanel } from './AiPanel';
 
 /** The quoted original under the text: read-only, at the composer's margins. */
@@ -578,6 +579,19 @@ export function Composer() {
 
   const accountList = () => accounts() ?? [];
   const from = () => accountList().find((a) => a.id === c().accountId);
+  onMount(() => void loadIdentities().catch(() => {}));
+  // Every address mail can go out from: each account's own, then its others.
+  const fromKey = (accountId: number, identity: number | null | undefined) => `${accountId}:${identity ?? ''}`;
+  // Shown as it goes out: the name with the address (the account's name where the address
+  // has none of its own; an account without a name is stored with its address as the name).
+  const asSent = (name: string | undefined, email: string) => (name && name.trim() && name.trim() !== email ? `${name.trim()} <${email}>` : email);
+  const fromOptions = () =>
+    accountList().flatMap((a) => [
+      { value: fromKey(a.id, null), label: asSent(a.displayName, a.email) },
+      ...identities()
+        .filter((i) => i.accountId === a.id)
+        .map((i) => ({ value: fromKey(a.id, i.id), label: asSent(i.name || a.displayName, i.email) })),
+    ]);
 
   // Signatures: the one picked shows under the text (it isn't part of the editor, so switching
   // never touches what's written). Another account: its default, unless one was picked by hand.
@@ -586,13 +600,18 @@ export function Composer() {
     const s = signatureById(id);
     updateCompose({ signatureId: s?.id ?? null, signatureHtml: s?.html ?? null });
   };
-  const changeAccount = (accountId: number) => {
+  /** Another address to send from (perhaps another account's): its default signature, unless
+   *  one was picked by hand. */
+  const changeFrom = (key: string) => {
+    const [a, i] = key.split(':');
+    const accountId = Number(a);
+    const fromIdentity = i ? Number(i) : null;
     const cur = c();
     const reply = cur.mode !== 'new';
-    const was = defaultSignature(sigs(), cur.accountId, reply);
-    if ((cur.signatureId ?? null) !== (was?.id ?? null)) return updateCompose({ accountId });
-    const next = defaultSignature(sigs(), accountId, reply);
-    updateCompose({ accountId, signatureId: next?.id ?? null, signatureHtml: next?.html ?? null });
+    const was = defaultSignature(sigs(), cur.accountId, reply, identityById(cur.fromIdentity));
+    if ((cur.signatureId ?? null) !== (was?.id ?? null)) return updateCompose({ accountId, fromIdentity });
+    const next = defaultSignature(sigs(), accountId, reply, identityById(fromIdentity));
+    updateCompose({ accountId, fromIdentity, signatureId: next?.id ?? null, signatureHtml: next?.html ?? null });
   };
 
   // Reply ⇄ Reply all: the recipients each would fill in, to switch between them.
@@ -692,16 +711,16 @@ export function Composer() {
         <div class="cmp-row">
           <label class="cmp-label">From</label>
           <Show
-            when={accountList().length > 1}
-            fallback={<span class="cmp-from">{from()?.email ?? ''}</span>}
+            when={fromOptions().length > 1}
+            fallback={<span class="cmp-from">{from() ? asSent(from()!.displayName, from()!.email) : ''}</span>}
           >
             <Select
               class="cmp-select"
               variant="plain"
               label="From"
-              value={c().accountId}
-              options={accountList().map((a) => ({ value: a.id, label: a.email }))}
-              onChange={(id) => changeAccount(id)}
+              value={fromKey(c().accountId, c().fromIdentity)}
+              options={fromOptions()}
+              onChange={(key) => changeFrom(key)}
             />
           </Show>
         </div>
@@ -754,8 +773,12 @@ export function Composer() {
           context={() => {
             const cur = c();
             const a = from();
+            // The writing help writes as whoever the mail is from.
+            const i = identityById(cur.fromIdentity);
+            const name = i?.name || a?.displayName;
+            const email = i?.email ?? a?.email;
             return {
-              me: a ? (a.displayName ? `${a.displayName} <${a.email}>` : a.email) : '',
+              me: email ? (name ? `${name} <${email}>` : email) : '',
               subject: cur.subject,
               to: [...cur.to, ...cur.cc].map((x) => (x.name ? `${x.name} <${x.addr}>` : x.addr)),
               html: cur.html,

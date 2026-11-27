@@ -30,6 +30,7 @@ import type {
   McpLogEntry,
   SearchField,
   Signatures,
+  Identity,
   SenderPage,
   Card,
   AiOutcome,
@@ -267,6 +268,11 @@ export const api = {
   setTag: (keyword: string | null, name: string, color: string): Promise<string> => call('set_tag', { keyword, name, color }),
   deleteTag: (keyword: string): Promise<void> => call('delete_tag', { keyword }),
   listSignatures: (): Promise<Signatures> => call('list_signatures', undefined),
+  /** Every account's other addresses to send as. */
+  identities: (): Promise<Identity[]> => call('identities', undefined),
+  /** Add (id 0) or change one; returns its id. */
+  saveIdentity: (identity: Identity): Promise<number> => call('save_identity', { identity }),
+  deleteIdentity: (id: number): Promise<void> => call('delete_identity', { id }),
   /** The address book, by name. */
   listCards: (): Promise<Card[]> => call('list_cards', undefined),
   /** Save a contact (new when its id is 0); returns its id. */

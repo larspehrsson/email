@@ -480,6 +480,7 @@ async fn sent_mail_goes_out_and_into_sent_once() {
             forward_messages: vec![],
             draft: None,
             draft_id: None,
+            from_identity: None,
             listed: true,
             replaces: None,
         })
@@ -536,6 +537,7 @@ async fn a_server_draft_opened_here_and_changed_goes_to_trash() {
         forward_messages: vec![],
         draft: Some(serde_json::json!({ "subject": "Written on the phone", "replaces": old })),
         draft_id: None,
+        from_identity: None,
         listed,
         replaces: Some(old),
     };
@@ -595,6 +597,7 @@ async fn deleting_a_draft_that_replaced_a_server_draft_leaves_that_in_trash() {
         forward_messages: vec![],
         draft: Some(serde_json::json!({ "subject": "Written on the phone", "replaces": old })),
         draft_id: None,
+        from_identity: None,
         listed: true,
         replaces: Some(old),
     };

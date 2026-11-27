@@ -73,8 +73,10 @@ arrives as it's delivered. Conversations are grouped together, even across folde
 **Writing mail** happens in its own window: rich text, pictures pasted into the text,
 attachments by drag and drop, replies quoted below your text, and a switch between Reply and
 Reply all. Addresses are suggested from the people you write to most. Signatures (Settings ›
-Signatures, with pictures pasted in) go under your text, a default per account for new messages
-and for replies, switchable in the message. Sending waits 10 seconds so you can undo it.
+Signatures, with pictures pasted in) go under your text, a default per address for new messages
+and for replies, switchable in the message. An account can send as other addresses too (an
+alias, a catch-all domain's), each with its own name and signatures, one of them the default;
+replies go out from the address the mail came to. Sending waits 10 seconds so you can undo it.
 Drafts open again with a double-click, including ones written on your phone or in another app.
 
 <img src="docs/screenshots/compose.png" alt="A compose window with address suggestions" width="640">

@@ -1,5 +1,5 @@
 import { createSignal } from 'solid-js';
-import { api, type Signature, type Signatures } from '../api';
+import { api, type Identity, type Signature, type Signatures } from '../api';
 import { broadcast, onBroadcast } from './windows';
 import { scalePicture } from './pictures';
 
@@ -42,10 +42,12 @@ export function signatureById(id: number | null | undefined): Signature | undefi
   return id == null ? undefined : sigs().signatures.find((s) => s.id === id);
 }
 
-/** The account's default signature for a new message (`reply` false) or a reply / forward. */
-export function defaultSignature(s: Signatures, accountId: number, reply: boolean): Signature | undefined {
+/** The default signature for a new message (`reply` false) or a reply / forward: the sending
+ *  address's own (`identity`), else the account's. */
+export function defaultSignature(s: Signatures, accountId: number, reply: boolean, identity?: Identity): Signature | undefined {
   const d = s.defaults.find((x) => x.accountId === accountId);
-  const id = reply ? d?.replyId : d?.newId;
+  const own = identity ? (reply ? identity.replySignatureId : identity.newSignatureId) : null;
+  const id = own ?? (reply ? d?.replyId : d?.newId);
   return id == null ? undefined : s.signatures.find((x) => x.id === id);
 }
 

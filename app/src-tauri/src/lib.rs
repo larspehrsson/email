@@ -135,6 +135,21 @@ async fn domain_rules(core: State<'_, Arc<Core>>) -> Res<bool> {
 }
 
 #[tauri::command]
+async fn identities(core: State<'_, Arc<Core>>) -> Res<Vec<mail_core::identities::Identity>> {
+    core.identities().map_err(err)
+}
+
+#[tauri::command]
+async fn save_identity(core: State<'_, Arc<Core>>, identity: mail_core::identities::Identity) -> Res<i64> {
+    core.save_identity(identity).map_err(err)
+}
+
+#[tauri::command]
+async fn delete_identity(core: State<'_, Arc<Core>>, id: i64) -> Res<()> {
+    core.delete_identity(id).map_err(err)
+}
+
+#[tauri::command]
 async fn set_domain_rules(core: State<'_, Arc<Core>>, on: bool) -> Res<()> {
     core.set_domain_rules(on).map_err(err)
 }
@@ -1709,6 +1724,9 @@ pub fn run() {
             remote_senders,
             domain_rules,
             set_domain_rules,
+            identities,
+            save_identity,
+            delete_identity,
             http_pictures,
             set_http_pictures,
             set_remote_sender,
