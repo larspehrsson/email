@@ -87,7 +87,7 @@ function SearchHelp(props: { anchor: HTMLElement; onPick: (q: string) => void; o
           </For>
         </div>
         <p class="sh-note">Words match prefixes as you type (inv → invoice).</p>
-        <p class="sh-note">The Sender / Recipients / Subject / Text chips limit plain words (Text: messages downloaded to this computer, and their attachments' names); All folders / the folder name sets the scope.</p>
+        <p class="sh-note">The Sender / Recipients / Subject / Text chips limit plain words (Text: messages downloaded to this computer, their attachments' names, and the text in their downloaded PDF and text-file attachments); All folders / the folder name sets the scope.</p>
         <div class="sh-foot">
           <button
             class="link-btn"

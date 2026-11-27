@@ -372,6 +372,11 @@ impl Core {
     fn spawn_body_indexer(&self) {
         let store = self.store.clone();
         let spawned = std::thread::Builder::new().name("body-index".into()).spawn(move || {
+            match store.index_attachment_text_once() {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(messages = n, "making the text in attachments searchable"),
+                Err(e) => tracing::warn!("making the text in attachments searchable: {e:#}"),
+            }
             let mut started: Option<(std::time::Instant, usize)> = None;
             loop {
                 match store.index_bodies(100) {
