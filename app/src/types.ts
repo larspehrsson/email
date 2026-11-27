@@ -711,6 +711,7 @@ export interface CommandMap {
   check_now: { args: undefined; ret: void };
   set_read: { args: { id: number; read: boolean }; ret: void };
   open_attachment: { args: { messageId: number; index: number }; ret: void };
+  attachment_matches: { args: { messageId: number; words: string[] }; ret: number[] };
   save_attachment: { args: { messageId: number; index: number }; ret: string };
   save_all_attachments: { args: { messageId: number }; ret: string[] };
   save_attachment_as: { args: { messageId: number; index: number }; ret: string | null };

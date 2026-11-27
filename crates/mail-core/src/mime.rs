@@ -539,6 +539,23 @@ pub fn stored_attachment(raw: &[u8], index: usize) -> Option<(String, String, Ve
     Some((attachment_name(part), part_mime(part), part.contents().to_vec()))
 }
 
+/// Every stored attachment's (name, mime, bytes), in index order.
+pub fn stored_attachment_parts(raw: &[u8]) -> Vec<(String, String, Vec<u8>)> {
+    let Some(msg) = MessageParser::default().parse(raw) else { return Vec::new() };
+    stored_attachments(&msg).into_iter().map(|p| (attachment_name(p), part_mime(p), p.contents().to_vec())).collect()
+}
+
+/// Whether `text` has a word starting with any of `words` (lowercase), as search's prefix
+/// matching finds them.
+pub fn has_word_prefix(text: &str, words: &[String]) -> bool {
+    use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
+    // As search's index has it: no accents (café is cafe), any case.
+    let lower: String = text.nfd().filter(|c| !is_combining_mark(*c)).collect::<String>().to_lowercase();
+    words.iter().filter(|w| !w.is_empty()).any(|w| {
+        lower.match_indices(w.as_str()).any(|(i, _)| !lower[..i].chars().next_back().is_some_and(char::is_alphanumeric))
+    })
+}
+
 /// How many attachments are stored in the raw message (omitted ones are numbered after these).
 pub fn stored_attachment_count(raw: &[u8]) -> usize {
     MessageParser::default().parse(raw).map(|m| stored_attachments(&m).len()).unwrap_or(0)

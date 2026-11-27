@@ -2907,6 +2907,13 @@ body.resizing iframe {
   background: var(--bg-hover);
   border-color: var(--text-4);
 }
+/* While searching: an attachment with a word of the search in it */
+.att-chip.att-match,
+.att-chip.att-match:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-elev));
+}
 .att-chip:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);

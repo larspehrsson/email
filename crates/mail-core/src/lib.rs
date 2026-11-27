@@ -904,6 +904,34 @@ impl Core {
         Ok((part.name.clone(), part.mime.clone(), data))
     }
 
+    /// Which of a message's attachments (their `index`) have one of `words` (lowercase, as
+    /// typed in search) in their name or their text: those stored with the body and those downloaded since.
+    /// Read now, not from the index (a POC: at most a few seconds for a large PDF).
+    pub fn attachment_matches(&self, message_id: i64, words: &[String]) -> Result<Vec<usize>> {
+        let Some(raw) = self.store.body(message_id)? else { return Ok(Vec::new()) };
+        let stored = mime::stored_attachment_parts(&raw);
+        let omitted: Vec<partial::OmittedPart> = self.store.omitted(message_id)?.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
+        let mut files: Vec<(usize, String, String, Vec<u8>)> = Vec::new();
+        let n = stored.len();
+        for (i, (name, mime, data)) in stored.into_iter().enumerate() {
+            files.push((i, name, mime, data));
+        }
+        for idx in self.store.cached_attachment_indices(message_id)? {
+            if let (Some(part), Some(data)) = (idx.checked_sub(n).and_then(|o| omitted.get(o)), self.store.cached_attachment(message_id, idx)?) {
+                files.push((idx, part.name.clone(), part.mime.clone(), data));
+            }
+        }
+        let mut out: Vec<usize> = files
+            .into_iter()
+            .filter(|(_, name, mime, data)| {
+                mime::has_word_prefix(name, words) || mime::attachment_text(name, mime, data).is_some_and(|t| mime::has_word_prefix(&t, words))
+            })
+            .map(|(i, ..)| i)
+            .collect();
+        out.sort_unstable();
+        Ok(out)
+    }
+
     /// The whole message as sent (RFC 822 bytes) and its subject: the stored copy when it's
     /// complete, else downloaded (bodies kept without their attachments). For forwarding as an
     /// attachment.

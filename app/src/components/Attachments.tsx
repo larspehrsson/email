@@ -1,10 +1,35 @@
-import { createEffect, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import { createEffect, createMemo, createResource, createRoot, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { createStore } from 'solid-js/store';
 import { api, errorMessage, type Attachment } from '../api';
 import { fmtSize } from '../lib/format';
 import { showToast } from './Toast';
 import { CloudIcon, DownloadIcon, FileIcon, ImageIcon } from './Icons';
 import { openContextMenu, type MenuItem } from './ContextMenu';
+import { parseQuery } from '../lib/query';
+import { searchActive, searchFields, searchQuery } from '../state';
+
+/** The words of the search being shown that are looked for in attachments (lowercase, no
+ *  accents), a moment after typing stops; none while there's no search. */
+const [attachmentWords, setAttachmentWords] = createSignal<string[]>([]);
+{
+  let t: ReturnType<typeof setTimeout> | undefined;
+  createRoot(() =>
+    createEffect(() => {
+      const words = new Set<string>();
+      if (searchActive()) {
+        for (const term of parseQuery(searchQuery())) {
+          if (term.neg) continue;
+          if (term.field === 'attachment' || (term.field === 'any' && searchFields().includes('attachments'))) term.words.forEach((w) => words.add(w));
+        }
+      }
+      const next = [...words].sort();
+      clearTimeout(t);
+      t = setTimeout(() => {
+        if (next.join(' ') !== attachmentWords().join(' ')) setAttachmentWords(next);
+      }, 300);
+    }),
+  );
+}
 
 export { ToastHost as AttachmentToast } from './Toast';
 
@@ -131,20 +156,21 @@ function attachmentMenu(e: MouseEvent, messageId: number, a: Attachment, list: A
   openContextMenu(e, items);
 }
 
-function Chip(props: { messageId: number; a: Attachment; list: Attachment[] }) {
+function Chip(props: { messageId: number; a: Attachment; list: Attachment[]; match?: boolean }) {
   const b = () => busy[key(props.messageId, props.a)];
   const tip = () =>
     [
       `${props.a.name} · ${sizeLabel(props.a)}`,
       props.a.openable ? 'Click to open · right-click for more' : "Click to save: this file type can't be opened directly",
       !props.a.downloaded ? 'Will be downloaded from the server' : '',
+      props.match ? 'Has a word you searched for' : '',
     ]
       .filter(Boolean)
       .join('\n');
   return (
     <button
       class="att-chip"
-      classList={{ busy: !!b() }}
+      classList={{ busy: !!b(), 'att-match': !!props.match }}
       aria-disabled={!!b()}
       aria-label={`${props.a.openable ? 'Open' : 'Save'} ${props.a.name}, ${fmtSize(props.a.size)}`}
       title={tip()}
@@ -223,6 +249,12 @@ export function AttachmentChips(props: { messageId: number; list: Attachment[] }
     // The chips' widths change once the fonts are in, the row's own size doesn't: fit again.
     void document.fonts?.ready.then(() => fit());
   });
+  // While a search is shown: which of them have a word of it (by name, or in their text).
+  const [matches] = createResource(
+    () => (attachmentWords().length ? { id: props.messageId, words: attachmentWords() } : null),
+    ({ id, words }) => api.attachmentMatches(id, words).catch(() => [] as number[]),
+  );
+  const matched = createMemo(() => new Set(attachmentWords().length ? (matches() ?? []) : []));
   const rest = () => props.list.length - shown();
   const folded = () => rest() > 0;
   return (
@@ -233,7 +265,7 @@ export function AttachmentChips(props: { messageId: number; list: Attachment[] }
       aria-label={`${props.list.length} ${props.list.length === 1 ? 'attachment' : 'attachments'}`}
       onClick={(e) => e.stopPropagation()}
     >
-      <For each={props.list.slice(0, shown())}>{(a) => <Chip messageId={props.messageId} a={a} list={props.list} />}</For>
+      <For each={props.list.slice(0, shown())}>{(a) => <Chip messageId={props.messageId} a={a} list={props.list} match={matched().has(a.index)} />}</For>
       <Show when={folded()}>
         <button
           class="att-chip att-more"
