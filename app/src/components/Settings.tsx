@@ -34,6 +34,7 @@ import { AccountDot } from './FolderSwitcher';
 import { SignaturesSection } from './SignatureSettings';
 import { autoUpdates, checkForUpdate, restartToUpdate, setAutoUpdates, updateStatus } from '../lib/updates';
 import { AiSection } from './AiSettings';
+import { platform } from '../lib/platform';
 
 // Settings: sections on the left, the chosen one on the right (each with its own heading,
 // scrolling and buttons). Fixed size, so switching sections never moves the dialog.
@@ -193,6 +194,17 @@ function ShortcutRow(p: { cmd: Command }) {
 /** The footer's "Restore defaults" menu: which client's keys to start over from. */
 const [presetMenu, setPresetMenu] = createSignal(false);
 
+/** The search over the shortcut list: words that must all be in a command's name, its
+ *  section's or its keys (as shown: "⌘ K", "Shift"). */
+const [keySearch, setKeySearch] = createSignal('');
+const keyWords = () => keySearch().toLowerCase().split(/\s+/).filter(Boolean);
+function keyMatches(sec: { title: string }, cmd: Command): boolean {
+  const words = keyWords();
+  if (!words.length) return true;
+  const hay = [cmd.desc, sec.title, ...keysOf(cmd.id).flatMap((k) => label(k))].join(' ').toLowerCase();
+  return words.every((w) => hay.includes(w));
+}
+
 function KeyboardSection() {
   let menuEl: HTMLDivElement | undefined;
   createEffect(() => {
@@ -210,14 +222,28 @@ function KeyboardSection() {
           Based on {presetName()}’s keys. Click + to add a key (on its own or with {MOD}) and × to remove one.
           Dimmed keys are fixed.
         </p>
+        <input
+          class="st-input st-keys-search"
+          type="search"
+          placeholder="Search shortcuts"
+          aria-label="Search shortcuts"
+          value={keySearch()}
+          // (Esc empties it first, then closes Settings: Settings' own key handler.)
+          onInput={(e) => setKeySearch(e.currentTarget.value)}
+        />
         <For each={COMMANDS}>
           {(sec) => (
-            <section class="st-section">
-              <h4>{sec.title}</h4>
-              <For each={sec.items}>{(cmd) => <ShortcutRow cmd={cmd} />}</For>
-            </section>
+            <Show when={sec.items.some((c) => keyMatches(sec, c))}>
+              <section class="st-section">
+                <h4>{sec.title}</h4>
+                <For each={sec.items.filter((c) => keyMatches(sec, c))}>{(cmd) => <ShortcutRow cmd={cmd} />}</For>
+              </section>
+            </Show>
           )}
         </For>
+        <Show when={!COMMANDS.some((sec) => sec.items.some((c) => keyMatches(sec, c)))}>
+          <p class="st-muted">No shortcuts match “{keySearch().trim()}”.</p>
+        </Show>
       </div>
       <div class="st-foot">
         <span class="st-status" classList={{ error: !!status()?.error }} aria-live="polite">
@@ -893,8 +919,40 @@ function GeneralSection() {
     }
     await refetch();
   };
+  // Starting at login: asked of the system each time the page opens.
+  const [atLogin, { mutate: setAtLogin }] = createResource(() => api.startAtLogin().catch(() => false));
+  const [loginMsg, setLoginMsg] = createSignal<string | null>(null);
+  const changeAtLogin = async (on: boolean) => {
+    setLoginMsg(null);
+    setAtLogin(on);
+    try {
+      await api.setStartAtLogin(on);
+    } catch (e) {
+      setAtLogin(!on);
+      setLoginMsg(errorMessage(e));
+    }
+  };
   return (
     <div class="st-body">
+      <SettingsGroup title="Startup">
+        <Field label="At login" class="st-field-top">
+          <Choice
+            checked={!!atLogin()}
+            onChange={(on) => void changeAtLogin(on)}
+            label="Open Email when you log in"
+            note={
+              platform === 'macos'
+                ? 'It starts out of sight, in the Dock: mail comes in and notifications show as usual.'
+                : 'Mail comes in and notifications show from the start.'
+            }
+          />
+        </Field>
+        <Show when={loginMsg()}>
+          <Field label="">
+            <span class="st-status error">{loginMsg()}</span>
+          </Field>
+        </Show>
+      </SettingsGroup>
       <SettingsGroup title="Appearance">
         <div class="st-field st-field-top">
           <span class="st-field-label">Theme</span>
@@ -1189,6 +1247,8 @@ function Panel() {
       e.preventDefault();
       e.stopPropagation();
       if (presetMenu()) setPresetMenu(false);
+      // The shortcuts' search empties first.
+      else if (section() === 'keyboard' && keySearch()) setKeySearch('');
       else close();
     }
   }

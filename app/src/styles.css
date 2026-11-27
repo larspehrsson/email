@@ -6898,3 +6898,9 @@ body.dragging-message iframe {
 .sf-check.spinning svg {
   animation: spin 0.8s linear infinite;
 }
+
+/* Settings › Keyboard: the search over the shortcuts */
+.st-keys-search {
+  width: 260px;
+  margin: 2px 0 6px;
+}

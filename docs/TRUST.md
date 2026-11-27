@@ -62,6 +62,7 @@ Email's data folder:
 | Opened attachments | The system's cache folder, in a folder only you can open | Copies to open in other apps; cleared each time Email starts |
 | Saved attachments and exports | Downloads, or where you choose | What you saved |
 | Settings | The app's own storage, and a few small files, in the data folder | Your choices in Settings and View options, window sizes, AI apps' permissions |
+| Starting at login | Only if you turn it on (Settings › General): a launch agent in `~/Library/LaunchAgents` (macOS), the registry's Run key (Windows), or `~/.config/autostart` (Linux) | Where Email's program is, to start it when you log in; removed when you turn it off |
 | The web view's cache and cookies | The data folder | Pictures you loaded, and cookies their servers set (a tracker's, typically): removed at every start and every hour |
 
 On Linux and macOS the data folder opens only to you, so other people with accounts on the same

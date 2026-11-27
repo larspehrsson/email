@@ -256,6 +256,9 @@ export const api = {
   /** Saves every attachment into a new Downloads folder; returns its path. */
   saveAllAttachments: (messageId: number): Promise<string[]> => call('save_all_attachments', { messageId }),
   /** Save As…: the system's save dialog; the path written, or null if cancelled. */
+  /** Whether the app starts when the user logs in (Settings › General). */
+  startAtLogin: (): Promise<boolean> => call('start_at_login', undefined),
+  setStartAtLogin: (on: boolean): Promise<void> => call('set_start_at_login', { on }),
   saveAttachmentAs: (messageId: number, index: number): Promise<string | null> =>
     call('save_attachment_as', { messageId, index }),
   /** Applies locally at once; moves reach the server after a 5 s undo window. */

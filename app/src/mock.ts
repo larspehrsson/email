@@ -2116,6 +2116,14 @@ export function createMockBackend(): Backend {
       const name = n === 1 ? a.name : `${a.name.slice(0, dot)} (${n - 1})${a.name.slice(dot)}`;
       return `/home/user/Downloads/${name}`;
     },
+    async start_at_login() {
+      await sleep(3);
+      return localStorage.getItem('mock.atLogin') === '1';
+    },
+    async set_start_at_login({ on }) {
+      await sleep(3);
+      localStorage.setItem('mock.atLogin', on ? '1' : '0');
+    },
     async save_attachment_as({ messageId, index }) {
       // No save dialog in the browser: as if one was given the name in Documents.
       const a = await fetchAttachment(messageId, index);

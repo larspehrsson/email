@@ -817,6 +817,33 @@
         "refuted_if": "Message content or credentials kept in localStorage."
       },
       {
+        "id": "storage.start-at-login",
+        "claim": "Only if the user turns on starting at login (Settings › General, off by default): a launch agent in ~/Library/LaunchAgents on macOS, the registry's Run key on Windows, or an entry in ~/.config/autostart on Linux, naming Email's program. Turning it off removes it.",
+        "level": "declared",
+        "location": {
+          "macos": "~/Library/LaunchAgents",
+          "windows": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+          "linux": "~/.config/autostart"
+        },
+        "holds": [
+          "settings"
+        ],
+        "encrypted_by_app": false,
+        "retention": "until turned off",
+        "removed_by": [
+          "user-action"
+        ],
+        "evidence": [
+          {
+            "kind": "code",
+            "path": "app/src-tauri/src/lib.rs",
+            "symbol": "set_start_at_login"
+          }
+        ],
+        "verify": "Read set_start_at_login and where tauri_plugin_autostart is set up.",
+        "refuted_if": "An entry made without the user turning it on, or left after turning it off."
+      },
+      {
         "id": "storage.webview-cache",
         "claim": "The web view keeps its own cache and cookies, so pictures you loaded can stay on disk. Cookies their servers set (a tracker's, typically) are removed at every start and every hour after; Email itself uses none.",
         "level": "declared",
