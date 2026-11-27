@@ -945,6 +945,21 @@ impl Core {
     /// the outbox (moves after the undo window). Returns the op id to pass to `undo_action`.
     pub fn apply_action(&self, action: actions::Action, message_ids: &[i64], folder_id: i64) -> Result<ActionResult> {
         let (account_id, _) = self.store.folder(folder_id)?.ok_or_else(|| anyhow!("unknown folder"))?;
+        // A draft written here (in the composer or by an AI app) is only here, never on the
+        // server: deleting its copy in Drafts discards the draft.
+        let mut kept = Vec::with_capacity(message_ids.len());
+        if matches!(action, actions::Action::Trash | actions::Action::DeleteForever) {
+            for &id in message_ids {
+                match self.store.message_draft(id)? {
+                    Some(draft) => self.discard_draft(draft)?,
+                    None => kept.push(id),
+                }
+            }
+            if kept.is_empty() {
+                return Ok(ActionResult { op_id: None, undoable: false });
+            }
+        }
+        let message_ids = if kept.is_empty() { message_ids } else { &kept };
         let result = queue_action(&self.store, &self.events, action, message_ids, folder_id)?;
         if result.op_id.is_some() {
             if let Some(s) = self.running.lock().unwrap().get(&account_id) {
@@ -2305,5 +2320,43 @@ mod vault_tests {
         assert_eq!(vault_join(&json, |_| panic!("no parts")).unwrap(), json);
         // A missing part is an error, not an empty vault.
         assert!(vault_join(&pieces[0], |_| anyhow::bail!("gone")).is_err());
+    }
+}
+
+#[cfg(test)]
+mod local_draft_tests {
+    use super::*;
+    use crate::store::ListedFolder;
+
+    /// A draft written here is only here: Delete on its copy in Drafts discards it, rather than
+    /// failing for want of a server copy ("isn't on the server yet").
+    #[test]
+    fn deleting_a_local_draft_discards_it() {
+        let dir = std::env::temp_dir().join(format!("mail-core-local-draft-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let core = Core::open(&dir, Secrets::memory()).unwrap();
+        let acct = core.store.insert_account("john.doe@example.com", "John Doe", Provider::Imap, "imap.example.com", 993).unwrap();
+        let lf = |name: &str, role| ListedFolder { raw_name: name.into(), path: vec![name.into()], role: Some(role), selectable: true };
+        core.store.sync_folder_list(acct.id, &[lf("INBOX", FolderRole::Inbox), lf("Drafts", FolderRole::Drafts), lf("Trash", FolderRole::Trash)]).unwrap();
+        let drafts = core.store.folders(acct.id).unwrap().into_iter().find(|f| f.raw_name == "Drafts").unwrap().id;
+        let req = |subject: &str| -> SendRequest {
+            serde_json::from_value(serde_json::json!({
+                "accountId": acct.id, "to": [{ "addr": "jane@example.org" }], "subject": subject,
+                "html": "<p>Hi</p>", "replyingTo": null, "forwarding": null, "draft": null, "listed": true,
+            }))
+            .unwrap()
+        };
+        let (a, b) = (core.save_draft(None, req("One")).unwrap(), core.save_draft(None, req("Two")).unwrap());
+        let rows = core.store.list_messages(drafts, 0, 10).unwrap().messages;
+        assert_eq!(rows.len(), 2);
+        let copy_of = |d: i64| rows.iter().find(|m| m.draft_id == Some(d)).unwrap().id;
+        for action in [actions::Action::Trash, actions::Action::DeleteForever] {
+            let id = copy_of(if matches!(action, actions::Action::Trash) { a } else { b });
+            let r = core.apply_action(action, &[id], drafts).unwrap();
+            assert_eq!(r.op_id, None, "nothing for the server");
+        }
+        assert!(core.store.list_messages(drafts, 0, 10).unwrap().messages.is_empty());
+        assert!(core.store.draft(a).unwrap().is_none() && core.store.draft(b).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

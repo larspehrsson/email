@@ -2345,6 +2345,12 @@ impl Store {
         Ok(path.map(|p| serde_json::from_str::<Vec<String>>(&p).map(|v| v.join("/")).unwrap_or(p)))
     }
 
+    /// The local draft a message is the copy in Drafts of, if it is one.
+    pub fn message_draft(&self, id: i64) -> Result<Option<i64>> {
+        let db = self.rdb();
+        Ok(db.query_row("SELECT draft_id FROM messages WHERE id=?1", [id], |r| r.get(0)).optional()?.flatten())
+    }
+
     pub fn message_subject(&self, id: i64) -> Result<Option<String>> {
         let db = self.rdb();
         Ok(db.query_row("SELECT subject FROM messages WHERE id=?1", [id], |r| r.get(0)).optional()?)
