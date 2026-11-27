@@ -6,8 +6,8 @@ import { showToast } from './Toast';
 
 // The right-click menu over a message's body (the app's own, as elsewhere, instead of the
 // webview's Reload / Inspect, whose Save Image does nothing here): Copy what's selected, Copy
-// link address over a link, Save image as… and Copy image address over a picture, and Show
-// source. An HTML body is a frame of its own, whose events don't reach the page: its menu is
+// link address over a link, Save image as…, Copy image and Copy image address over a picture,
+// and Show source. An HTML body is a frame of its own, whose events don't reach the page: its menu is
 // opened from inside it, at the same spot in the window.
 
 function copy(text: string, doc: Document) {
@@ -41,6 +41,28 @@ async function saveImage(img: HTMLImageElement) {
   }
 }
 
+/** The picture on the clipboard, as PNG (what other apps take). The clipboard is written at
+ *  once, with the picture to follow, so it still counts as the user's click. */
+function copyImage(img: HTMLImageElement) {
+  const src = img.currentSrc || img.src;
+  const png = (async () => {
+    const url = src.startsWith('data:') ? src : await api.imageData(src);
+    const pic = new Image();
+    pic.src = url;
+    await pic.decode();
+    const c = document.createElement('canvas');
+    // (An SVG without a size of its own: as big as it's shown.)
+    c.width = pic.naturalWidth || img.naturalWidth || img.width;
+    c.height = pic.naturalHeight || img.naturalHeight || img.height;
+    c.getContext('2d')?.drawImage(pic, 0, 0, c.width, c.height);
+    return new Promise<Blob>((ok, fail) => c.toBlob((b) => (b ? ok(b) : fail(new Error("Couldn't copy the picture."))), 'image/png'));
+  })();
+  navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]).then(
+    () => showToast({ kind: 'ok', text: 'Picture copied', ms: 2000 }),
+    (e) => showToast({ kind: 'error', text: errorMessage(e) }),
+  );
+}
+
 function items(messageId: number | null, doc: Document, target: EventTarget | null): MenuItem[] {
   const list: MenuItem[] = [];
   const selected = doc.getSelection()?.toString() ?? '';
@@ -65,6 +87,7 @@ function items(messageId: number | null, doc: Document, target: EventTarget | nu
   const img = el?.closest('img') ?? null;
   if (img && img.complete && img.naturalWidth > 0) {
     list.push({ label: 'Save image as…', separatorBefore: list.length > 0, run: () => void saveImage(img) });
+    list.push({ label: 'Copy image', run: () => copyImage(img) });
     const src = img.currentSrc || img.src;
     if (/^https?:/i.test(src) && !/^http:\/\/mailimg\.localhost/i.test(src)) list.push({ label: 'Copy image address', run: () => copy(src, doc) });
   }

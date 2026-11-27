@@ -261,6 +261,8 @@ export const api = {
   /** A picture in a message, where the user chooses (the system's save dialog): its path, or null
    *  if cancelled. `src` is the address it's shown from, `name` a name to start from. */
   saveImageAs: (src: string, name: string): Promise<string | null> => call('save_image_as', { src, name }),
+  /** A picture in a message as a data: URL, by the address it's shown from (Copy image). */
+  imageData: (src: string): Promise<string> => call('image_data', { src }),
   /** Applies locally at once; moves reach the server after a 5 s undo window. */
   applyAction: (action: Action, messageIds: number[], folderId: number): Promise<ActionResult> =>
     call('apply_action', { action, messageIds, folderId }),

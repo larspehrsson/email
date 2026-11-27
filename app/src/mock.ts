@@ -2116,6 +2116,12 @@ export function createMockBackend(): Backend {
       const name = n === 1 ? a.name : `${a.name.slice(0, dot)} (${n - 1})${a.name.slice(dot)}`;
       return `/home/user/Downloads/${name}`;
     },
+    async image_data({ src }) {
+      // The demo's pictures from the web can't be read back here: inline ones only.
+      await sleep(10);
+      if (!src.startsWith('data:')) throw "Couldn't get the picture: not in the demo";
+      return src;
+    },
     async save_image_as({ src, name }) {
       // No save dialog in the browser: as if one was given the name in Documents, with the
       // extension its type calls for (as the core gives it).

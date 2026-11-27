@@ -644,6 +644,14 @@ async fn save_image_as(app: tauri::AppHandle, src: String, name: String) -> Res<
     Ok(Some(path.to_string_lossy().into_owned()))
 }
 
+/// A picture in a message as a `data:` URL, by the address it's shown from (as
+/// `save_image_as` gets it): for Copy image, which puts it on the clipboard as PNG.
+#[tauri::command]
+async fn image_data(src: String) -> Res<String> {
+    let picture = mail_core::icons::picture_to_save(&src).await.map_err(|e| format!("Couldn't get the picture: {e:#}"))?;
+    Ok(picture.data_url())
+}
+
 /// Write `data` as `name` in `dir` without overwriting: `name (1).ext`, `name (2).ext`, ...
 fn write_unique(dir: &std::path::Path, name: &str, data: &[u8]) -> Result<std::path::PathBuf, String> {
     use std::io::Write;
@@ -1772,6 +1780,7 @@ pub fn run() {
             save_all_attachments,
             save_attachment_as,
             save_image_as,
+            image_data,
             draft_attachment_files,
             reveal_path,
             app_version,
