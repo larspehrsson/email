@@ -1177,6 +1177,11 @@ fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
     if let Some(state) = &saved {
         builder = window_state::apply(app, builder, state, window_state::MAIN);
     }
+    // Started at login (Settings › General): on macOS out of sight, in the Dock to open.
+    #[cfg(target_os = "macos")]
+    if std::env::args().any(|a| a == STARTED_AT_LOGIN) {
+        builder = builder.visible(false);
+    }
     // macOS: transparent title bar with the traffic lights over the sidebar's top row
     // (like Mail/Notes). The UI reserves room for them and makes the pane tops draggable.
     #[cfg(target_os = "macos")]
@@ -1203,20 +1208,43 @@ fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
     window_state::track(&window, saved, requested, window_state::MAIN);
     forget_cookies(window.clone());
 
-    // Closing the main window quits (macOS too; a compose window still open keeps the app
-    // until it's closed). With an export running it asks first ("confirm-close"); stopping it
-    // and closing comes back as `close_anyway`.
+    // macOS: closing the main window (⌘W, its close button) hides it, as Mac apps do: mail
+    // keeps coming in and notifications keep showing; the Dock icon brings it back
+    // (`RunEvent::Reopen`), ⌘Q quits. Elsewhere closing it quits (a compose window still open
+    // keeps the app until it's closed); with an export running it asks first ("confirm-close");
+    // stopping it and closing comes back as `close_anyway`.
     {
         let app = app.handle().clone();
+        let main = window.clone();
         window.on_window_event(move |event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if ask_before_closing(&app, false) {
+                if cfg!(target_os = "macos") {
+                    api.prevent_close();
+                    let _ = main.hide();
+                } else if ask_before_closing(&app, false) {
                     api.prevent_close();
                 }
             }
         });
     }
     Ok(())
+}
+
+/// The argument the app is started with at login (`tauri_plugin_autostart`).
+const STARTED_AT_LOGIN: &str = "--at-login";
+
+/// Whether the app starts when the user logs in (Settings › General).
+#[tauri::command]
+fn start_at_login(app: tauri::AppHandle) -> Res<bool> {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_start_at_login(app: tauri::AppHandle, on: bool) -> Res<()> {
+    use tauri_plugin_autostart::ManagerExt;
+    let l = app.autolaunch();
+    if on { l.enable() } else { l.disable() }.map_err(|e| format!("Couldn't change starting at login: {e}"))
 }
 
 /// An export is running: the window asks whether to stop it and close (or, `quit`, quit).
@@ -1319,6 +1347,9 @@ fn macos_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
             &MenuItem::with_id(app, "new-message", "New Message", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "address-book", "Address Book", true, Some("CmdOrCtrl+Shift+B"))?,
+            &PredefinedMenuItem::separator(app)?,
+            // ⌘W: closes a compose window (asking about its draft), hides the main one.
+            &PredefinedMenuItem::close_window(app, None)?,
         ],
     )?;
     let edit = Submenu::with_items(
@@ -1668,6 +1699,9 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // Starting at login: a launch agent on macOS, the registry on Windows, an autostart
+        // entry on Linux; started with STARTED_AT_LOGIN.
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec![STARTED_AT_LOGIN])))
         .register_asynchronous_uri_scheme_protocol("mailimg", mail_image_protocol)
         // Every window learns the system's clock (24-hour or not) before its scripts run.
         .plugin(tauri::plugin::Builder::<tauri::Wry>::new("clock").js_init_script(clock::init_script()).build());
@@ -1735,6 +1769,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             take_mailto_links,
             close_anyway,
+            start_at_login,
+            set_start_at_login,
             export_plan,
             export_account,
             cancel_export,
@@ -1863,6 +1899,16 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { api, code: None, .. } = &_event {
                 if ask_before_closing(_app, true) {
                     api.prevent_exit();
+                }
+            }
+            // macOS: the Dock icon clicked (or the app opened again) brings the main window
+            // back after ⌘W hid it.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = &_event {
+                if let Some(w) = _app.get_webview_window("main") {
+                    let _ = w.show();
+                    let _ = w.unminimize();
+                    let _ = w.set_focus();
                 }
             }
 

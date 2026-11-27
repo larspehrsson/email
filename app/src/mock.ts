@@ -2159,6 +2159,14 @@ export function createMockBackend(): Backend {
       const ext = type === 'svg+xml' ? 'svg' : type === 'jpeg' ? 'jpg' : type;
       return `/home/user/Documents/${name.replace(/\.[a-z0-9]+$/i, '')}.${ext}`;
     },
+    async start_at_login() {
+      await sleep(3);
+      return localStorage.getItem('mock.atLogin') === '1';
+    },
+    async set_start_at_login({ on }) {
+      await sleep(3);
+      localStorage.setItem('mock.atLogin', on ? '1' : '0');
+    },
     async save_attachment_as({ messageId, index }) {
       // No save dialog in the browser: as if one was given the name in Documents.
       const a = await fetchAttachment(messageId, index);

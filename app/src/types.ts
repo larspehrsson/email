@@ -735,6 +735,8 @@ export interface CommandMap {
   save_attachment_as: { args: { messageId: number; index: number }; ret: string | null };
   save_image_as: { args: { src: string; name: string }; ret: string | null };
   image_data: { args: { src: string }; ret: string };
+  start_at_login: { args: undefined; ret: boolean };
+  set_start_at_login: { args: { on: boolean }; ret: void };
   draft_attachment_files: { args: { messageId: number }; ret: string[] };
   apply_action: { args: { action: Action; messageIds: number[]; folderId: number }; ret: ActionResult };
   undo_action: { args: { opId: number }; ret: void };

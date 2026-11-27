@@ -148,6 +148,8 @@ interface SyncStatus {
 | `open_attachment` | `{ messageId, index }` | `void` — fetches if needed, writes to the app cache, opens in the default app. Rejects (string) for non-openable types or on failure |
 | `image_data` | `{ src }` | `string` — a picture in a message as a `data:` URL, got as `save_image_as` gets it (Copy image) |
 | `save_image_as` | `{ src, name }` | `string \| null` — a picture in a message (right-click › Save image as…) where the user chooses (the system's save dialog, starting in Downloads): `src` is the address it's shown from (`data:`, `mailimg:`, or http(s) for a remote picture the message may load, fetched again from public addresses only), `name` a name to start from (the extension follows the content); the path written, or null if cancelled |
+| `start_at_login` | — | `boolean` — whether the app starts when the user logs in, as the system has it |
+| `set_start_at_login` | `{ on }` | `void` — turn starting at login on or off (Settings › General) |
 | `save_attachment` | `{ messageId, index }` | `string` — absolute path written in the Downloads folder (`name (1).ext` if taken) |
 | `save_all_attachments` | `{ messageId }` | `string[]` — absolute paths of every attachment, each saved directly in Downloads (`name (1).ext` if taken) |
 | `apply_action` | `{ action: Action, messageIds: number[], folderId }` | `{ opId: number \| null, undoable: boolean }` — applies locally at once (emits `messages-changed` / `folders-changed`); moves are sent to the server after a 5 s undo window, read/star at once. Rejects (string) when the action doesn't apply (e.g. no Archive folder) |

@@ -909,6 +909,56 @@ describe('search', () => {
 });
 
 describe('settings layout', () => {
+  test('Keyboard: the search narrows the shortcuts by name, section or key; Esc empties it', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'Keyboard' }).click();
+      const rows = page.locator('.st-keys-body .st-row');
+      await rows.first().waitFor();
+      const all = await rows.count();
+      const search = page.locator('.st-keys-search');
+      await search.fill('new mail');
+      const shown = (await rows.locator('.st-desc').allTextContents()).map((t) => t.replace('Default', '').trim());
+      assert.ok(shown.length > 0 && shown.length < all, `${shown.length} of ${all}`);
+      assert.ok(shown.includes('Check for new mail'), shown.join(' | '));
+      assert.ok(shown.every((d) => /new|mail/i.test(d)), shown.join(' | '));
+      // By its key, as shown.
+      await search.fill('f5');
+      assert.ok((await rows.locator('.st-desc').allTextContents()).some((t) => t.includes('Check for new mail')));
+      await search.fill('zzzz nothing');
+      assert.equal(await rows.count(), 0);
+      await page.locator('.st-keys-body', { hasText: 'No shortcuts match' }).waitFor();
+      await search.press('Escape');
+      assert.equal(await search.inputValue(), '', 'emptied');
+      assert.equal(await rows.count(), all, 'all again');
+      assert.equal(await page.locator('.st-nav-item', { hasText: 'Keyboard' }).count(), 1, 'Settings still open');
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
+  test('General: Open Email when you log in, off to begin with, is kept', async () => {
+    const { page, errors, close } = await open({ threaded: false });
+    try {
+      await page.keyboard.press('ControlOrMeta+,');
+      await page.locator('.st-nav-item', { hasText: 'General' }).click();
+      const box = page.locator('.st-level', { hasText: 'Open Email when you log in' }).locator('input');
+      assert.equal(await box.isChecked(), false);
+      await box.check();
+      await page.waitForTimeout(100);
+      assert.equal(await page.evaluate(() => localStorage.getItem('mock.atLogin')), '1');
+      await page.locator('.st-nav-item', { hasText: 'Keyboard' }).click();
+      await page.locator('.st-nav-item', { hasText: 'General' }).click();
+      // (asked of the system again: a moment)
+      await page.waitForFunction(() => [...document.querySelectorAll('.st-level')].find((l) => l.textContent.includes('Open Email when you log in'))?.querySelector('input')?.checked === true, null, { timeout: 2000 });
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('accounts open one at a time; Sender pictures in General is the View option', async () => {
     const { page, errors, close } = await open({ threaded: false, query: '&many' });
     try {
