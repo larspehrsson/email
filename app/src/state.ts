@@ -151,7 +151,7 @@ const [searchScope, setSearchScopeSig] = createSignal<SearchScope>(
   loadPref<SearchScope>('ui.searchScope', 'all') === 'folder' ? 'folder' : 'all',
 );
 export const ALL_SEARCH_FIELDS: SearchField[] = ['sender', 'recipients', 'subject', 'body', 'attachments'];
-/** What the search can look through, as eM Client offers it: a fixed list, everything first. */
+/** What the search can look through: a fixed list, everything first. */
 /** `short`: on the button, where the whole label doesn't fit. */
 export const SEARCH_FIELD_SETS: { label: string; short?: string; fields: SearchField[] }[] = [
   { label: 'Subject, sender, recipients, text and attachments', short: 'Everything', fields: ALL_SEARCH_FIELDS },
