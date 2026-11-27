@@ -905,10 +905,13 @@ impl Core {
     }
 
     /// Which of a message's attachments (their `index`) have one of `words` (lowercase, as
-    /// typed in search) in their name or their text: those stored with the body and those downloaded since.
+    /// typed in search) in their name or, with `attachment_search` on, their text: those stored
+    /// with the body and those downloaded since.
     /// Read now, not from the index (a POC: at most a few seconds for a large PDF).
     pub fn attachment_matches(&self, message_id: i64, words: &[String]) -> Result<Vec<usize>> {
         let Some(raw) = self.store.body(message_id)? else { return Ok(Vec::new()) };
+        // Their text only if the user turned that on (PDFs through the helper, like search).
+        let read = self.store.attachment_search()?;
         let stored = mime::stored_attachment_parts(&raw);
         let omitted: Vec<partial::OmittedPart> = self.store.omitted(message_id)?.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
         let mut files: Vec<(usize, String, String, Vec<u8>)> = Vec::new();
@@ -924,7 +927,7 @@ impl Core {
         let mut out: Vec<usize> = files
             .into_iter()
             .filter(|(_, name, mime, data)| {
-                mime::has_word_prefix(name, words) || mime::attachment_text(name, mime, data).is_some_and(|t| mime::has_word_prefix(&t, words))
+                mime::has_word_prefix(name, words) || read && mime::attachment_text(name, mime, data).is_some_and(|t| mime::has_word_prefix(&t, words))
             })
             .map(|(i, ..)| i)
             .collect();
