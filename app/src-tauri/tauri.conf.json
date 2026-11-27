@@ -43,7 +43,7 @@
       }
     },
     "shortDescription": "A fast, local-first email app",
-    "longDescription": "All your accounts in one window (Gmail, Outlook and Microsoft 365, any IMAP server), your mail kept on your computer: conversations, search as you type, tags, snooze, undo send and a keyboard for everything.",
+    "longDescription": "All your accounts in one window (Gmail, Outlook and Microsoft 365, any IMAP server), your mail kept on your computer: conversations, search as you type, tags, snooze, undo send and a keyboard shortcut for everything.",
     "homepage": "https://github.com/rickhall/email",
     "category": "Productivity",
     "license": "MIT"

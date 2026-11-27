@@ -1,7 +1,7 @@
 # Email
 
 A fast desktop email app for Linux, macOS and Windows. All your accounts in one window, your
-mail kept on your computer so everything opens instantly, and a keyboard for everything.
+mail kept on your computer so everything opens instantly, and a keyboard shortcut for everything.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/inbox-dark.png">
