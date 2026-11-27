@@ -2532,6 +2532,49 @@ describe('message source', () => {
     }
   });
 
+  test('right-click over a picture › Save image as… saves it, Copy image copies it; the quoted original has the menu too', async () => {
+    const { page, errors, context, close } = await open({ threaded: false, query: '&picture' });
+    try {
+      await page.locator('.folder-layer .row', { hasText: 'picture as the body' }).first().click();
+      const frame = page.frameLocator('.reader iframe').first();
+      await frame.locator('img').waitFor();
+      await frame.locator('img').click({ button: 'right', position: { x: 30, y: 30 } });
+      const labels = async (p = page) => (await p.locator('.ctx-menu .vm-item').allTextContents()).map((t) => t.trim());
+      assert.deepEqual(await labels(), ['Save image as…', 'Copy image', 'Show source…'], 'an inline picture: no address to copy');
+      await page.locator('.ctx-menu .vm-item', { hasText: 'Save image as…' }).click();
+      await page.locator('.toast', { hasText: 'Saved image.svg' }).waitFor();
+      // Copy image: on the clipboard as a PNG.
+      await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(page.url()).origin });
+      await frame.locator('img').click({ button: 'right', position: { x: 30, y: 30 } });
+      await page.locator('.ctx-menu .vm-item', { hasText: 'Copy image' }).click();
+      await page.locator('.toast', { hasText: 'Picture copied' }).waitFor();
+      const copied = await page.evaluate(async () => {
+        const [item] = await navigator.clipboard.read();
+        const blob = await item.getType('image/png');
+        const bmp = await createImageBitmap(blob);
+        return { types: item.types, w: bmp.width, h: bmp.height };
+      });
+      assert.deepEqual(copied, { types: ['image/png'], w: 1400, h: 700 }, 'the picture, whole');
+      // Not over a picture: no picture items.
+      await frame.locator('body').click({ button: 'right', position: { x: 40, y: 8 } });
+      assert.deepEqual(await labels(), ['Show source…']);
+      await page.keyboard.press('Escape');
+      // A reply quotes it in a frame of its own: the picture's menu there too (no Show source).
+      const popup = context.waitForEvent('page');
+      await page.keyboard.press('r');
+      const w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      await w.locator('.cmp-quote-pill').click();
+      const quote = w.frameLocator('.cmp-quote iframe');
+      await quote.locator('img').waitFor();
+      await quote.locator('img').click({ button: 'right', position: { x: 30, y: 30 } });
+      assert.deepEqual(await labels(w), ['Save image as…', 'Copy image']);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('right-click › Show source; a question about it is answered; ⌥⌘U opens it too', async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {

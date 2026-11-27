@@ -68,7 +68,7 @@ export function AutoHeightFrame(props: { doc: string; sender?: string; messageId
       if (!doc) return;
       forwardFrameKeys(f);
       watchFrameLinks(f, props.sender ?? null);
-      if (props.messageId != null) watchFrameMenu(f, props.messageId);
+      watchFrameMenu(f, props.messageId ?? null);
       zoomableImages(doc, () => measure());
       if (props.remote && httpPictures()) rescueHttpImages(doc, mailImageUrl);
       last = -1;
