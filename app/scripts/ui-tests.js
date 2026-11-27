@@ -66,11 +66,13 @@ async function choose(box, label) {
 }
 /** Settings (open) › an account's page, from the accounts under Accounts in its sidebar: by
  *  its place, or its address. */
-async function accountCard(page, account = 0) {
+async function accountCard(page, account = 0, tab = 'Identity') {
   const entry = typeof account === 'number' ? page.locator('.st-nav-acct').nth(account) : page.locator('.st-nav-acct', { hasText: account });
   await entry.click();
   const card = page.locator('.st-acct');
-  await card.locator('.sa-list').waitFor();
+  await card.locator('.st-tab', { hasText: tab }).click();
+  await card.locator('.st-tab.on', { hasText: tab }).waitFor();
+  if (tab === 'Identity') await card.locator('.sa-list').waitFor();
   return card;
 }
 /** Settings (open) › Accounts › Send as: the signature of an account's own address (row 0) or
@@ -978,8 +980,24 @@ describe('settings layout', () => {
       await rows.nth(2).click();
       assert.equal(await rows.count(), 0, 'the list makes way');
       assert.match(await page.locator('.st-pane-head h3').textContent(), new RegExp(third.replace(/[.]/g, '\\.')));
-      for (const g of ['Identity', 'Connection', 'On this computer']) await page.locator('.st-acct .st-group-title', { hasText: g }).waitFor();
       assert.equal((await page.locator('.st-nav-acct.on .st-nav-acct-email').textContent()).trim(), third);
+      // …in tabs, the first picked
+      const tabs = page.locator('.st-acct .st-tab');
+      await page.locator('.st-acct .st-tab.on', { hasText: 'Identity' }).waitFor();
+      assert.deepEqual((await tabs.allTextContents()).slice(0, 3), ['Identity', 'Connection', 'On this computer']);
+      // A tab shows only its rows; the arrow keys go from tab to tab
+      await tabs.filter({ hasText: 'Connection' }).click();
+      await page.locator('.st-acct .st-field', { hasText: 'Incoming (IMAP)' }).waitFor();
+      assert.equal(await page.locator('.st-acct .sa-list').count(), 0, 'not the Identity tab’s');
+      await page.keyboard.press('ArrowRight');
+      await page.locator('.st-acct .st-tab.on', { hasText: 'On this computer' }).waitFor();
+      assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'On this computer', 'focus follows');
+      await page.locator('.st-acct .st-field', { hasText: 'Storage' }).waitFor();
+      // Another account's page opens at the same tab; Export… and Remove account… are on every tab
+      await page.locator('.st-nav-acct').nth(0).click();
+      await page.locator('.st-acct .st-tab.on', { hasText: 'On this computer' }).waitFor();
+      await page.locator('.st-acct').getByRole('button', { name: 'Remove account…' }).waitFor();
+      await tabs.filter({ hasText: 'Identity' }).click();
       // Accounts goes back to the list
       await page.locator('.st-nav-item', { hasText: 'Accounts' }).click();
       await rows.first().waitFor();
@@ -1225,7 +1243,7 @@ describe('accounts', () => {
       const tag = page.locator('.reader .act-btn[aria-label^="Tag"]').first();
       assert.match(await tag.getAttribute('aria-label'), /doesn't keep tags/);
       await page.keyboard.press('Control+,');
-      const acct = await accountCard(page, 'jane@outlook.com');
+      const acct = await accountCard(page, 'jane@outlook.com', 'Connected');
       await acct.getByRole('button', { name: 'Turn on…' }).click();
       await acct.getByText('On, as Outlook categories').waitFor();
       await page.keyboard.press('Escape');
@@ -1256,11 +1274,11 @@ describe('accounts', () => {
       await page.waitForSelector('.sidebar .account-name:has-text("jane@gmail.com")', { timeout: 15000 });
       // In Settings: signed in with Google, no password to update
       await page.keyboard.press('ControlOrMeta+,');
-      const acct = await accountCard(page, 'jane@gmail.com');
+      const acct = await accountCard(page, 'jane@gmail.com', 'Connection');
       await acct.locator('.st-signin', { hasText: 'With Google' }).waitFor();
       assert.equal(await acct.getByRole('button', { name: 'Update password…' }).count(), 0);
       // An app-password Gmail account switches over from its card (the client is there now)
-      const john = await accountCard(page, 'john.doe@example.com');
+      const john = await accountCard(page, 'john.doe@example.com', 'Connection');
       await john.getByRole('button', { name: 'Sign in with Google instead…' }).click();
       await john.locator('.st-signin', { hasText: 'With Google' }).waitFor({ timeout: 5000 });
       assert.equal(await john.getByRole('button', { name: 'Update password…' }).count(), 0);
@@ -1279,7 +1297,7 @@ describe('accounts', () => {
       await page.keyboard.press('ControlOrMeta+,');
       await page.locator('.settings .st-nav-item', { hasText: 'Accounts' }).click().catch(() => {});
       // An app-password Gmail account switches over at once: no client form
-      const john = await accountCard(page, 'john.doe@example.com');
+      const john = await accountCard(page, 'john.doe@example.com', 'Connection');
       await john.getByRole('button', { name: 'Sign in with Google instead…' }).click();
       await john.locator('.st-signin', { hasText: 'With Google' }).waitFor({ timeout: 5000 });
       assert.equal(await page.locator('input[aria-label="Google client ID"]').count(), 0, 'no client asked for');
@@ -2402,7 +2420,7 @@ describe('google contacts', () => {
     const { page, errors, close } = await open({ threaded: false });
     try {
       await page.keyboard.press('ControlOrMeta+,');
-      const field = (await accountCard(page, 0)).locator('.gc');
+      const field = (await accountCard(page, 0, 'Connected')).locator('.gc');
       await field.getByRole('button', { name: 'Connect…' }).click();
       // No client yet: asked for it.
       await field.locator('input[aria-label="Google client ID"]').fill('not-a-client');
@@ -2445,7 +2463,7 @@ describe('google contacts', () => {
       await page.keyboard.press('Escape');
       // Disconnect: its contacts leave the address book.
       await page.keyboard.press('ControlOrMeta+,');
-      await (await accountCard(page, 0)).locator('.gc').getByRole('button', { name: 'Disconnect' }).click();
+      await (await accountCard(page, 0, 'Connected')).locator('.gc').getByRole('button', { name: 'Disconnect' }).click();
       // (The question comes over Settings.)
       await page.locator('.confirm-backdrop .btn', { hasText: 'Disconnect' }).click();
       await page.locator('.st-acct').first().getByRole('button', { name: 'Connect…' }).waitFor();

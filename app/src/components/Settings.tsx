@@ -638,113 +638,145 @@ function AccountPage(props: { d: AccountDetails }) {
   // address alone is stored as the address itself.
   const [name, setName] = createSignal(props.d.displayName === props.d.email ? '' : props.d.displayName);
   const connected = () => account()?.provider === 'gmail' || account()?.auth === 'microsoft';
+  const tabs = () => ACCOUNT_TABS.filter((t) => t.id !== 'connected' || connected());
+  // The tab picked last (on any account's page), or the first when this one hasn't it.
+  const tab = () => (tabs().some((t) => t.id === accountTab()) ? accountTab() : 'identity');
+  let bar!: HTMLDivElement;
+  const onTabKey = (e: KeyboardEvent) => {
+    const list = tabs();
+    const i = list.findIndex((t) => t.id === tab());
+    const to = e.key === 'ArrowRight' ? i + 1 : e.key === 'ArrowLeft' ? i - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? list.length - 1 : null;
+    if (to == null) return;
+    e.preventDefault();
+    const next = list[(to + list.length) % list.length]!;
+    setAccountTab(next.id);
+    bar.querySelector<HTMLElement>(`[data-tab="${next.id}"]`)?.focus();
+  };
   return (
     <div class="st-acct">
-        <Group title="Identity">
-          <Show when={account()}>{(a) => <MarkField account={a()} onError={(text) => setMsg({ text, error: true })} />}</Show>
-          <SendAsGroup accountId={props.d.id} email={props.d.email} name={name()} onRename={setName} />
-        </Group>
-        <Group title="Connection">
-      <Field label="Incoming (IMAP)">
-        {props.d.imapHost}:{props.d.imapPort}
-      </Field>
-      <Field label="Outgoing (SMTP)">
-        <Show when={props.d.smtpHost} fallback={<span class="st-muted">not set</span>}>
-          {props.d.smtpHost}:{props.d.smtpPort}
-        </Show>
-      </Field>
-      <Show when={account()?.auth !== 'password' ? account() : undefined}>
-        {(a) => (
-          <Field label="Sign-in">
-            <BrowserSignIn account={a()} onMessage={setMsg} />
-          </Field>
-        )}
-      </Show>
-      <Show when={(account()?.auth ?? 'password') === 'password'}>
-      <Field label="Password">
-        <Show
-          when={editing()}
-          fallback={
-            <span class="st-signin">
-              <button class="link-btn" onClick={() => (setEditing(true), setMsg(null))}>
-                Update password…
+      <div class="st-tabs" role="tablist" aria-label="Account settings" ref={bar} onKeyDown={onTabKey}>
+        <For each={tabs()}>
+          {(t) => (
+            <button
+              class="st-tab"
+              role="tab"
+              data-tab={t.id}
+              aria-selected={tab() === t.id}
+              tabIndex={tab() === t.id ? 0 : -1}
+              classList={{ on: tab() === t.id }}
+              onClick={() => setAccountTab(t.id)}
+            >
+              {t.title}
+            </button>
+          )}
+        </For>
+      </div>
+      <div class="st-tab-panel" role="tabpanel" aria-label={tabs().find((t) => t.id === tab())?.title}>
+        <Switch>
+          <Match when={tab() === 'identity'}>
+            <Show when={account()}>{(a) => <MarkField account={a()} onError={(text) => setMsg({ text, error: true })} />}</Show>
+            <SendAsGroup accountId={props.d.id} email={props.d.email} name={name()} onRename={setName} />
+          </Match>
+          <Match when={tab() === 'connection'}>
+            <Field label="Incoming (IMAP)">
+              {props.d.imapHost}:{props.d.imapPort}
+            </Field>
+            <Field label="Outgoing (SMTP)">
+              <Show when={props.d.smtpHost} fallback={<span class="st-muted">not set</span>}>
+                {props.d.smtpHost}:{props.d.smtpPort}
+              </Show>
+            </Field>
+            <Show when={account()?.auth !== 'password' ? account() : undefined}>
+              {(a) => (
+                <Field label="Sign-in">
+                  <BrowserSignIn account={a()} onMessage={setMsg} />
+                </Field>
+              )}
+            </Show>
+            <Show when={(account()?.auth ?? 'password') === 'password'}>
+            <Field label="Password">
+              <Show
+                when={editing()}
+                fallback={
+                  <span class="st-signin">
+                    <button class="link-btn" onClick={() => (setEditing(true), setMsg(null))}>
+                      Update password…
+                    </button>
+                    <Show when={props.d.provider === 'gmail' ? account() : undefined}>{(a) => <SwitchToGoogle account={a()} onMessage={setMsg} />}</Show>
+                  </span>
+                }
+              >
+                <form class="st-pw" onSubmit={save}>
+                  <input
+                    class="st-input"
+                    type="password"
+                    placeholder="App password"
+                    autocomplete="current-password"
+                    value={pw()}
+                    ref={(el) => queueMicrotask(() => el.focus())}
+                    onInput={(e) => setPw(e.currentTarget.value)}
+                  />
+                  <button class="btn primary st-pw-save" type="submit" disabled={!pw() || busy()}>
+                    Save
+                  </button>
+                  <button class="btn secondary" type="button" onClick={() => (setEditing(false), setPw(''))}>
+                    Cancel
+                  </button>
+                </form>
+              </Show>
+            </Field>
+            </Show>
+          </Match>
+          <Match when={tab() === 'computer'}>
+            <Field label="Storage">
+              {/* the row is there from the start; its text arrives when counted */}
+              <span class="st-oneline">
+                <Show
+                  when={stored()}
+                  fallback={<span class="st-muted">{storageError() ? 'Couldn’t count' : 'Counting…'}</span>}
+                >
+                  {(s) => (
+                    <>
+                      {fmtNum(s().messages)} {s().messages === 1 ? 'message' : 'messages'} · {fmtSize(s().localBytes)} local
+                      <span class="st-muted"> · {fmtSize(s().serverBytes)} on the server</span>
+                    </>
+                  )}
+                </Show>
+              </span>
+              {/* same label while counting (the old figures stay until the new ones are in) */}
+              <button class="link-btn st-field-action" disabled={counting()} onClick={countStorage}>
+                Recount
               </button>
-              <Show when={props.d.provider === 'gmail' ? account() : undefined}>{(a) => <SwitchToGoogle account={a()} onMessage={setMsg} />}</Show>
-            </span>
-          }
-        >
-          <form class="st-pw" onSubmit={save}>
-            <input
-              class="st-input"
-              type="password"
-              placeholder="App password"
-              autocomplete="current-password"
-              value={pw()}
-              ref={(el) => queueMicrotask(() => el.focus())}
-              onInput={(e) => setPw(e.currentTarget.value)}
-            />
-            <button class="btn primary st-pw-save" type="submit" disabled={!pw() || busy()}>
-              Save
-            </button>
-            <button class="btn secondary" type="button" onClick={() => (setEditing(false), setPw(''))}>
-              Cancel
-            </button>
-          </form>
-        </Show>
-      </Field>
-      </Show>
-        </Group>
-        <Group title="On this computer">
-      <Field label="Storage">
-        {/* the row is there from the start; its text arrives when counted */}
-        <span class="st-oneline">
-          <Show
-            when={stored()}
-            fallback={<span class="st-muted">{storageError() ? 'Couldn’t count' : 'Counting…'}</span>}
-          >
-            {(s) => (
-              <>
-                {fmtNum(s().messages)} {s().messages === 1 ? 'message' : 'messages'} · {fmtSize(s().localBytes)} local
-                <span class="st-muted"> · {fmtSize(s().serverBytes)} on the server</span>
-              </>
-            )}
-          </Show>
-        </span>
-        {/* same label while counting (the old figures stay until the new ones are in) */}
-        <button class="link-btn st-field-action" disabled={counting()} onClick={countStorage}>
-          Recount
-        </button>
-      </Field>
-      <Field label="Offline">
-        <label class="st-check">
-          <input
-            type="checkbox"
-            checked={keep()}
-            disabled={removing()}
-            onChange={(e) => {
-              const on = e.currentTarget.checked;
-              setKeep(on);
-              api.setKeepAttachments(props.d.id, on).then(recountAttachments, (err) => {
-                setKeep(!on);
-                setMsg({ text: errorMessage(err), error: true });
-              });
-            }}
-          />
-          Keep attachments on this computer
-          <Show when={offlineSize()}>
-            <span class="st-muted">({offlineSize()})</span>
-          </Show>
-        </label>
-        {/* removing is its own step, offered only once attachments aren't kept */}
-        <Show when={!keep() && !removing() && (counts()?.kept ?? 0) > 0}>
-          <button class="link-btn st-field-action" onClick={remove}>
-            Remove
-          </button>
-        </Show>
-      </Field>
-        </Group>
-        <Show when={connected()}>
-          <Group title="Connected">
+            </Field>
+            <Field label="Offline">
+              <label class="st-check">
+                <input
+                  type="checkbox"
+                  checked={keep()}
+                  disabled={removing()}
+                  onChange={(e) => {
+                    const on = e.currentTarget.checked;
+                    setKeep(on);
+                    api.setKeepAttachments(props.d.id, on).then(recountAttachments, (err) => {
+                      setKeep(!on);
+                      setMsg({ text: errorMessage(err), error: true });
+                    });
+                  }}
+                />
+                Keep attachments on this computer
+                <Show when={offlineSize()}>
+                  <span class="st-muted">({offlineSize()})</span>
+                </Show>
+              </label>
+              {/* removing is its own step, offered only once attachments aren't kept */}
+              <Show when={!keep() && !removing() && (counts()?.kept ?? 0) > 0}>
+                <button class="link-btn st-field-action" onClick={remove}>
+                  Remove
+                </button>
+              </Show>
+            </Field>
+          </Match>
+          <Match when={tab() === 'connected'}>
             <Show when={account()?.provider === 'gmail' ? account() : undefined}>
               {(a) => (
                 <Field label="Google Contacts">
@@ -755,25 +787,28 @@ function AccountPage(props: { d: AccountDetails }) {
             <Show when={account()?.auth === 'microsoft' ? account() : undefined}>
               {(a) => <GraphField account={a()} onMessage={setMsg} />}
             </Show>
-          </Group>
-        </Show>
-        <Show when={msg()}>{(m) => <p class="st-acct-msg" classList={{ error: !!m().error }}>{m().text}</p>}</Show>
-        <div class="st-acct-foot">
-          <AccountTools account={props.d} />
-        </div>
+          </Match>
+        </Switch>
+      </div>
+      <Show when={msg()}>{(m) => <p class="st-acct-msg" classList={{ error: !!m().error }}>{m().text}</p>}</Show>
+      <div class="st-acct-foot">
+        <AccountTools account={props.d} />
+      </div>
     </div>
   );
 }
 
-/** A titled group of an account card's rows. */
-function Group(props: { title: string; children: JSX.Element }) {
-  return (
-    <div class="st-group">
-      <div class="st-group-title">{props.title}</div>
-      {props.children}
-    </div>
-  );
-}
+/** An account page's tabs. */
+type AccountTab = 'identity' | 'connection' | 'computer' | 'connected';
+const ACCOUNT_TABS: { id: AccountTab; title: string }[] = [
+  { id: 'identity', title: 'Identity' },
+  { id: 'connection', title: 'Connection' },
+  { id: 'computer', title: 'On this computer' },
+  // Gmail's and Microsoft's accounts only
+  { id: 'connected', title: 'Connected' },
+];
+/** The tab shown: the same one as you go from account to account. */
+const [accountTab, setAccountTab] = createSignal<AccountTab>('identity');
 
 /** What an account holds, for its row in the overview ("" until counted). */
 function storedSummary(id: number): string {
@@ -1029,7 +1064,7 @@ function GeneralSection() {
             )}
           </Show>
         </Field>
-        <Show when={msg()}>
+      <Show when={msg()}>
           <Field label="">
             <span class="st-status error">{msg()}</span>
           </Field>
