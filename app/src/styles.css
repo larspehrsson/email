@@ -4541,6 +4541,41 @@ html.macos .app.rail-mode .search-bar {
 .cmp-editor .ProseMirror a {
   color: var(--accent);
 }
+/* Code as the theme has it here (the inline style is what's sent) */
+.cmp-editor .ProseMirror code {
+  background: var(--bg-hover) !important;
+  border-color: var(--sep-strong) !important;
+  color: inherit;
+}
+.cmp-editor .ProseMirror pre {
+  margin: 0 0 0.7em;
+  background: var(--bg-hover) !important;
+  border-color: var(--sep-strong) !important;
+}
+.cmp-editor .ProseMirror h1,
+.cmp-editor .ProseMirror h2,
+.cmp-editor .ProseMirror h3 {
+  color: var(--text);
+}
+.cmp-editor .ProseMirror hr {
+  border-top-color: var(--sep-strong) !important;
+}
+.cmp-editor .ProseMirror hr.ProseMirror-selectednode {
+  outline: 2px solid var(--accent);
+}
+.cmp-editor .ProseMirror pre code {
+  /* the block's own box only */
+  background: none !important;
+  border: 0 !important;
+  padding: 0 !important;
+  font-size: inherit !important;
+}
+.cmp-toolbar .fmt-btn[aria-label='Code'],
+.cmp-toolbar .fmt-btn[aria-label='Code block'] {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  font-weight: 600;
+}
 .cmp-editor .ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   float: left;
