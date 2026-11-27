@@ -4,6 +4,10 @@ import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import Image from '@tiptap/extension-image';
+import CodeBlock from '@tiptap/extension-code-block';
+import Heading from '@tiptap/extension-heading';
+import { mergeAttributes } from '@tiptap/core';
+import { TextSelection } from '@tiptap/pm/state';
 import { pastedPictures, scalePicture } from '../lib/pictures';
 import type { Addr } from '../api';
 import { accounts } from '../state';
@@ -26,7 +30,7 @@ import { api } from '../api';
 import { composeDraftId, onCloseRequested, onFileDrop, pickFiles, setWindowTitle } from '../lib/windows';
 import { GMAIL_LIMIT } from '../lib/compose';
 import { MOD } from '../lib/shortcuts';
-import { DRAG } from '../lib/platform';
+import { DRAG, platform } from '../lib/platform';
 import { confirmDialog } from './Actions';
 import { CloseIcon, ForwardIcon, MailIcon, PaperclipIcon, ReplyAllIcon, ReplyIcon, TrashIcon } from './Icons';
 import { AutoHeightFrame } from './AutoHeightFrame';
@@ -378,27 +382,36 @@ function Toolbar(props: {
           </span>
         }
       >
-        <B label="Bold" key={`${MOD}B`} name="bold" onClick={run((e) => e.chain().focus().toggleBold().run())}>
+        <B label="Bold" key={keyText('B')} name="bold" onClick={run((e) => e.chain().focus().toggleBold().run())}>
           B
         </B>
-        <B label="Italic" key={`${MOD}I`} name="italic" onClick={run((e) => e.chain().focus().toggleItalic().run())}>
+        <B label="Italic" key={keyText('I')} name="italic" onClick={run((e) => e.chain().focus().toggleItalic().run())}>
           I
         </B>
-        <B label="Underline" key={`${MOD}U`} name="underline" onClick={run((e) => e.chain().focus().toggleUnderline().run())}>
+        <B label="Underline" key={keyText('U')} name="underline" onClick={run((e) => e.chain().focus().toggleUnderline().run())}>
           U
         </B>
-        <B label="Link" key={`${MOD}K`} name="link" onClick={openLink}>
+        <B label="Link" key={keyText('K')} name="link" onClick={openLink}>
           🔗
         </B>
+        <B label="Code" key={keyText('E')} name="code" onClick={run((e) => e.chain().focus().toggleCode().run())}>
+          {'</>'}
+        </B>
         <span class="fmt-sep" />
-        <B label="Bulleted list" key="" name="bulletList" onClick={run((e) => e.chain().focus().toggleBulletList().run())}>
+        <B label="Heading" key={keyText('1', { alt: true })} name="heading" onClick={run((e) => e.chain().focus().toggleHeading({ level: 1 }).run())}>
+          H
+        </B>
+        <B label="Bulleted list" key={keyText('8', { shift: true })} name="bulletList" onClick={run((e) => e.chain().focus().toggleBulletList().run())}>
           •
         </B>
-        <B label="Numbered list" key="" name="orderedList" onClick={run((e) => e.chain().focus().toggleOrderedList().run())}>
+        <B label="Numbered list" key={keyText('7', { shift: true })} name="orderedList" onClick={run((e) => e.chain().focus().toggleOrderedList().run())}>
           1.
         </B>
-        <B label="Quote" key="" name="blockquote" onClick={run((e) => e.chain().focus().toggleBlockquote().run())}>
+        <B label="Quote" key={keyText('B', { shift: true })} name="blockquote" onClick={run((e) => e.chain().focus().toggleBlockquote().run())}>
           ❝
+        </B>
+        <B label="Code block" key={keyText('C', { alt: true })} name="codeBlock" onClick={run((e) => e.chain().focus().toggleCodeBlock().run())}>
+          {'{ }'}
         </B>
         <span class="fmt-fill" />
         <button
@@ -420,6 +433,77 @@ function Toolbar(props: {
     </div>
   );
 }
+
+/** How code looks in the message sent (and in the editor, adjusted to the theme there). */
+const MONO = "ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace";
+const RULE_STYLE = 'border:0;border-top:1px solid #d0d7de;margin:14px 0';
+
+/** Code blocks that take several lines as one: with lines (paragraphs, list items…) selected,
+ *  the toolbar's button or ⌥⌘C makes one block of them all, each a line of it, as Slack and
+ *  GitHub do (TipTap's own makes a block of each). In a code block it turns back into text,
+ *  a paragraph per line. */
+const CodeBlockLines = CodeBlock.extend({
+  addCommands() {
+    return {
+      ...this.parent?.(),
+      toggleCodeBlock:
+        (attributes) =>
+        ({ state, dispatch, commands }) => {
+          const { $from, $to } = state.selection;
+          const type = state.schema.nodes[this.name]!;
+          const para = state.schema.nodes.paragraph!;
+          // In a code block: its lines back as paragraphs.
+          if ($from.parent.type === type && $from.sameParent($to)) {
+            const block = $from.parent;
+            const start = $from.before();
+            const lines = block.textContent.split('\n');
+            if (dispatch) {
+              const nodes = lines.map((l) => para.create(null, l ? state.schema.text(l) : null));
+              const tr = state.tr.replaceWith(start, start + block.nodeSize, nodes);
+              tr.setSelection(TextSelection.near(tr.doc.resolve(start + 1)));
+              dispatch(tr.scrollIntoView());
+            }
+            return true;
+          }
+          // Within one line: as TipTap does.
+          if ($from.sameParent($to)) return commands.toggleNode(this.name, 'paragraph', attributes);
+          // Several: the top-level blocks they're in, as one block, a line each.
+          const from = $from.before(1);
+          const to = $to.after(1);
+          const text = state.doc.textBetween(from, to, '\n', '\n');
+          if (dispatch) {
+            const tr = state.tr.replaceWith(from, to, type.create(attributes, text ? state.schema.text(text) : null));
+            tr.setSelection(TextSelection.near(tr.doc.resolve(from + 1)));
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+    };
+  },
+});
+
+/** Headings styled inline per level (the recipient's mail app has none of the app's CSS):
+ *  sized for a message, not a web page. */
+const HEADING_STYLES: Record<number, string> = {
+  1: 'font-size:20px;line-height:1.3;font-weight:600;margin:16px 0 8px',
+  2: 'font-size:17px;line-height:1.35;font-weight:600;margin:14px 0 6px',
+  3: 'font-size:15px;line-height:1.4;font-weight:600;margin:12px 0 4px',
+};
+const SizedHeading = Heading.extend({
+  renderHTML({ node, HTMLAttributes }) {
+    const level = this.options.levels.includes(node.attrs.level) ? node.attrs.level : this.options.levels[0];
+    return [`h${level}`, mergeAttributes(this.options.HTMLAttributes, HTMLAttributes, { style: HEADING_STYLES[level] ?? '' }), 0];
+  },
+});
+
+/** A shortcut as the platform writes it: ⌥⇧⌘8 on a Mac, Ctrl+Shift+8 elsewhere. */
+function keyText(key: string, mods: { shift?: boolean; alt?: boolean } = {}): string {
+  if (platform === 'macos') return `${mods.alt ? '⌥' : ''}${mods.shift ? '⇧' : ''}⌘${key}`;
+  return ['Ctrl', mods.alt && 'Alt', mods.shift && 'Shift', key].filter(Boolean).join('+');
+}
+
+const CODE_STYLE = `font-family:${MONO};font-size:90%;background:#f3f4f6;border:1px solid #e1e4e8;border-radius:4px;padding:1px 4px`;
+const CODE_BLOCK_STYLE = `font-family:${MONO};font-size:90%;line-height:1.45;background:#f6f8fa;border:1px solid #e1e4e8;border-radius:6px;padding:10px 12px;white-space:pre-wrap;overflow-wrap:anywhere`;
 
 // ------------------------------------------------------------- composer
 
@@ -466,10 +550,17 @@ export function Composer() {
       extensions: [
         StarterKit.configure({
           heading: false,
+          // Code (`text`, ⌘E) and code blocks (```, ⌥⌘C): styled inline, as sent, since the
+          // recipient's mail app has none of the app's CSS.
+          code: { HTMLAttributes: { style: CODE_STYLE } },
           codeBlock: false,
-          horizontalRule: false,
+          // `---`: a line across.
+          horizontalRule: { HTMLAttributes: { style: RULE_STYLE } },
           link: { openOnClick: false, autolink: true, defaultProtocol: 'https' },
         }),
+        CodeBlockLines.configure({ HTMLAttributes: { style: CODE_BLOCK_STYLE } }),
+        // `# `, `## `, `### ` (⌥⌘1–3): headings, sized for a message, not a page.
+        SizedHeading.configure({ levels: [1, 2, 3] }),
         Placeholder.configure({ placeholder: 'Write your message…' }),
         // Pictures pasted in sit in the text (sized by dragging a corner); sent as inline parts.
         Image.configure({
