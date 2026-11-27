@@ -2532,6 +2532,37 @@ describe('message source', () => {
     }
   });
 
+  test('right-click over a picture › Save image as… saves it; the quoted original has the menu too', async () => {
+    const { page, errors, context, close } = await open({ threaded: false, query: '&picture' });
+    try {
+      await page.locator('.folder-layer .row', { hasText: 'picture as the body' }).first().click();
+      const frame = page.frameLocator('.reader iframe').first();
+      await frame.locator('img').waitFor();
+      await frame.locator('img').click({ button: 'right', position: { x: 30, y: 30 } });
+      const labels = async (p = page) => (await p.locator('.ctx-menu .vm-item').allTextContents()).map((t) => t.trim());
+      assert.deepEqual(await labels(), ['Save image as…', 'Show source…'], 'an inline picture: no address to copy');
+      await page.locator('.ctx-menu .vm-item', { hasText: 'Save image as…' }).click();
+      await page.locator('.toast', { hasText: 'Saved image.svg' }).waitFor();
+      // Not over a picture: no picture items.
+      await frame.locator('body').click({ button: 'right', position: { x: 40, y: 8 } });
+      assert.deepEqual(await labels(), ['Show source…']);
+      await page.keyboard.press('Escape');
+      // A reply quotes it in a frame of its own: the picture's menu there too (no Show source).
+      const popup = context.waitForEvent('page');
+      await page.keyboard.press('r');
+      const w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      await w.locator('.cmp-quote-pill').click();
+      const quote = w.frameLocator('.cmp-quote iframe');
+      await quote.locator('img').waitFor();
+      await quote.locator('img').click({ button: 'right', position: { x: 30, y: 30 } });
+      assert.deepEqual(await labels(w), ['Save image as…']);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('right-click › Show source; a question about it is answered; ⌥⌘U opens it too', async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {

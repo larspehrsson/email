@@ -6,6 +6,7 @@ import { endBoot } from '../lib/windows';
 import { Composer } from './Composer';
 import { ToastHost } from './Toast';
 import { ConfirmHost } from './Actions';
+import { ContextMenuHost } from './ContextMenu';
 
 /** The whole page of a compose window: one draft, written and sent from here. */
 export function ComposeWindow() {
@@ -29,6 +30,8 @@ export function ComposeWindow() {
       </Show>
       <ToastHost />
       <ConfirmHost />
+      {/* Right-click menus (the quoted original's, with Save image as…). */}
+      <ContextMenuHost />
     </div>
   );
 }

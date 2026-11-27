@@ -608,6 +608,42 @@ async fn save_attachment_as(
     Ok(Some(path.to_string_lossy().into_owned()))
 }
 
+/// A picture in a message, saved where the user chooses (right-click › Save image as…): `src`
+/// is the address it's shown from (`icons::picture_to_save`), `name` a name to start from.
+/// Returns the path written, or None if the dialog was cancelled.
+#[tauri::command]
+async fn save_image_as(app: tauri::AppHandle, src: String, name: String) -> Res<Option<String>> {
+    use tauri_plugin_dialog::DialogExt;
+    let picture = mail_core::icons::picture_to_save(&src).await.map_err(|e| format!("Couldn't get the picture: {e:#}"))?;
+    let ext = match picture.mime.as_str() {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/svg+xml" => "svg",
+        "image/x-icon" | "image/vnd.microsoft.icon" => "ico",
+        "image/bmp" => "bmp",
+        _ => "img",
+    };
+    // The name it had, with the extension its content calls for.
+    let base = mail_core::mime::safe_file_name(&name);
+    let stem = base.rsplit_once('.').map_or(base.as_str(), |(s, _)| s).trim();
+    let file = format!("{}.{ext}", if stem.is_empty() { "image" } else { stem });
+    let mut dialog = app.dialog().file().set_file_name(file);
+    if let Ok(dir) = downloads_dir(&app) {
+        dialog = dialog.set_directory(dir);
+    }
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    dialog.save_file(move |p| {
+        let _ = tx.send(p);
+    });
+    let Some(chosen) = rx.await.map_err(|e| e.to_string())? else { return Ok(None) };
+    let path = chosen.into_path().map_err(|e| e.to_string())?;
+    std::fs::write(&path, &picture.data).map_err(|e| format!("Couldn't write {}: {e}", path.display()))?;
+    mark_downloaded(&path);
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
 /// Write `data` as `name` in `dir` without overwriting: `name (1).ext`, `name (2).ext`, ...
 fn write_unique(dir: &std::path::Path, name: &str, data: &[u8]) -> Result<std::path::PathBuf, String> {
     use std::io::Write;
@@ -1735,6 +1771,7 @@ pub fn run() {
             save_attachment,
             save_all_attachments,
             save_attachment_as,
+            save_image_as,
             draft_attachment_files,
             reveal_path,
             app_version,

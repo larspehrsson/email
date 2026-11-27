@@ -277,6 +277,42 @@ pub async fn mail_image(url: &str) -> Result<Icon> {
     Ok(Icon { mime, data: body })
 }
 
+/// A picture in a message, to save it (right-click › Save image as…), by the address it's
+/// shown from: a `data:` URL (inline pictures), a `mailimg:` one (an http picture the app
+/// fetched, `mail_image_url`), or the http(s) address of a remote picture the message was
+/// allowed to load, fetched again the same way (public addresses only, pictures only).
+pub async fn picture_to_save(src: &str) -> Result<Icon> {
+    if let Some(rest) = src.strip_prefix("data:") {
+        let (head, body) = rest.split_once(',').ok_or_else(|| anyhow!("not a data URL"))?;
+        let data = if head.ends_with(";base64") {
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, body.trim()).map_err(|e| anyhow!("{e}"))?
+        } else {
+            mail_image_url(body).ok_or_else(|| anyhow!("not a data URL"))?.into_bytes()
+        };
+        let mime = sniff(&data).map(str::to_string).or_else(|| head.split(';').next().filter(|m| m.starts_with("image/")).map(str::to_string));
+        return Ok(Icon { mime: mime.ok_or_else(|| anyhow!("not an image"))?, data });
+    }
+    // The app's own scheme for http pictures: the address inside.
+    let inner = if let Some(rest) = src.strip_prefix("mailimg://localhost") {
+        Some(rest)
+    } else {
+        src.strip_prefix("http://mailimg.localhost")
+    };
+    let url = match inner {
+        Some(path) => mail_image_url(path).ok_or_else(|| anyhow!("not a picture address"))?,
+        None => src.to_string(),
+    };
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        bail!("not a picture address");
+    }
+    let (_, status, mime, body) = get(&url, 5, MAIL_IMAGES).await?;
+    if !(200..300).contains(&status) || body.is_empty() {
+        bail!("{status}");
+    }
+    let mime = sniff(&body).map(str::to_string).or_else(|| mime.starts_with("image/").then_some(mime)).ok_or_else(|| anyhow!("not an image"))?;
+    Ok(Icon { mime, data: body })
+}
+
 /// The address in a `mailimg:` request's path (`/` and the address, percent-encoded).
 pub fn mail_image_url(path: &str) -> Option<String> {
     let enc = path.strip_prefix('/').unwrap_or(path).as_bytes();
@@ -521,6 +557,24 @@ async fn exchange<S: AsyncRead + AsyncWrite + Unpin>(s: &mut S, req: &str, limit
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Save image as…: an inline picture's bytes come from its data: URL, typed by what they
+    /// are; anything that isn't a picture address is refused (nothing fetched for these).
+    #[tokio::test]
+    async fn pictures_to_save_from_data_urls() {
+        let png = b"\x89PNG\r\n\x1a\nrest";
+        let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png);
+        let p = picture_to_save(&format!("data:image/png;base64,{b64}")).await.unwrap();
+        assert_eq!((p.mime.as_str(), p.data.as_slice()), ("image/png", &png[..]));
+        // Labelled wrong: what the bytes are counts.
+        assert_eq!(picture_to_save(&format!("data:image/jpeg;base64,{b64}")).await.unwrap().mime, "image/png");
+        let svg = picture_to_save("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%2F%3E").await.unwrap();
+        assert_eq!(svg.mime, "image/svg+xml");
+        assert!(String::from_utf8(svg.data).unwrap().starts_with("<svg"));
+        for bad in ["data:text/plain,hello", "data:image/png;base64,***", "file:///etc/passwd", "javascript:alert(1)", "cid:abc", "mailimg://localhost/file%3A%2F%2F%2Fetc%2Fpasswd"] {
+            assert!(picture_to_save(bad).await.is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn domains() {

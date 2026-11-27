@@ -714,6 +714,7 @@ export interface CommandMap {
   save_attachment: { args: { messageId: number; index: number }; ret: string };
   save_all_attachments: { args: { messageId: number }; ret: string[] };
   save_attachment_as: { args: { messageId: number; index: number }; ret: string | null };
+  save_image_as: { args: { src: string; name: string }; ret: string | null };
   draft_attachment_files: { args: { messageId: number }; ret: string[] };
   apply_action: { args: { action: Action; messageIds: number[]; folderId: number }; ret: ActionResult };
   undo_action: { args: { opId: number }; ret: void };

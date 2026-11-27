@@ -2116,6 +2116,14 @@ export function createMockBackend(): Backend {
       const name = n === 1 ? a.name : `${a.name.slice(0, dot)} (${n - 1})${a.name.slice(dot)}`;
       return `/home/user/Downloads/${name}`;
     },
+    async save_image_as({ src, name }) {
+      // No save dialog in the browser: as if one was given the name in Documents, with the
+      // extension its type calls for (as the core gives it).
+      await sleep(30);
+      const type = /^data:image\/([a-z+]+)/.exec(src)?.[1] ?? 'png';
+      const ext = type === 'svg+xml' ? 'svg' : type === 'jpeg' ? 'jpg' : type;
+      return `/home/user/Documents/${name.replace(/\.[a-z0-9]+$/i, '')}.${ext}`;
+    },
     async save_attachment_as({ messageId, index }) {
       // No save dialog in the browser: as if one was given the name in Documents.
       const a = await fetchAttachment(messageId, index);
