@@ -946,12 +946,16 @@ impl Core {
     pub fn apply_action(&self, action: actions::Action, message_ids: &[i64], folder_id: i64) -> Result<ActionResult> {
         let (account_id, _) = self.store.folder(folder_id)?.ok_or_else(|| anyhow!("unknown folder"))?;
         // A draft written here (in the composer or by an AI app) is only here, never on the
-        // server: deleting its copy in Drafts discards the draft.
+        // server: deleting its copy in Drafts deletes the draft. Not `discard_draft`: that's
+        // the composer's "never mind", which puts back a server draft this one replaced; one
+        // deleted on purpose leaves that in Trash, or it would come back to Drafts.
         let mut kept = Vec::with_capacity(message_ids.len());
         if matches!(action, actions::Action::Trash | actions::Action::DeleteForever) {
             for &id in message_ids {
                 match self.store.message_draft(id)? {
-                    Some(draft) => self.discard_draft(draft)?,
+                    Some(draft) => {
+                        self.delete_draft(draft)?;
+                    }
                     None => kept.push(id),
                 }
             }

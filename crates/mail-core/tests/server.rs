@@ -568,3 +568,56 @@ async fn a_server_draft_opened_here_and_changed_goes_to_trash() {
     }
     until("one draft here, the server's", 20, || a.subjects(FolderRole::Drafts) == ["Written on the phone"]).await;
 }
+
+/// A draft written in another app, opened here and changed, then deleted from Drafts: the
+/// server's copy stays in Trash (unlike Discard in the composer, which puts it back).
+#[tokio::test(flavor = "multi_thread")]
+async fn deleting_a_draft_that_replaced_a_server_draft_leaves_that_in_trash() {
+    let Some(s) = servers() else { return };
+    let user = new_user("deldraft");
+    let mut other = other_client(&s, &user).await;
+    append(&mut other, "Drafts", &raw_message(&user, "Jane Doe <jane@example.test>", "Written on the phone", 1), Some("(\\Draft)")).await;
+    let a = app(&s, &user).await;
+    folders_listed(&a).await;
+    until("the draft here", 30, || a.subjects(FolderRole::Drafts).iter().any(|s| s == "Written on the phone")).await;
+    let old = a.messages(FolderRole::Drafts).into_iter().find(|m| m.subject == "Written on the phone").unwrap().id;
+    let req = SendRequest {
+        account_id: a.account.id,
+        to: vec![Addr { name: Some("Jane Doe".into()), addr: "jane@example.test".into() }],
+        cc: vec![],
+        bcc: vec![],
+        subject: "Written on the phone".into(),
+        html: "<p>Hello Jane, more</p>".into(),
+        attachments: vec![],
+        replying_to: None,
+        forwarding: None,
+        forward_attachments: vec![],
+        forward_messages: vec![],
+        draft: Some(serde_json::json!({ "subject": "Written on the phone", "replaces": old })),
+        draft_id: None,
+        listed: true,
+        replaces: Some(old),
+    };
+    let id = a.core.save_draft(None, req).unwrap();
+    let in_trash = || async {
+        let end = Instant::now() + Duration::from_secs(30);
+        let mut other = other_client(&s, &user).await;
+        loop {
+            let drafts = on_server(&mut other, "Drafts", "Written on the phone").await.len();
+            let trash = on_server(&mut other, "Trash", "Written on the phone").await.len();
+            if drafts == 0 && trash == 1 {
+                break;
+            }
+            assert!(Instant::now() < end, "the server's draft isn't (only) in Trash (Drafts {drafts}, Trash {trash})");
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+    };
+    in_trash().await;
+    // Deleted from the Drafts list: the draft here goes, the server's stays in Trash.
+    let drafts = a.folder(FolderRole::Drafts).id;
+    let copy = a.messages(FolderRole::Drafts).into_iter().find(|m| m.draft_id == Some(id)).unwrap().id;
+    a.core.apply_action(Action::Trash, &[copy], drafts).unwrap();
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    in_trash().await;
+    assert!(a.subjects(FolderRole::Drafts).is_empty());
+}
