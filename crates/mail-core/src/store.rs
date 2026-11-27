@@ -353,6 +353,15 @@ CREATE TRIGGER IF NOT EXISTS body_fts_del AFTER DELETE ON messages BEGIN
     DELETE FROM body_fts WHERE rowid = OLD.id;
 END;
 CREATE INDEX IF NOT EXISTS messages_unindexed ON messages(id) WHERE has_body=1 AND body_indexed=0;
+-- The names of a message's attachments and the text in them (PDFs, plain-text files), from
+-- the same background indexing: search's Attachments field.
+CREATE VIRTUAL TABLE IF NOT EXISTS file_fts USING fts5(
+    files,
+    content='', contentless_delete=1,
+    tokenize='unicode61 remove_diacritics 2', prefix='2 3');
+CREATE TRIGGER IF NOT EXISTS file_fts_del AFTER DELETE ON messages BEGIN
+    DELETE FROM file_fts WHERE rowid = OLD.id;
+END;
 "#;
 
 /// Schema versions (`PRAGMA user_version`). `SCHEMA` is always the current schema, whole:
@@ -1852,7 +1861,7 @@ impl Store {
         // A term matches in the header index or in the text: the union of the two.
         for t in terms.into_iter().flatten() {
             let mut sets = Vec::new();
-            for (table, expr) in [("msg_fts", t.head), ("body_fts", t.body)] {
+            for (table, expr) in [("msg_fts", t.head), ("body_fts", t.body), ("file_fts", t.files)] {
                 if let Some(expr) = expr {
                     args.push(Box::new(expr));
                     sets.push(format!("SELECT rowid FROM {table} WHERE {table} MATCH ?{}", args.len()));
@@ -2872,7 +2881,7 @@ impl Store {
             return Ok(0);
         }
         // (id, the body's length and how many attachments were downloaded apart, as read; its text)
-        let mut texts: Vec<(i64, Option<usize>, usize, Option<String>)> = Vec::with_capacity(ids.len());
+        let mut texts: Vec<(i64, Option<usize>, usize, Option<(String, String)>)> = Vec::with_capacity(ids.len());
         for id in &ids {
             let (raw, cached): (Option<Vec<u8>>, Vec<(usize, Vec<u8>)>) = {
                 let bodies = self.bodies_read.lock().unwrap_or_else(|e| e.into_inner());
@@ -2894,6 +2903,8 @@ impl Store {
         {
             let mut del = tx.prepare_cached("DELETE FROM body_fts WHERE rowid=?1")?;
             let mut add = tx.prepare_cached("INSERT INTO body_fts (rowid, body) VALUES (?1, ?2)")?;
+            let mut del_files = tx.prepare_cached("DELETE FROM file_fts WHERE rowid=?1")?;
+            let mut add_files = tx.prepare_cached("INSERT INTO file_fts (rowid, files) VALUES (?1, ?2)")?;
             let mut done = tx.prepare_cached("UPDATE messages SET body_indexed=1 WHERE id=?1")?;
             let mut waiting = tx.prepare_cached("SELECT 1 FROM messages WHERE id=?1 AND has_body=1 AND body_indexed=0")?;
             let bodies = self.bodies_read.lock().unwrap_or_else(|e| e.into_inner());
@@ -2912,8 +2923,13 @@ impl Store {
                 }
                 done_n += 1;
                 del.execute([id])?;
-                if let Some(t) = text.as_deref().filter(|t| !t.trim().is_empty()) {
-                    add.execute(params![id, t])?;
+                del_files.execute([id])?;
+                let (body, files) = text.as_ref().map_or(("", ""), |(b, f)| (b.as_str(), f.as_str()));
+                if !body.trim().is_empty() {
+                    add.execute(params![id, body])?;
+                }
+                if !files.trim().is_empty() {
+                    add_files.execute(params![id, files])?;
                 }
                 done.execute([id])?;
             }
@@ -2938,14 +2954,14 @@ impl Store {
             .collect())
     }
 
-    /// Once, after the upgrade that made attachments' text searchable: messages with
-    /// attachments indexed before that are indexed again. Returns how many.
+    /// Once, after the upgrade that made attachments searchable on their own (file_fts):
+    /// messages with attachments indexed before that are indexed again. Returns how many.
     pub fn index_attachment_text_once(&self) -> Result<usize> {
-        if self.choice("attachment_text_indexed", false)? {
+        if self.choice("attachment_fts_indexed", false)? {
             return Ok(0);
         }
         let n = self.db().execute("UPDATE messages SET body_indexed=0 WHERE has_body=1 AND body_indexed=1 AND has_attachments=1", [])?;
-        self.set_choice("attachment_text_indexed", true)?;
+        self.set_choice("attachment_fts_indexed", true)?;
         Ok(n)
     }
 
@@ -5357,10 +5373,14 @@ mod tests {
         assert_eq!(store.bodies_to_index().unwrap(), 1, "indexed again once downloaded");
         while store.index_bodies(100).unwrap() > 0 {}
         assert_eq!(hits("echidna census"), ["Partial"]);
-        assert_eq!(hits("body:echidna"), ["Partial"]);
+        assert_eq!(hits("attachment:echidna"), ["Partial"]);
+        assert!(hits("body:echidna").is_empty(), "the message's text is apart");
+        let only = |q: &str, fields: &[&str]| store.search(acct.id, None, q, fields, 0, 50).unwrap().total;
+        assert_eq!((only("echidna", &["attachments"]), only("echidna", &["body"]), only("echidna", &["subject", "attachments"])), (1, 0, 1));
+        assert_eq!(only("later", &["attachments"]), 1, "by name");
 
         // Once, after the upgrade: messages with attachments, indexed before, are done again.
-        store.db().execute("DELETE FROM settings WHERE key='attachment_text_indexed'", []).unwrap();
+        store.db().execute("DELETE FROM settings WHERE key='attachment_fts_indexed'", []).unwrap();
         assert_eq!(store.index_attachment_text_once().unwrap(), 2);
         assert_eq!(store.index_attachment_text_once().unwrap(), 0, "only once");
         while store.index_bodies(100).unwrap() > 0 {}

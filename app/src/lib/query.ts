@@ -1,7 +1,7 @@
 // Tiny parser for the quick-search syntax (see api-contract.md). Used by the mock backend
 // and for highlighting matched words in result rows. The real matching happens in core.
 
-export type Field = 'any' | 'from' | 'to' | 'subject' | 'body' | 'tag';
+export type Field = 'any' | 'from' | 'to' | 'subject' | 'body' | 'attachment' | 'tag';
 
 export interface Term {
   field: Field;
@@ -21,7 +21,7 @@ export function tokenize(s: string): string[] {
   return norm(s).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
 }
 
-const TERM_RE = /(-)?(?:(from|to|subject|body|tag):)?(?:"([^"]*)"?|(\S+))/gi;
+const TERM_RE = /(-)?(?:(from|to|subject|body|attachment|tag):)?(?:"([^"]*)"?|(\S+))/gi;
 
 export function parseQuery(q: string): Term[] {
   const out: Term[] = [];

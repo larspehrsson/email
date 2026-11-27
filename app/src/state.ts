@@ -150,13 +150,30 @@ const [searchQuery, setSearchQuerySig] = createSignal('');
 const [searchScope, setSearchScopeSig] = createSignal<SearchScope>(
   loadPref<SearchScope>('ui.searchScope', 'all') === 'folder' ? 'folder' : 'all',
 );
-export const ALL_SEARCH_FIELDS: SearchField[] = ['sender', 'recipients', 'subject', 'body'];
+export const ALL_SEARCH_FIELDS: SearchField[] = ['sender', 'recipients', 'subject', 'body', 'attachments'];
+/** What the search can look through, as eM Client offers it: a fixed list, everything first. */
+/** `short`: on the button, where the whole label doesn't fit. */
+export const SEARCH_FIELD_SETS: { label: string; short?: string; fields: SearchField[] }[] = [
+  { label: 'Subject, sender, recipients, text and attachments', short: 'Everything', fields: ALL_SEARCH_FIELDS },
+  { label: 'Subject, sender, recipients and text', short: 'All but attachments', fields: ['sender', 'recipients', 'subject', 'body'] },
+  { label: 'Subject, sender and recipients', fields: ['sender', 'recipients', 'subject'] },
+  { label: 'Subject', fields: ['subject'] },
+  { label: 'Text', fields: ['body'] },
+  { label: 'Attachments', fields: ['attachments'] },
+  { label: 'Sender', fields: ['sender'] },
+  { label: 'Recipients', fields: ['recipients'] },
+];
+const sameFields = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((f) => b.includes(f));
+/** The set `fields` is, if it's one of the list's. */
+export const searchFieldSet = (fields: readonly SearchField[]) => SEARCH_FIELD_SETS.find((s) => sameFields(s.fields, fields));
 function loadFields(): SearchField[] {
-  const v = loadPref<unknown>('ui.searchFields', ALL_SEARCH_FIELDS);
-  const ok = Array.isArray(v) ? ALL_SEARCH_FIELDS.filter((f) => v.includes(f)) : [];
-  // Saved before the text could be searched, with every field then on: all, the text too.
-  if (Array.isArray(v) && !v.includes('body') && ['sender', 'recipients', 'subject'].every((f) => v.includes(f))) return ALL_SEARCH_FIELDS;
-  return ok.length ? ok : ALL_SEARCH_FIELDS;
+  const v = loadPref<unknown>('ui.searchIn', null);
+  if (Array.isArray(v)) return searchFieldSet(v as SearchField[])?.fields ?? ALL_SEARCH_FIELDS;
+  // Chosen with the chips (before the list): the same set if it's one of the list's, but every
+  // field there was then on means everything (the attachments too).
+  const old = loadPref<unknown>('ui.searchFields', null);
+  if (!Array.isArray(old) || ['sender', 'recipients', 'subject'].every((f) => old.includes(f))) return ALL_SEARCH_FIELDS;
+  return searchFieldSet(old as SearchField[])?.fields ?? ALL_SEARCH_FIELDS;
 }
 const [searchFields, setSearchFieldsSig] = createSignal<SearchField[]>(loadFields());
 export { searchQuery, searchScope, searchFields };
@@ -165,15 +182,10 @@ export { searchQuery, searchScope, searchFields };
 export const searchFieldsArg = (): SearchField[] | null =>
   searchFields().length === ALL_SEARCH_FIELDS.length ? null : searchFields();
 
-/** Toggle one field; never leaves zero. `only` makes it the sole field (alt/option-click). */
-export function toggleSearchField(f: SearchField, only = false): void {
-  const cur = searchFields();
-  let next: SearchField[];
-  if (only) next = cur.length === 1 && cur[0] === f ? ALL_SEARCH_FIELDS : [f];
-  else if (cur.includes(f)) next = cur.length === 1 ? cur : cur.filter((x) => x !== f);
-  else next = ALL_SEARCH_FIELDS.filter((x) => x === f || cur.includes(x));
-  setSearchFieldsSig(next);
-  savePref('ui.searchFields', next);
+/** Search in one of `SEARCH_FIELD_SETS`. */
+export function setSearchFields(fields: SearchField[]): void {
+  setSearchFieldsSig(fields);
+  savePref('ui.searchIn', fields);
 }
 export const searchActive = () => searchQuery().trim() !== '';
 

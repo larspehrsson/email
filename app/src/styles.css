@@ -1979,12 +1979,38 @@ body.resizing iframe {
   flex-wrap: wrap;
 }
 .search-fields-label {
+  flex: none;
   font-size: 11px;
   color: var(--text-3);
   margin-right: 2px;
+  white-space: nowrap;
 }
-.field-chip {
+/* "Search in": eM Client's fixed list of what plain words are looked for in */
+.search-in {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
   height: 22px;
+  padding: 0 6px 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--sep);
+  font-size: 12px;
+  color: var(--text);
+}
+.search-in:hover,
+.search-in.menu-target {
+  background: var(--bg-hover);
+}
+.search-in-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.search-in-chev {
+  flex: none;
+  transform: rotate(90deg);
+  color: var(--text-3);
 }
 .search-hint-fields {
   margin-bottom: 4px;

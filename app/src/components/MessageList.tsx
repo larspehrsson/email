@@ -34,8 +34,9 @@ import {
   searchQuery,
   searchScope,
   searchFields,
-  toggleSearchField,
-  ALL_SEARCH_FIELDS,
+  setSearchFields,
+  searchFieldSet,
+  SEARCH_FIELD_SETS,
   setSearchQuery,
   setSearchScope,
   selectedMessageId,
@@ -60,7 +61,7 @@ import {
   multiPicked,
 } from '../state';
 import { platform } from '../lib/platform';
-import { CheckIcon, ClockIcon, FlagIcon, ForwardIcon, PaperclipIcon, ReplyIcon, TrashIcon } from './Icons';
+import { ChevronIcon, ClockIcon, FlagIcon, ForwardIcon, PaperclipIcon, ReplyIcon, TrashIcon } from './Icons';
 import { confirmDialog } from './Actions';
 import { openContextMenu } from './ContextMenu';
 import { openSource } from './SourceView';
@@ -245,7 +246,7 @@ function RowContent(props: { m: MessageSummary; re?: RegExp | null; subjRe?: Reg
   );
 }
 
-const FIELD_LABEL: Record<SearchField, string> = { sender: 'Sender', recipients: 'Recipients', subject: 'Subject', body: 'Text' };
+const FIELD_LABEL: Record<SearchField, string> = { sender: 'Sender', recipients: 'Recipients', subject: 'Subject', body: 'Text', attachments: 'Attachments' };
 
 export interface SearchSpec {
   accountId: number;
@@ -1092,24 +1093,31 @@ export function MessageList(props: {
               </button>
             </div>
             </div>
-            <div class="search-fields" role="group" aria-label="Search in" data-tauri-drag-region={DRAG}>
+            <div class="search-fields" data-tauri-drag-region={DRAG}>
               <span class="search-fields-label" data-tauri-drag-region={DRAG}>Search in</span>
-              <For each={ALL_SEARCH_FIELDS}>
-                {(f) => (
-                  <button
-                    class="chip-toggle field-chip"
-                    classList={{ on: searchFields().includes(f) }}
-                    aria-pressed={searchFields().includes(f)}
-                    title={`Match plain words in ${FIELD_LABEL[f].toLowerCase()} · ⌥/Alt-click: only ${FIELD_LABEL[f].toLowerCase()}`}
-                    onClick={(e) => toggleSearchField(f, e.altKey)}
-                  >
-                    <span class="chip-check" aria-hidden="true">
-                      <CheckIcon size={10} />
-                    </span>
-                    {FIELD_LABEL[f]}
-                  </button>
-                )}
-              </For>
+              <button
+                class="search-in"
+                aria-haspopup="menu"
+                title={`Plain words are looked for in: ${(searchFieldSet(searchFields())?.label ?? '').toLowerCase()}`}
+                onClick={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  openContextMenu(
+                    new MouseEvent('click', { clientX: r.left, clientY: r.bottom + 4 }),
+                    SEARCH_FIELD_SETS.map((s) => ({
+                      label: s.label,
+                      checked: searchFieldSet(searchFields())?.label === s.label,
+                      run: () => setSearchFields(s.fields),
+                    })),
+                    e.currentTarget,
+                  );
+                }}
+              >
+                <span class="search-in-label">{(() => {
+                  const s = searchFieldSet(searchFields());
+                  return s?.short ?? s?.label ?? 'Everything';
+                })()}</span>
+                <ChevronIcon size={11} class="icon search-in-chev" />
+              </button>
             </div>
           </header>
         )}

@@ -1317,6 +1317,8 @@ export function createMockBackend(): Backend {
         const subjT = tokenize(m.subject);
         // The demo's bodies are made from the snippet.
         const textT = tokenize(m.snippet ?? '');
+        // Attachments: the demo's have no text, only names.
+        const filesT = tokenize((meta.get(m.id)?.attachments ?? []).map((a) => a.name).join(' '));
         const ok = terms.every((t) => {
           const hit =
             t.field === 'tag'
@@ -1329,7 +1331,10 @@ export function createMockBackend(): Backend {
                   ? fieldMatches(subjT, t.words)
                   : t.field === 'body'
                     ? fieldMatches(textT, t.words)
-                    : (inField('sender') && fieldMatches(fromT, t.words)) ||
+                    : t.field === 'attachment'
+                    ? fieldMatches(filesT, t.words)
+                    : (inField('attachments') && fieldMatches(filesT, t.words)) ||
+                      (inField('sender') && fieldMatches(fromT, t.words)) ||
                       (inField('subject') && fieldMatches(subjT, t.words)) ||
                       (inField('recipients') && fieldMatches(toTokens, t.words)) ||
                       (inField('body') && fieldMatches(textT, t.words));

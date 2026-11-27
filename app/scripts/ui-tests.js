@@ -782,7 +782,7 @@ describe('search', () => {
     }
   });
 
-  test('words in the text find mail; the Text chip and body: limit it', async () => {
+  test('words in the text find mail; Search in and body: limit it', async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {
       const count = async (q) => {
@@ -796,28 +796,45 @@ describe('search', () => {
       assert.ok(subjects.every((s) => !/package/i.test(s)), `none by its subject: ${subjects.join(' | ')}`);
       assert.ok((await count('body:package')) > 0, 'body: finds it');
       assert.equal(await count('subject:package'), 0, 'not in a subject');
-      // Text off: plain words skip it (the choice is kept, so it's put back).
+      // Search in: a fixed list, everything to begin with; without the text, not found (the
+      // choice is kept, so it's put back).
       await count('package');
-      const chip = page.locator('.field-chip', { hasText: 'Text' });
-      assert.equal(await chip.getAttribute('aria-pressed'), 'true', 'on by default');
-      await chip.click();
-      await page.waitForTimeout(400);
-      assert.equal(await page.locator('.search-layer .row').count(), 0, 'Text off: not found');
-      await chip.click();
+      const searchIn = page.locator('.search-in');
+      assert.equal(await searchIn.textContent(), 'Everything', 'everything by default');
+      const pick = async (label) => {
+        await searchIn.click();
+        await page.locator('.ctx-menu .vm-item', { hasText: new RegExp(`^${label}$`) }).click();
+        await page.waitForTimeout(400);
+      };
+      await searchIn.click();
+      assert.equal(await page.locator('.ctx-menu .vm-item[aria-checked="true"]').textContent(), 'Subject, sender, recipients, text and attachments');
+      assert.equal(await page.locator('.ctx-menu .vm-item').count(), 8);
+      await page.keyboard.press('Escape');
+      await pick('Subject, sender and recipients');
+      assert.equal(await page.locator('.search-layer .row').count(), 0, 'without the text: not found');
+      assert.equal(await searchIn.textContent(), 'Subject, sender and recipients');
+      await pick('Text');
+      assert.ok((await page.locator('.search-layer .row').count()) > 0, 'the text only: found');
+      await pick('Subject, sender, recipients, text and attachments');
       assert.deepEqual(errors, []);
     } finally {
       await close();
     }
   });
 
-  test('a saved choice of every field from before includes the text', async () => {
+  test('a saved choice of every field from before includes the text and attachments', async () => {
     const { page, errors, close } = await open({ threaded: false });
     try {
       await page.evaluate(() => localStorage.setItem('ui.searchFields', JSON.stringify(['sender', 'recipients', 'subject'])));
       await page.reload();
       await page.fill('.search-field input', 'package');
-      await page.locator('.field-chip', { hasText: 'Text' }).waitFor();
-      assert.equal(await page.locator('.field-chip', { hasText: 'Text' }).getAttribute('aria-pressed'), 'true');
+      await page.locator('.search-in').waitFor();
+      assert.equal(await page.locator('.search-in').textContent(), 'Everything');
+      // One of the list's, chosen with the chips: kept.
+      await page.evaluate(() => localStorage.setItem('ui.searchFields', JSON.stringify(['subject'])));
+      await page.reload();
+      await page.fill('.search-field input', 'package');
+      assert.equal(await page.locator('.search-in').textContent(), 'Subject');
       assert.deepEqual(errors, []);
     } finally {
       await close();

@@ -220,11 +220,12 @@ pub const ATTACHMENT_TEXT_MAX: usize = 100_000;
 /// PDFs larger than this aren't read for search (time and memory on the indexing thread).
 const PDF_MAX_BYTES: usize = 20 << 20;
 
-/// What search finds a message by in its body: its text (HTML as text), its attachments'
-/// names, then the text in its attachments (stored in the body, or downloaded later:
-/// `fetched`, as (name, mime, bytes)). At most `SEARCH_TEXT_MAX` of the message's text and
-/// `ATTACHMENT_TEXT_MAX` of its attachments'. None: not a message the parser can read.
-pub fn search_text(raw: &[u8], fetched: &[(String, String, Vec<u8>)]) -> Option<String> {
+/// What search finds a message by in its body, as (the message's text, its attachments'):
+/// its text (HTML as text) and its attachments' names, at most `SEARCH_TEXT_MAX`; then the
+/// attachments' names and the text in them (stored in the body, or downloaded later:
+/// `fetched`, as (name, mime, bytes)), at most `ATTACHMENT_TEXT_MAX`. None: not a message the
+/// parser can read.
+pub fn search_text(raw: &[u8], fetched: &[(String, String, Vec<u8>)]) -> Option<(String, String)> {
     let msg = MessageParser::default().parse(raw)?;
     let mut text = String::new();
     let mut i = 0;
@@ -247,19 +248,26 @@ pub fn search_text(raw: &[u8], fetched: &[(String, String, Vec<u8>)]) -> Option<
         }
     }
     let mut files = String::new();
-    let parts = stored.iter().map(|p| (attachment_name(p), part_mime(p), p.contents()));
-    for (name, mime, data) in parts.chain(fetched.iter().map(|(n, m, d)| (n.clone(), m.clone(), d.as_slice()))) {
+    let parts: Vec<(String, String, &[u8])> = stored
+        .iter()
+        .map(|p| (attachment_name(p), part_mime(p), p.contents()))
+        .chain(fetched.iter().map(|(n, m, d)| (n.clone(), m.clone(), d.as_slice())))
+        .collect();
+    for (name, ..) in &parts {
+        files.push_str(name);
+        files.push('\n');
+    }
+    for (name, mime, data) in &parts {
         if files.len() >= ATTACHMENT_TEXT_MAX {
             break;
         }
-        if let Some(t) = attachment_text(&name, &mime, data) {
+        if let Some(t) = attachment_text(name, mime, data) {
             files.push('\n');
             files.push_str(t.trim());
         }
     }
     truncate_at(&mut files, ATTACHMENT_TEXT_MAX);
-    text.push_str(&files);
-    Some(text)
+    Some((text, files))
 }
 
 fn truncate_at(text: &mut String, max: usize) {
@@ -807,15 +815,17 @@ pub(crate) mod tests {
             ("notes.txt", "text/plain", b"platypus sightings"),
             ("photo.jpg", "image/jpeg", b"\xff\xd8\xff\x00wallaby"),
         ]);
-        let text = search_text(&raw, &[]).unwrap();
+        let (text, files) = search_text(&raw, &[]).unwrap();
         assert!(text.contains("See attached.") && text.contains("invoice.pdf"), "{text}");
-        assert!(text.contains("wombat enclosure"), "the PDF's text: {text}");
-        assert!(text.contains("platypus"), "a text file's: {text}");
-        assert!(!text.contains("wallaby"), "not a picture's bytes");
+        assert!(!text.contains("wombat"), "the message's own text is apart: {text}");
+        assert!(files.contains("invoice.pdf") && files.contains("photo.jpg"), "names: {files}");
+        assert!(files.contains("wombat enclosure"), "the PDF's text: {files}");
+        assert!(files.contains("platypus"), "a text file's: {files}");
+        assert!(!files.contains("wallaby"), "not a picture's bytes");
         // Downloaded apart (the body stored without them).
         let plain = b"Subject: Hi\r\nContent-Type: text/plain\r\n\r\nHello\r\n";
         let fetched = [("later.pdf".to_string(), "application/pdf".to_string(), tiny_pdf("echidna report"))];
-        assert!(search_text(plain, &fetched).unwrap().contains("echidna report"));
+        assert!(search_text(plain, &fetched).unwrap().1.contains("echidna report"));
     }
 
     #[test]
@@ -825,19 +835,19 @@ pub(crate) mod tests {
             assert_eq!(attachment_text("bad.pdf", "application/pdf", &bad), None);
         }
         let raw = with_attachments(&[("bad.pdf", "application/pdf", b"%PDF-1.7 garbage")]);
-        assert!(search_text(&raw, &[]).unwrap().contains("bad.pdf"), "the name still counts");
+        assert!(search_text(&raw, &[]).unwrap().1.contains("bad.pdf"), "the name still counts");
     }
 
     #[test]
     fn attachment_text_has_its_own_limit() {
         let long = "kookaburra ".repeat(SEARCH_TEXT_MAX / 5);
         let raw = with_attachments(&[("a.txt", "text/plain", long.as_bytes()), ("b.txt", "text/plain", long.as_bytes())]);
-        let text = search_text(&raw, &[]).unwrap();
-        assert!(text.len() <= SEARCH_TEXT_MAX + ATTACHMENT_TEXT_MAX);
-        assert!(text.len() > ATTACHMENT_TEXT_MAX, "a long body doesn't crowd attachments out, nor they it");
+        let (_, files) = search_text(&raw, &[]).unwrap();
+        assert!(files.len() <= ATTACHMENT_TEXT_MAX && files.len() > ATTACHMENT_TEXT_MAX / 2);
         let long_body = format!("Subject: Long\r\nContent-Type: text/plain\r\n\r\n{long}{long}\r\n");
         let fetched = [("c.txt".to_string(), "text/plain".to_string(), b"dingo".to_vec())];
-        assert!(search_text(long_body.as_bytes(), &fetched).unwrap().contains("dingo"));
+        let (text, files) = search_text(long_body.as_bytes(), &fetched).unwrap();
+        assert!(text.len() <= SEARCH_TEXT_MAX && files.contains("dingo"), "a long body doesn't crowd attachments out");
     }
 
     #[test]

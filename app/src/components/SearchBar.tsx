@@ -42,6 +42,7 @@ const EXAMPLES: [string, string][] = [
   ['to:bob@corp', 'recipients only'],
   ['subject:invoice', 'subject only'],
   ['body:refund', 'the message\'s text only'],
+  ['attachment:invoice', 'attachments only (names, text in PDFs)'],
   ['tag:work', 'tagged Work'],
   ['tag:"to do"', 'tag with spaces'],
 ];
@@ -87,7 +88,7 @@ function SearchHelp(props: { anchor: HTMLElement; onPick: (q: string) => void; o
           </For>
         </div>
         <p class="sh-note">Words match prefixes as you type (inv → invoice).</p>
-        <p class="sh-note">The Sender / Recipients / Subject / Text chips limit plain words (Text: messages downloaded to this computer, their attachments' names, and the text in their downloaded PDF and text-file attachments); All folders / the folder name sets the scope.</p>
+        <p class="sh-note">"Search in" limits plain words: to the subject, sender, recipients, text (of messages downloaded to this computer) or attachments (their names, and the text in downloaded PDFs and text files), or some of them together; All folders / the folder name sets the scope.</p>
         <div class="sh-foot">
           <button
             class="link-btn"
