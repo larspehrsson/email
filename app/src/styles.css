@@ -7102,3 +7102,58 @@ body.dragging-message iframe {
 .st-tab-panel {
   margin-bottom: 20px;
 }
+
+/* Composer: text and highlight colour buttons and their palettes */
+.fmt-color {
+  position: relative;
+  display: inline-flex;
+}
+.fmt-color-btn {
+  flex-direction: column;
+  gap: 1px;
+}
+.fmt-color-glyph {
+  line-height: 1;
+  font-weight: 600;
+}
+.fmt-color-bar {
+  width: 14px;
+  height: 3px;
+  border-radius: 1px;
+  box-shadow: inset 0 0 0 1px var(--sep);
+}
+.fmt-palette {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: repeat(4, 22px);
+  gap: 6px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--sep);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-card);
+}
+.fmt-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--sep-strong);
+  padding: 0;
+  cursor: pointer;
+}
+.fmt-swatch[aria-checked='true'] {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* Default / None: white with a slash */
+.fmt-swatch.none {
+  background: linear-gradient(to top right, transparent 45%, #d1242f 46%, #d1242f 54%, transparent 55%), #fff;
+}
+/* A highlight is light: its text stays dark here too, as on the white it's read on. */
+.cmp-editor .ProseMirror mark {
+  color: #1d1d1f !important;
+  border-radius: 2px;
+}
