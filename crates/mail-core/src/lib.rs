@@ -94,22 +94,44 @@ fn vault_join(first: &str, mut part: impl FnMut(usize) -> Result<String>) -> Res
     Ok(json)
 }
 
+/// The vault as it's in the keychain now: None when there's no item yet.
+fn vault_read() -> Result<Option<HashMap<String, String>>> {
+    match vault_entry()?.get_password() {
+        Ok(first) => {
+            let json = vault_join(&first, |i| {
+                vault_part(i)?.get_password().with_context(|| format!("reading part {i} of the app's keychain item"))
+            })?;
+            Ok(Some(serde_json::from_str(&json).context("reading the app's keychain item")?))
+        }
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(anyhow::Error::new(e).context("reading the app's secrets from the system keychain")),
+    }
+}
+
 /// The vault's secrets: read from the keychain the first time.
 fn vault_loaded(cache: &mut Option<HashMap<String, String>>) -> Result<&mut HashMap<String, String>> {
     if cache.is_none() {
-        let map = match vault_entry()?.get_password() {
-            Ok(first) => {
-                let json = vault_join(&first, |i| {
-                    vault_part(i)?.get_password().with_context(|| format!("reading part {i} of the app's keychain item"))
-                })?;
-                serde_json::from_str(&json).context("reading the app's keychain item")?
-            }
-            Err(keyring::Error::NoEntry) => HashMap::new(),
-            Err(e) => return Err(anyhow::Error::new(e).context("reading the app's secrets from the system keychain")),
-        };
-        *cache = Some(map);
+        *cache = Some(vault_read()?.unwrap_or_default());
     }
     Ok(cache.as_mut().unwrap())
+}
+
+/// What to save when one secret changes: the vault as just read from the keychain (`fresh`,
+/// with whatever another copy of the app saved meanwhile), with only that change. Never the copy
+/// kept in memory (`cached`) as a whole: an old or incomplete one would erase the others. No
+/// item at all while this copy knew of secrets is taken for a keychain that didn't answer
+/// properly (locked, restarting): refused, rather than saved over as empty.
+fn vault_updated(
+    cached: Option<&HashMap<String, String>>,
+    fresh: Result<Option<HashMap<String, String>>>,
+    change: impl FnOnce(&mut HashMap<String, String>) -> bool,
+) -> Result<Option<HashMap<String, String>>> {
+    let mut map = match fresh? {
+        Some(m) => m,
+        None if cached.is_some_and(|c| !c.is_empty()) => bail!("The app's keychain item couldn't be read (is the keychain locked?); nothing was saved."),
+        None => HashMap::new(),
+    };
+    Ok(change(&mut map).then_some(map))
 }
 
 fn vault_save(map: &HashMap<String, String>) -> Result<()> {
@@ -145,9 +167,15 @@ impl Secrets {
         match self {
             Secrets::Keyring(cache) => {
                 let mut cache = cache.lock().unwrap();
-                let map = vault_loaded(&mut cache)?;
-                map.insert(email.into(), password.into());
-                vault_save(map)
+                let map = vault_updated(cache.as_ref(), vault_read(), |m| {
+                    m.insert(email.into(), password.into());
+                    true
+                })?
+                .expect("changed");
+                vault_save(&map)?;
+                tracing::info!(name = %secret_name(email), entries = map.len(), "keychain: secret saved");
+                *cache = Some(map);
+                Ok(())
             }
             Secrets::Memory(m) => {
                 m.lock().unwrap().insert(email.into(), password.into());
@@ -160,17 +188,31 @@ impl Secrets {
         match self {
             Secrets::Keyring(cache) => {
                 let mut cache = cache.lock().unwrap();
-                let map = vault_loaded(&mut cache)?;
-                if let Some(s) = map.get(email) {
+                if let Some(s) = vault_loaded(&mut cache)?.get(email) {
                     return Ok(s.clone());
                 }
-                // Saved by an earlier version: move it in.
+                // Not in the copy read before: saved since, perhaps (by another copy of the app).
+                if let Some(fresh) = vault_read()? {
+                    let found = fresh.get(email).cloned();
+                    *cache = Some(fresh);
+                    if let Some(s) = found {
+                        return Ok(s);
+                    }
+                }
+                // Saved by an earlier version (an item of its own): move it in.
                 let old = keyring::Entry::new(KEYRING_SERVICE, email)?
                     .get_password()
                     .context("reading password from the system keychain")?;
-                map.insert(email.into(), old.clone());
-                if let Err(e) = vault_save(map) {
-                    tracing::warn!("couldn't move a secret into the app's keychain item: {e:#}");
+                match vault_updated(cache.as_ref(), vault_read(), |m| {
+                    m.insert(email.into(), old.clone());
+                    true
+                })
+                .and_then(|m| {
+                    let m = m.expect("changed");
+                    vault_save(&m).map(|_| m)
+                }) {
+                    Ok(m) => *cache = Some(m),
+                    Err(e) => tracing::warn!("couldn't move a secret into the app's keychain item: {e:#}"),
                 }
                 Ok(old)
             }
@@ -187,10 +229,16 @@ impl Secrets {
         match self {
             Secrets::Keyring(cache) => {
                 let mut cache = cache.lock().unwrap();
-                if let Ok(map) = vault_loaded(&mut cache)
-                    && map.remove(email).is_some()
-                {
-                    let _ = vault_save(map);
+                match vault_updated(cache.as_ref(), vault_read(), |m| m.remove(email).is_some()) {
+                    Ok(Some(map)) => match vault_save(&map) {
+                        Ok(()) => {
+                            tracing::info!(name = %secret_name(email), entries = map.len(), "keychain: secret removed");
+                            *cache = Some(map);
+                        }
+                        Err(e) => tracing::warn!(name = %secret_name(email), "keychain: couldn't remove a secret: {e:#}"),
+                    },
+                    Ok(None) => {}
+                    Err(e) => tracing::warn!(name = %secret_name(email), "keychain: couldn't remove a secret: {e:#}"),
                 }
                 if let Ok(e) = keyring::Entry::new(KEYRING_SERVICE, email) {
                     let _ = e.delete_credential();
@@ -200,6 +248,18 @@ impl Secrets {
                 m.lock().unwrap().remove(email);
             }
         }
+    }
+}
+
+/// A secret's name for the log: what it is, not whose (an account's address isn't written out).
+fn secret_name(name: &str) -> String {
+    if !name.contains('@') {
+        return name.into();
+    }
+    // "someone@example.com#graph" and the like: what it is, and that it's an account's
+    match name.split_once('#') {
+        Some((_, kind)) => format!("<account>#{kind}"),
+        None => "<account password>".into(),
     }
 }
 
@@ -2406,6 +2466,36 @@ mod vault_tests {
         assert_eq!(vault_join(&json, |_| panic!("no parts")).unwrap(), json);
         // A missing part is an error, not an empty vault.
         assert!(vault_join(&pieces[0], |_| anyhow::bail!("gone")).is_err());
+    }
+
+    /// A save changes only its own secret in the vault as it's in the keychain now: never puts
+    /// back an old copy over what another copy of the app saved, nor saves over a keychain that
+    /// didn't answer.
+    #[test]
+    fn vault_saves_change_only_their_secret() {
+        let m = |kv: &[(&str, &str)]| kv.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect::<HashMap<_, _>>();
+        let cached = m(&[("a@example.com", "pw")]);
+        let fresh = m(&[("a@example.com", "pw"), ("#google-contacts:5", "token")]);
+        let add = |map: &mut HashMap<String, String>| {
+            map.insert("b@example.com".into(), "pw2".into());
+            true
+        };
+        // Saved by another copy since this one read it: kept.
+        let saved = vault_updated(Some(&cached), Ok(Some(fresh.clone())), add).unwrap().unwrap();
+        assert_eq!(saved, m(&[("a@example.com", "pw"), ("#google-contacts:5", "token"), ("b@example.com", "pw2")]));
+        // Removing: only that one; nothing to remove, nothing saved.
+        let saved = vault_updated(Some(&cached), Ok(Some(fresh.clone())), |map| map.remove("a@example.com").is_some()).unwrap().unwrap();
+        assert_eq!(saved, m(&[("#google-contacts:5", "token")]));
+        assert_eq!(vault_updated(Some(&cached), Ok(Some(fresh)), |map| map.remove("x").is_some()).unwrap(), None);
+        // The keychain not answering: refused, not taken as empty.
+        assert!(vault_updated(Some(&cached), Err(anyhow!("locked")), add).is_err());
+        assert!(vault_updated(Some(&cached), Ok(None), add).is_err(), "no item, yet there were secrets");
+        // A first secret ever: saved.
+        assert_eq!(vault_updated(None, Ok(None), add).unwrap().unwrap(), m(&[("b@example.com", "pw2")]));
+        // Names in the log: no addresses.
+        assert_eq!(secret_name("a@example.com"), "<account password>");
+        assert_eq!(secret_name("a@example.com#graph"), "<account>#graph");
+        assert_eq!(secret_name("#google-contacts:5"), "#google-contacts:5");
     }
 }
 

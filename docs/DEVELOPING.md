@@ -93,6 +93,15 @@ shown in the sync status row; closing the main window (or quitting) while it run
 its keychain entry, and compacts both databases in the background; nothing changes on the
 server.
 
+Secrets (passwords, sign-in tokens, the API key) are one keychain item, `secrets` under
+`dev.mail-client`: a JSON object of name → secret (`Secrets` in `crates/mail-core/src/lib.rs`;
+on Windows split in parts, as Credential Manager keeps little in one). It's read once and kept in
+memory for reading; a change (a secret saved or removed) reads the item again first and changes
+only that secret, so another copy of the app's saves are never put back over (`vault_updated`).
+When the item can't be read, or is missing while the app knew of secrets (a keychain that didn't
+answer properly), nothing is saved. Each save is logged with the secret's name, never its value
+or the account's address ("keychain: secret saved").
+
 ## Microsoft Graph (tags and snooze on Exchange)
 
 Exchange keeps no custom IMAP keywords, so a Microsoft account the user allows it for
