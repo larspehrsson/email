@@ -340,6 +340,53 @@ describe('compose', () => {
     }
   });
 
+  test('text colour and highlight from their palettes (and None), styled inline as sent', async () => {
+    const { page, errors, context, close } = await open({ threaded: false });
+    try {
+      const popup = context.waitForEvent('page');
+      await page.keyboard.press('c');
+      const w = await popup;
+      w.on('pageerror', (e) => errors.push(e.message));
+      const editor = w.locator('.cmp-editor .ProseMirror');
+      await editor.waitFor();
+      await editor.click();
+      await w.keyboard.type('Red words and marked ones');
+      const select = async (n) => {
+        for (let i = 0; i < n; i++) await w.keyboard.press('Shift+ArrowLeft');
+      };
+      const choose = async (button, swatch) => {
+        await w.locator(`.fmt-btn[aria-label="${button}"]`).click();
+        await w.locator(`.fmt-palette .fmt-swatch[aria-label="${swatch}"]`).click();
+        assert.equal(await w.locator('.fmt-palette').count(), 0, 'the palette closes');
+      };
+      await select('marked ones'.length);
+      await choose('Highlight', 'Yellow');
+      await editor.locator('mark', { hasText: 'marked ones' }).waitFor();
+      // The palette shows the colour now on; Esc closes it.
+      await w.locator('.fmt-btn[aria-label="Highlight"]').click();
+      assert.equal(await w.locator('.fmt-swatch[aria-checked="true"]').getAttribute('aria-label'), 'Yellow');
+      await w.keyboard.press('Escape');
+      assert.equal(await w.locator('.fmt-palette').count(), 0);
+      await w.keyboard.press('ArrowRight');
+      for (let i = 0; i < 'and marked ones'.length; i++) await w.keyboard.press('ArrowLeft');
+      await w.keyboard.press('ArrowLeft');
+      await select('Red words'.length);
+      await choose('Text colour', 'Red');
+      await editor.locator('span[style*="color"]', { hasText: 'Red words' }).waitFor();
+      await w.waitForTimeout(900);
+      const saved = () => w.evaluate(() => Object.values(JSON.parse(localStorage.getItem('mock.drafts') ?? '{}')).map((d) => d.html).join(''));
+      const html = await saved();
+      assert.match(html, /<span style="color: ?(#d1242f|rgb\(209, 36, 47\));?">Red words<\/span>/, html);
+      assert.match(html, /<mark [^>]*style="background-color: ?(#fff3a3|rgb\(255, 243, 163\))[^"]*">marked ones<\/mark>/, html);
+      // Default takes the colour off again.
+      await choose('Text colour', 'Default');
+      assert.equal(await editor.locator('span[style*="color"]').count(), 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await close();
+    }
+  });
+
   test('--- draws a line and # makes a heading, each styled inline as sent', async () => {
     const { page, errors, context, close } = await open({ threaded: false });
     try {
