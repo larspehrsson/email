@@ -440,11 +440,16 @@ const MIGRATIONS: &[fn(&Connection) -> Result<()>] = &[
     |db| Ok(db.execute_batch("ALTER TABLE messages ADD COLUMN body_indexed INTEGER NOT NULL DEFAULT 0;")?),
     // 14: settings; rules for a whole domain became opt-in, on for those who already had one
     |db| {
-        Ok(db.execute_batch(
-            "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-             INSERT OR IGNORE INTO settings (key, value)
-               SELECT 'domain_rules', '1' WHERE EXISTS (SELECT 1 FROM remote_senders WHERE addr LIKE '@%');",
-        )?)
+        db.execute_batch("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);")?;
+        // `remote_senders` came by `SCHEMA`, which runs after the steps: a database from before
+        // it has no such table yet (and so no rules to keep on).
+        if table_exists(db, "remote_senders")? {
+            db.execute_batch(
+                "INSERT OR IGNORE INTO settings (key, value)
+                   SELECT 'domain_rules', '1' WHERE EXISTS (SELECT 1 FROM remote_senders WHERE addr LIKE '@%');",
+            )?;
+        }
+        Ok(())
     },
     // 15: another address can have no signature (None), not only its own or the account's
     |db| {
@@ -459,6 +464,12 @@ const MIGRATIONS: &[fn(&Connection) -> Result<()>] = &[
     },
 ];
 const SCHEMA_VERSION: i64 = BASE_VERSION + MIGRATIONS.len() as i64;
+
+/// Whether the database has the table `name`. A step that reads a table `SCHEMA` added (rather
+/// than a step) must check: `SCHEMA` runs after the steps, so an older database may not have it.
+fn table_exists(db: &Connection, name: &str) -> Result<bool> {
+    Ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1")?.exists([name])?)
+}
 
 const BODY_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS bodies (
@@ -5598,6 +5609,7 @@ mod tests {
                  CREATE TABLE identities (id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, email TEXT NOT NULL,
                    name TEXT NOT NULL, new_sig INTEGER, reply_sig INTEGER, is_default INTEGER NOT NULL DEFAULT 0);
                  DROP TABLE signature_defaults; DROP TABLE signatures;
+                 DROP TABLE remote_senders; DROP TABLE settings;
                  PRAGMA user_version={BASE_VERSION};"
             ))
             .unwrap();
